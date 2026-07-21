@@ -292,7 +292,12 @@ pub async fn fulltext_search_handler(
 
     let search_req = SearchQuery {
         query: query.to_string(),
-        categories: params.category.as_ref().map(|c| vec![c.clone()]),
+        categories: params.category.as_ref().map(|c| {
+            c.split(',')
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect::<Vec<String>>()
+        }),
         networks: params.network.as_ref().map(|n| {
             n.split(',')
                 .filter_map(|s| match s {

@@ -154,6 +154,8 @@ pub async fn search(
 
     if let Some(cat) = category {
         params.push(("category", cat.to_string()));
+        // Also send normalized categories param for backend consistency
+        params.push(("categories", cat.to_string()));
     }
 
     if let Some(s) = sort {

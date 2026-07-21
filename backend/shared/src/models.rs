@@ -295,6 +295,86 @@ where
     deserializer.deserialize_any(NetworksVisitor)
 }
 
+fn deserialize_optional_strings<'de, D>(deserializer: D) -> Result<Option<Vec<String>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    struct StringsVisitor;
+
+    impl<'de> Visitor<'de> for StringsVisitor {
+        type Value = Option<Vec<String>>;
+
+        fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+            formatter.write_str("a comma-separated string or sequence of strings")
+        }
+
+        fn visit_none<E>(self) -> Result<Self::Value, E>
+        where
+            E: de::Error,
+        {
+            Ok(None)
+        }
+
+        fn visit_unit<E>(self) -> Result<Self::Value, E>
+        where
+            E: de::Error,
+        {
+            Ok(None)
+        }
+
+        fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+        where
+            A: SeqAccess<'de>,
+        {
+            let mut values = Vec::new();
+            while let Some(v) = seq.next_element::<String>()? {
+                let trimmed = v.trim().to_string();
+                if !trimmed.is_empty() {
+                    values.push(trimmed);
+                }
+            }
+            if values.is_empty() {
+                Ok(None)
+            } else {
+                Ok(Some(values))
+            }
+        }
+
+        fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+        where
+            E: de::Error,
+        {
+            let values: Vec<String> = value
+                .split(',')
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(|s| s.to_string())
+                .collect();
+            if values.is_empty() {
+                Ok(None)
+            } else {
+                Ok(Some(values))
+            }
+        }
+
+        fn visit_string<E>(self, value: String) -> Result<Self::Value, E>
+        where
+            E: de::Error,
+        {
+            self.visit_str(&value)
+        }
+
+        fn visit_borrowed_str<E>(self, value: &'de str) -> Result<Self::Value, E>
+        where
+            E: de::Error,
+        {
+            self.visit_str(value)
+        }
+    }
+
+    deserializer.deserialize_any(StringsVisitor)
+}
+
 /// Upgrade strategy for contract upgrades
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::Type, utoipa::ToSchema)]
 #[sqlx(type_name = "upgrade_strategy_type", rename_all = "lowercase")]
@@ -1125,7 +1205,8 @@ pub struct ContractSearchParams {
     /// Filter by verification_status (unverified, pending, verified, failed)
     pub verification_status: Option<VerificationStatus>,
     pub category: Option<String>,
-    /// Multiple categories filter (e.g. ?categories=DeFi&categories=NFT)
+    /// Multiple categories filter (e.g. ?categories=DeFi&categories=NFT or ?categories=DeFi,NFT)
+    #[serde(default, deserialize_with = "deserialize_optional_strings")]
     pub categories: Option<Vec<String>>,
     pub tags: Option<Vec<String>>,
     pub maturity: Option<MaturityLevel>,
@@ -4709,6 +4790,102 @@ pub struct ZkCircuitSummary {
 mod tests {
     use super::*;
     use serde_json;
+
+    // ── deserialize_optional_strings ───────────────────────────────────
+
+    /// Helper: deserialize a single comma-separated string value through the custom deserializer
+    fn deser_comma_separated(input: &str) -> Option<Vec<String>> {
+        use serde::de::value::StrDeserializer;
+        deserialize_optional_strings(StrDeserializer::<serde::de::value::Error>::new(input)).ok().flatten()
+    }
+
+    /// Helper: deserialize repeated params through a sequence
+    fn deser_repeated(inputs: &[&str]) -> Option<Vec<String>> {
+        use serde::de::value::{SeqDeserializer, StringDeserializer};
+        let seq = inputs.iter().map(|s| StringDeserializer::<serde::de::value::Error>::new(s.to_string()));
+        let deserializer = SeqDeserializer::new(seq);
+        deserialize_optional_strings(deserializer).ok().flatten()
+    }
+
+    #[test]
+    fn test_optional_categories_single_value() {
+        let cats = deser_comma_separated("DeFi").unwrap();
+        assert_eq!(cats, vec!["DeFi"]);
+    }
+
+    #[test]
+    fn test_optional_categories_comma_separated() {
+        let cats = deser_comma_separated("DeFi,NFT").unwrap();
+        assert_eq!(cats, vec!["DeFi", "NFT"]);
+    }
+
+    #[test]
+    fn test_optional_categories_repeated_params() {
+        let cats = deser_repeated(&["DeFi", "NFT"]).unwrap();
+        assert_eq!(cats, vec!["DeFi", "NFT"]);
+    }
+
+    #[test]
+    fn test_optional_categories_with_spaces() {
+        let cats = deser_comma_separated("DeFi, NFT").unwrap();
+        assert_eq!(cats, vec!["DeFi", "NFT"]);
+    }
+
+    #[test]
+    fn test_optional_categories_missing() {
+        let cats = deser_comma_separated("");
+        // Empty string should return None or empty vec
+        assert!(cats.is_none() || cats.unwrap().is_empty());
+    }
+
+    #[test]
+    fn test_optional_categories_empty_seq() {
+        let cats = deser_repeated(&[]);
+        assert!(cats.is_none() || cats.unwrap().is_empty());
+    }
+
+    // ── ContractSearchParams filter normalization ──────────────────────
+
+    /// Helper: deserialize ContractSearchParams from a comma-separated query string
+    fn parse_search_params(qs: &str) -> Result<ContractSearchParams, serde_urlencoded::de::Error> {
+        serde_urlencoded::from_str(qs)
+    }
+
+    #[test]
+    fn test_search_params_networks_comma_separated() {
+        let params = parse_search_params("networks=testnet,mainnet").unwrap();
+        let nets = params.networks.unwrap();
+        assert_eq!(nets.len(), 2);
+        assert!(nets.contains(&Network::Testnet));
+        assert!(nets.contains(&Network::Mainnet));
+    }
+
+    #[test]
+    fn test_search_params_invalid_network_fails_gracefully() {
+        let result = parse_search_params("networks=unknown");
+        assert!(result.is_err(), "Invalid network values should fail clearly");
+    }
+
+    #[test]
+    fn test_search_params_categories_normalized() {
+        let params = parse_search_params("categories=lending,dex&network=testnet").unwrap();
+        let cats = params.categories.unwrap();
+        assert_eq!(cats.len(), 2);
+        assert!(cats.contains(&"lending".to_string()));
+        assert!(cats.contains(&"dex".to_string()));
+    }
+
+    #[test]
+    fn test_search_params_combined_network_and_category_filters() {
+        let params = parse_search_params("networks=testnet&categories=DeFi,NFT&verified_only=true&query=swap")
+            .unwrap();
+        assert_eq!(params.query.as_deref(), Some("swap"));
+        assert!(params.verified_only.unwrap_or(false));
+        assert!(params.networks.unwrap().contains(&Network::Testnet));
+        assert!(params.categories.unwrap().contains(&"DeFi".to_string()));
+    }
+
+    // ── Existing tests follow ──────────────────────────────────────────
 
     #[test]
     fn test_contract_usage_count_serialization() {

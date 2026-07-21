@@ -930,8 +930,10 @@ export async function fetchContracts(
       page = 1,
       page_size = 20,
       network,
+      networks,
       verified_only,
       category,
+      categories,
       tags,
       sort_by,
       sort_order = "desc",
@@ -949,8 +951,10 @@ export async function fetchContracts(
     }
 
     if (network) results = results.filter((c) => c.network === network);
+    if (networks?.length) results = results.filter((c) => networks.includes(c.network));
     if (verified_only) results = results.filter((c) => c.is_verified);
     if (category) results = results.filter((c) => c.category === category);
+    if (categories?.length) results = results.filter((c) => categories.includes(c.category ?? ""));
     if (tags && tags.length > 0)
       results = results.filter((c) => tags.some((t) => c.tags?.includes(t)));
 
@@ -990,8 +994,14 @@ export async function fetchContracts(
   const searchParams = new URLSearchParams();
   if (params.query) searchParams.set("query", params.query);
   if (params.network) searchParams.set("network", params.network);
+  if (params.networks?.length) {
+    params.networks.forEach((n) => searchParams.append("networks", n));
+  }
   if (params.verified_only) searchParams.set("verified_only", "true");
   if (params.category) searchParams.set("category", params.category);
+  if (params.categories?.length) {
+    params.categories.forEach((c) => searchParams.append("categories", c));
+  }
   if (params.tags?.length) params.tags.forEach((t) => searchParams.append("tags", t));
   if (params.page) searchParams.set("page", String(params.page));
   if (params.page_size) searchParams.set("page_size", String(params.page_size));

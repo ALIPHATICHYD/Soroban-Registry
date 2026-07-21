@@ -28,3 +28,6 @@ opentelemetry_sdk = { workspace = true }
 opentelemetry-otlp = { workspace = true }
 once_cell = { workspace = true }
 tempfile = "3.5"
+
+[dev-dependencies]
+serde_urlencoded = "0.7"
