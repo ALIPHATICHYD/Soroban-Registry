@@ -1,0 +1,25 @@
+{
+  "name": "soroban-registry-dashboard",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Interactive terminal dashboard for Soroban-Registry (blessed + ws).",
+  "license": "Apache-2.0",
+  "scripts": {
+    "dev": "tsx src/index.ts dashboard",
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/index.js dashboard",
+    "mock:server": "tsx scripts/mock-ws-server.ts"
+  },
+  "dependencies": {
+    "blessed": "^0.1.81",
+    "commander": "^14.0.0",
+    "ws": "^8.18.3"
+  },
+  "devDependencies": {
+    "@types/blessed": "^0.1.25",
+    "@types/node": "^22.0.0",
+    "@types/ws": "^8.18.1",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0"
+  }
+}

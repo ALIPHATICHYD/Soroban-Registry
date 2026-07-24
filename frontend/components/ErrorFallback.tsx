@@ -1,10 +1,14 @@
-'use client';
+"use client";
 
-import { useState } from 'react';
-import { AlertTriangle, RefreshCw, ChevronDown, ChevronUp } from 'lucide-react';
-import { ErrorFallbackProps } from './ErrorBoundary';
+import { useState } from "react";
+import { AlertTriangle, RefreshCw, ChevronDown, ChevronUp } from "lucide-react";
+import { ErrorFallbackProps } from "./ErrorBoundary";
 
-export default function ErrorFallback({ error, errorInfo, resetError }: ErrorFallbackProps) {
+export default function ErrorFallback({
+  error,
+  errorInfo,
+  resetError,
+}: ErrorFallbackProps) {
   const [showDetails, setShowDetails] = useState(false);
 
   return (
@@ -14,20 +18,21 @@ export default function ErrorFallback({ error, errorInfo, resetError }: ErrorFal
           <div className="flex-shrink-0">
             <AlertTriangle className="w-12 h-12 text-red-500" />
           </div>
-          
+
           <div className="flex-1">
             <h1 className="text-2xl font-bold text-foreground mb-2">
               Something went wrong
             </h1>
-            
+
             <p className="text-muted-foreground mb-6">
-              We encountered an unexpected error. Do not worry, your data is safe. 
-              You can try refreshing the page or contact support if the problem persists.
+              We encountered an unexpected error. Do not worry, your data is
+              safe. You can try refreshing the page or contact support if the
+              problem persists.
             </p>
 
             <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-4 mb-6">
               <p className="text-sm font-medium text-red-800 dark:text-red-200">
-                {error.message || 'An unexpected error occurred'}
+                {error.message || "An unexpected error occurred"}
               </p>
             </div>
 
@@ -40,9 +45,9 @@ export default function ErrorFallback({ error, errorInfo, resetError }: ErrorFal
                 <RefreshCw className="w-4 h-4" />
                 Try Again
               </button>
-              
+
               <button
-                onClick={() => window.location.href = '/'}
+                onClick={() => (window.location.href = "/")}
                 className="px-4 py-2 bg-accent hover:bg-muted text-foreground rounded-lg transition-colors font-medium"
               >
                 Go to Home

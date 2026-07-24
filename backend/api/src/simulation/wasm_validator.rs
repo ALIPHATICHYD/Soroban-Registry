@@ -92,3 +92,62 @@ pub fn validate_wasm(wasm_bytes: &[u8]) -> WasmValidationResult {
         import_functions,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_validate_wasm_empty_type_section() {
+        // WASM magic number: \0asm (0x00 0x61 0x73 0x6d)
+        // WASM version: 1 (0x01 0x00 0x00 0x00)
+        // Section 1 (Type Section): ID = 1
+        // Size of section: 1 (0x01)
+        // Content: 0 types (0x00)
+        let wasm_bytes = vec![
+            0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, // Header
+            0x01, // Section ID (Type)
+            0x01, // Section Size (1 byte)
+            0x00, // Number of types (0)
+        ];
+
+        let result = validate_wasm(&wasm_bytes);
+
+        // It shouldn't have WASM parsing errors
+        let has_parse_error = result
+            .errors
+            .iter()
+            .any(|e| e.contains("WASM parsing error"));
+        assert!(
+            !has_parse_error,
+            "Should parse successfully, but got errors: {:?}",
+            result.errors
+        );
+    }
+
+    #[test]
+    fn test_validate_wasm_zero_length_type_section() {
+        // WASM magic number: \0asm (0x00 0x61 0x73 0x6d)
+        // WASM version: 1 (0x01 0x00 0x00 0x00)
+        // Section 1 (Type Section): ID = 1
+        // Size of section: 0 (0x00)
+        let wasm_bytes = vec![
+            0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, // Header
+            0x01, // Section ID (Type)
+            0x00, // Section Size (0 bytes)
+        ];
+
+        let result = validate_wasm(&wasm_bytes);
+
+        // This is invalid WASM because the type section needs a count, so we expect a parsing error
+        let has_parse_error = result
+            .errors
+            .iter()
+            .any(|e| e.contains("WASM parsing error"));
+        assert!(
+            has_parse_error,
+            "Should fail with a parsing error, but got: {:?}",
+            result.errors
+        );
+    }
+}

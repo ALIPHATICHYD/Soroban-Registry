@@ -1,4 +1,3 @@
-import React from 'react';
 import { StatsResponse } from '@/types/stats';
 import { FileText, CheckCircle2, Users } from 'lucide-react';
 

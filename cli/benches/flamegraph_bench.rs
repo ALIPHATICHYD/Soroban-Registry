@@ -1,10 +1,12 @@
 use criterion::{criterion_group, criterion_main, Criterion};
 use std::collections::HashMap;
+use std::fs;
 use std::time::Duration;
 use tempfile::NamedTempFile;
-use std::fs;
 
-use soroban_registry_cli::profiler::{ProfileData, FunctionProfile, generate_flame_graph_old, generate_flame_graph};
+use soroban_registry_cli::profiler::{
+    generate_flame_graph, generate_flame_graph_old, FunctionProfile, ProfileData,
+};
 
 fn make_large_profile(n: usize) -> ProfileData {
     let mut functions = HashMap::new();

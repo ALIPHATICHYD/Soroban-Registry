@@ -21,7 +21,7 @@ use crate::{
 };
 
 fn map_json_rejection(err: axum::extract::rejection::JsonRejection) -> ApiError {
-    ApiError::bad_request(
+    ApiError::bad_request_with(
         "InvalidRequest",
         format!("Invalid JSON payload: {}", err.body_text()),
     )
@@ -137,14 +137,13 @@ async fn verify_signature_locally(
 ) -> ApiResult<Json<VerifySignatureResponse>> {
     let contract_uuid = parse_contract_uuid(state, &req.contract_id).await?;
 
-    let sig_bytes = BASE64
-        .decode(sig_b64)
-        .map_err(|_| ApiError::bad_request("InvalidSignature", "signature is not valid base64"))?;
+    let sig_bytes = BASE64.decode(sig_b64).map_err(|_| {
+        ApiError::bad_request_with("InvalidSignature", "signature is not valid base64")
+    })?;
 
-    let sig_array: [u8; 64] = sig_bytes
-        .as_slice()
-        .try_into()
-        .map_err(|_| ApiError::bad_request("InvalidSignature", "signature must be 64 bytes"))?;
+    let sig_array: [u8; 64] = sig_bytes.as_slice().try_into().map_err(|_| {
+        ApiError::bad_request_with("InvalidSignature", "signature must be 64 bytes")
+    })?;
 
     let signature = Signature::from_bytes(&sig_array);
 
@@ -279,8 +278,9 @@ pub async fn revoke_signature(
 ) -> ApiResult<Json<serde_json::Value>> {
     let Json(req) = payload.map_err(map_json_rejection)?;
 
-    let sig_uuid = Uuid::parse_str(&signature_id)
-        .map_err(|_| ApiError::bad_request("InvalidSignatureId", "signature_id must be a UUID"))?;
+    let sig_uuid = Uuid::parse_str(&signature_id).map_err(|_| {
+        ApiError::bad_request_with("InvalidSignatureId", "signature_id must be a UUID")
+    })?;
 
     let existing: Option<PackageSignature> =
         sqlx::query_as("SELECT * FROM package_signatures WHERE id = $1")

@@ -1,17 +1,66 @@
+use crate::validation::extractors::ValidatedJson;
 use axum::{
     extract::{Path, State},
     Json,
 };
-use chrono::Utc;
-use shared::{
-    DiffSummary, FunctionChange, GenerateReleaseNotesRequest, PublishReleaseNotesRequest,
-    ReleaseNotesGenerated, ReleaseNotesResponse, ReleaseNotesStatus, SemVer,
-    UpdateReleaseNotesRequest,
-};
+use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
+use shared::{DiffSummary, FunctionChange, ReleaseNotesStatus, SemVer};
+use sqlx::FromRow;
 use uuid::Uuid;
 
 use crate::error::{ApiError, ApiResult};
 use crate::state::AppState;
+
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct ReleaseNotesGenerated {
+    pub id: Uuid,
+    pub contract_id: Uuid,
+    pub version: String,
+    pub previous_version: Option<String>,
+    pub diff_summary: serde_json::Value,
+    pub changelog_entry: Option<String>,
+    pub notes_text: String,
+    pub status: ReleaseNotesStatus,
+    pub generated_by: String,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+    pub published_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReleaseNotesResponse {
+    pub id: Uuid,
+    pub contract_id: Uuid,
+    pub version: String,
+    pub previous_version: Option<String>,
+    pub diff_summary: DiffSummary,
+    pub changelog_entry: Option<String>,
+    pub notes_text: String,
+    pub status: ReleaseNotesStatus,
+    pub generated_by: String,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+    pub published_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct GenerateReleaseNotesRequest {
+    pub version: String,
+    pub previous_version: Option<String>,
+    pub changelog_content: Option<String>,
+    pub contract_address: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct UpdateReleaseNotesRequest {
+    pub notes_text: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct PublishReleaseNotesRequest {
+    pub update_version_record: bool,
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // GET  /api/contracts/:id/release-notes/:version
@@ -73,7 +122,7 @@ pub async fn list_release_notes(
 pub async fn generate_release_notes(
     State(state): State<AppState>,
     Path(id): Path<String>,
-    Json(req): Json<GenerateReleaseNotesRequest>,
+    ValidatedJson(req): ValidatedJson<GenerateReleaseNotesRequest>,
 ) -> ApiResult<Json<ReleaseNotesResponse>> {
     let (contract_uuid, contract_id) = fetch_contract_identity(&state, &id).await?;
 
@@ -206,7 +255,7 @@ pub async fn generate_release_notes(
 pub async fn update_release_notes(
     State(state): State<AppState>,
     Path((id, version)): Path<(String, String)>,
-    Json(req): Json<UpdateReleaseNotesRequest>,
+    ValidatedJson(req): ValidatedJson<UpdateReleaseNotesRequest>,
 ) -> ApiResult<Json<ReleaseNotesResponse>> {
     let (contract_uuid, _contract_id) = fetch_contract_identity(&state, &id).await?;
 
@@ -264,7 +313,7 @@ pub async fn update_release_notes(
 pub async fn publish_release_notes(
     State(state): State<AppState>,
     Path((id, version)): Path<(String, String)>,
-    Json(req): Json<PublishReleaseNotesRequest>,
+    ValidatedJson(req): ValidatedJson<PublishReleaseNotesRequest>,
 ) -> ApiResult<Json<ReleaseNotesResponse>> {
     let (contract_uuid, _contract_id) = fetch_contract_identity(&state, &id).await?;
 

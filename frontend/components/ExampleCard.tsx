@@ -40,25 +40,27 @@ export default function ExampleCard({ example }: ExampleCardProps) {
     '#e5e7eb';
 
   useEffect(() => {
-    setAvatarLoadError(false);
+    requestAnimationFrame(() => {
+      setAvatarLoadError(false);
 
-    if (!avatarSrc) {
-      setAvatarPlaceholder(null);
-      return;
-    }
+      if (!avatarSrc) {
+        setAvatarPlaceholder(null);
+        return;
+      }
 
-    if (avatarBlurHash) {
-      setAvatarPlaceholder(
-        generateBlurHashPlaceholder(avatarBlurHash, {
-          width: 24,
-          height: 24,
-          fallbackColor: avatarFallbackColor,
-        })
-      );
-      return;
-    }
+      if (avatarBlurHash) {
+        setAvatarPlaceholder(
+          generateBlurHashPlaceholder(avatarBlurHash, {
+            width: 24,
+            height: 24,
+            fallbackColor: avatarFallbackColor,
+          })
+        );
+        return;
+      }
 
-    setAvatarPlaceholder(generateSolidPlaceholder(avatarFallbackColor));
+      setAvatarPlaceholder(generateSolidPlaceholder(avatarFallbackColor));
+    });
   }, [avatarSrc, avatarBlurHash, avatarFallbackColor]);
 
   const handleRate = async (val: number) => {

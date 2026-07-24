@@ -33,7 +33,10 @@ pub fn as_u64(val: &Value, field: &str) -> Result<u64> {
     if let Some(num) = val.as_u64() {
         Ok(num)
     } else if let Some(f) = val.as_f64() {
-        f64_to_u64(f).context(format!("Invalid f64 to u64 conversion for field: {}", field))
+        f64_to_u64(f).context(format!(
+            "Invalid f64 to u64 conversion for field: {}",
+            field
+        ))
     } else {
         anyhow::bail!("Missing or invalid numeric field: {}", field)
     }
@@ -42,7 +45,8 @@ pub fn as_u64(val: &Value, field: &str) -> Result<u64> {
 /// Extracts a usize from a JSON Value.
 pub fn as_usize(val: &Value, field: &str) -> Result<usize> {
     let u = as_u64(val, field)?;
-    usize::try_from(u).map_err(|_| anyhow::anyhow!("Value exceeds usize capacity for field: {}", field))
+    usize::try_from(u)
+        .map_err(|_| anyhow::anyhow!("Value exceeds usize capacity for field: {}", field))
 }
 
 /// Converts an f64 to a u64 securely.
@@ -80,8 +84,8 @@ pub fn str_to_string(s: &str) -> String {
 }
 
 /// Unified String to &str explicitly (though typically implicit via Deref).
-pub fn string_to_str(s: &String) -> &str {
-    s.as_str()
+pub fn string_to_str(s: &str) -> &str {
+    s
 }
 
 #[cfg(test)]
@@ -100,8 +104,8 @@ mod tests {
 
     #[test]
     fn test_as_bool() {
-        assert_eq!(as_bool(&json!(true), "test").unwrap(), true);
-        assert_eq!(as_bool(&json!(false), "test").unwrap(), false);
+        assert!(as_bool(&json!(true), "test").unwrap());
+        assert!(!as_bool(&json!(false), "test").unwrap());
         assert!(as_bool(&json!("true"), "test").is_err());
         assert!(as_bool(&json!(1), "test").is_err());
         assert!(as_bool(&json!(null), "test").is_err());
@@ -153,9 +157,9 @@ mod tests {
     fn test_f64_to_u64() {
         assert_eq!(f64_to_u64(0.0).unwrap(), 0);
         assert_eq!(f64_to_u64(42.0).unwrap(), 42);
-        
+
         assert!(f64_to_u64(-1.0).is_err());
-        assert!(f64_to_u64(3.14).is_err());
+        assert!(f64_to_u64(3.5).is_err());
         assert!(f64_to_u64(f64::NAN).is_err());
         assert!(f64_to_u64(f64::INFINITY).is_err());
         assert!(f64_to_u64(f64::NEG_INFINITY).is_err());
@@ -185,8 +189,8 @@ mod tests {
     #[test]
     fn test_str_bindings() {
         let s = "hello";
-        let S = str_to_string(s);
-        assert_eq!(S, "hello");
-        assert_eq!(string_to_str(&S), "hello");
+        let s_val = str_to_string(s);
+        assert_eq!(s_val, "hello");
+        assert_eq!(string_to_str(&s_val), "hello");
     }
 }

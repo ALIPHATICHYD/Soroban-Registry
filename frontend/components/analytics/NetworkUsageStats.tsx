@@ -1,4 +1,3 @@
-import React from 'react';
 import { Activity, Globe } from 'lucide-react';
 
 interface NetworkCount {

@@ -132,6 +132,15 @@ pub static DB_CONNECTIONS_ACTIVE: Lazy<IntGauge> =
 pub static DB_CONNECTIONS_IDLE: Lazy<IntGauge> =
     gauge!("db_connections_idle", "Idle DB connections");
 pub static DB_QUERY_ERRORS: Lazy<IntCounter> = counter!("db_query_errors_total", "DB query errors");
+// Issue #887: application-side query observation counters.
+pub static DB_QUERIES_OBSERVED: Lazy<IntCounter> = counter!(
+    "db_queries_observed_total",
+    "Queries observed by the app-side analyzer"
+);
+pub static DB_SLOW_QUERIES: Lazy<IntCounter> = counter!(
+    "db_slow_queries_total",
+    "Queries exceeding the slow threshold"
+);
 pub static DB_TRANSACTIONS_TOTAL: Lazy<IntCounter> =
     counter!("db_transactions_total", "Total DB transactions");
 pub static DB_POOL_SIZE: Lazy<IntGauge> = gauge!("db_pool_size", "DB connection pool size");
@@ -155,6 +164,36 @@ pub static DB_POOL_UTILIZATION: Lazy<GaugeVec> = gauge_f64_vec!(
     "DB pool utilization ratio",
     &["pool"]
 );
+pub static DB_REPLICATION_LAG_MS: Lazy<IntGauge> = gauge!(
+    "db_replication_lag_ms",
+    "Replica replay lag in milliseconds"
+);
+pub static DB_REPLICATION_WAL_LAG_BYTES: Lazy<IntGauge> = gauge!(
+    "db_replication_wal_lag_bytes",
+    "Estimated WAL lag between the primary and replica in bytes"
+);
+pub static DB_REPLICATION_HEALTH: Lazy<IntGauge> = gauge!(
+    "db_replication_health",
+    "Replication health state (1=healthy, 0=unhealthy)"
+);
+pub static DB_REPLICATION_CHECKS_TOTAL: Lazy<IntCounter> = counter!(
+    "db_replication_checks_total",
+    "Replication health checks performed"
+);
+pub static DB_REPLICATION_CHECK_FAILURES_TOTAL: Lazy<IntCounter> = counter!(
+    "db_replication_check_failures_total",
+    "Replication health checks that failed"
+);
+pub static SEARCH_QUERY_DURATION: Lazy<HistogramVec> = histogram_vec!(
+    "search_query_duration_seconds",
+    "Search query latency",
+    &["type"]
+);
+pub static SEARCH_SLOW_QUERIES: Lazy<IntCounterVec> = counter_vec!(
+    "search_slow_queries_total",
+    "Search queries slower than the threshold",
+    &["type"]
+);
 
 // ── Cache ───────────────────────────────────────────────────────────────────
 pub static CACHE_HITS: Lazy<IntCounter> = counter!("cache_hits_total", "Cache hits");
@@ -172,6 +211,15 @@ pub static VERIFICATION_CACHE_MISSES: Lazy<IntCounter> = counter!(
     "verification_cache_misses_total",
     "Verification cache misses"
 );
+pub static CONTRACTS_CACHE_HITS: Lazy<IntCounter> =
+    counter!("contracts_cache_hits_total", "Contracts cache hits");
+pub static CONTRACTS_CACHE_MISSES: Lazy<IntCounter> =
+    counter!("contracts_cache_misses_total", "Contracts cache misses");
+
+pub static REDIS_CACHE_HITS: Lazy<IntCounter> =
+    counter!("redis_cache_hits_total", "Redis cache hits");
+pub static REDIS_CACHE_MISSES: Lazy<IntCounter> =
+    counter!("redis_cache_misses_total", "Redis cache misses");
 
 // ── Resources ────────────────────────────────────────────────────────────────────
 pub static RESOURCE_RECORDINGS: Lazy<IntCounter> =
@@ -247,6 +295,36 @@ pub static PROCESS_START_TIME: Lazy<IntGauge> =
 pub static BUILD_INFO: Lazy<IntGaugeVec> =
     gauge_vec!("build_info", "Build information", &["version", "commit"]);
 
+// ── Client-side breaker metrics ─────────────────────────────────────────────
+pub static CLIENT_BREAKER_OPEN: Lazy<IntGaugeVec> = gauge_vec!(
+    "client_breaker_open",
+    "Client-side circuit breaker open state (1=open, 0=closed)",
+    &["endpoint"]
+);
+
+// ── Database Resilience Metrics ─────────────────────────────────────────────
+pub static DB_RESILIENCE_QUEUE_DEPTH: Lazy<IntGauge> = gauge!(
+    "db_resilience_queue_depth",
+    "Current requests waiting in the DB connection queue"
+);
+pub static DB_RESILIENCE_ACTIVE_REQS: Lazy<IntGauge> = gauge!(
+    "db_resilience_active_reqs",
+    "Active requests holding a DB concurrency permit"
+);
+pub static DB_RESILIENCE_BREAKER_STATE: Lazy<IntGauge> = gauge!(
+    "db_resilience_breaker_state",
+    "Database circuit breaker state (0=Closed, 1=Open, 2=HalfOpen)"
+);
+pub static DB_RESILIENCE_BREAKER_TRIPS: Lazy<IntCounter> = counter!(
+    "db_resilience_breaker_trips_total",
+    "Total database circuit breaker trips"
+);
+pub static DB_RESILIENCE_REJECTIONS: Lazy<IntCounterVec> = counter_vec!(
+    "db_resilience_rejections_total",
+    "Total requests rejected by database resilience",
+    &["reason"]
+);
+
 // ── SLO ─────────────────────────────────────────────────────────────────────
 pub static SLO_ERROR_BUDGET: Lazy<GaugeVec> = gauge_f64_vec!(
     "slo_error_budget_remaining",
@@ -299,11 +377,20 @@ pub fn register_all(r: &Registry) -> prometheus::Result<()> {
     r.register(Box::new(DB_CONNECTIONS_ACTIVE.clone()))?;
     r.register(Box::new(DB_CONNECTIONS_IDLE.clone()))?;
     r.register(Box::new(DB_QUERY_ERRORS.clone()))?;
+    r.register(Box::new(DB_QUERIES_OBSERVED.clone()))?;
+    r.register(Box::new(DB_SLOW_QUERIES.clone()))?;
     r.register(Box::new(DB_TRANSACTIONS_TOTAL.clone()))?;
     r.register(Box::new(DB_POOL_SIZE.clone()))?;
     r.register(Box::new(DB_CONNECTION_WAIT_MS.clone()))?;
     r.register(Box::new(DB_POOL_TIMEOUTS.clone()))?;
     r.register(Box::new(DB_POOL_UTILIZATION.clone()))?;
+    r.register(Box::new(DB_REPLICATION_LAG_MS.clone()))?;
+    r.register(Box::new(DB_REPLICATION_WAL_LAG_BYTES.clone()))?;
+    r.register(Box::new(DB_REPLICATION_HEALTH.clone()))?;
+    r.register(Box::new(DB_REPLICATION_CHECKS_TOTAL.clone()))?;
+    r.register(Box::new(DB_REPLICATION_CHECK_FAILURES_TOTAL.clone()))?;
+    r.register(Box::new(SEARCH_QUERY_DURATION.clone()))?;
+    r.register(Box::new(SEARCH_SLOW_QUERIES.clone()))?;
 
     r.register(Box::new(CACHE_HITS.clone()))?;
     r.register(Box::new(CACHE_MISSES.clone()))?;
@@ -314,6 +401,10 @@ pub fn register_all(r: &Registry) -> prometheus::Result<()> {
     r.register(Box::new(ABI_CACHE_MISSES.clone()))?;
     r.register(Box::new(VERIFICATION_CACHE_HITS.clone()))?;
     r.register(Box::new(VERIFICATION_CACHE_MISSES.clone()))?;
+    r.register(Box::new(CONTRACTS_CACHE_HITS.clone()))?;
+    r.register(Box::new(CONTRACTS_CACHE_MISSES.clone()))?;
+    r.register(Box::new(REDIS_CACHE_HITS.clone()))?;
+    r.register(Box::new(REDIS_CACHE_MISSES.clone()))?;
     r.register(Box::new(RESOURCE_RECORDINGS.clone()))?;
     r.register(Box::new(RESOURCE_ALERTS_FIRED.clone()))?;
     r.register(Box::new(RESOURCE_FORECAST_RUNS.clone()))?;
@@ -332,6 +423,12 @@ pub fn register_all(r: &Registry) -> prometheus::Result<()> {
     r.register(Box::new(MULTISIG_REJECTIONS.clone()))?;
     r.register(Box::new(PROCESS_START_TIME.clone()))?;
     r.register(Box::new(BUILD_INFO.clone()))?;
+    r.register(Box::new(CLIENT_BREAKER_OPEN.clone()))?;
+    r.register(Box::new(DB_RESILIENCE_QUEUE_DEPTH.clone()))?;
+    r.register(Box::new(DB_RESILIENCE_ACTIVE_REQS.clone()))?;
+    r.register(Box::new(DB_RESILIENCE_BREAKER_STATE.clone()))?;
+    r.register(Box::new(DB_RESILIENCE_BREAKER_TRIPS.clone()))?;
+    r.register(Box::new(DB_RESILIENCE_REJECTIONS.clone()))?;
     r.register(Box::new(SLO_ERROR_BUDGET.clone()))?;
     r.register(Box::new(SLO_BURN_RATE.clone()))?;
     r.register(Box::new(SLO_AVAILABILITY.clone()))?;
@@ -354,7 +451,6 @@ pub fn gather_metrics(r: &Registry) -> String {
     String::from_utf8(buf).unwrap_or_default()
 }
 
-#[allow(dead_code)]
 pub fn observe_http(method: &str, path: &str, status: u16, duration_secs: f64) {
     HTTP_REQUESTS_TOTAL
         .with_label_values(&[method, path, &status.to_string()])
@@ -364,7 +460,6 @@ pub fn observe_http(method: &str, path: &str, status: u16, duration_secs: f64) {
         .observe(duration_secs);
 }
 
-#[allow(dead_code)]
 pub fn observe_verification_latency(result: &str, duration_secs: f64) {
     VERIFICATION_LATENCY
         .with_label_values(&[result])

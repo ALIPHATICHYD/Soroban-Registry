@@ -1,0 +1,79 @@
+.modalOverlay {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 4rem;
+  padding-left: 1rem;
+  padding-right: 1rem;
+  transition: all 0.2s;
+}
+
+@media (min-width: 640px) {
+  .modalOverlay {
+    padding-top: 6rem;
+  }
+}
+
+.modalBackdrop {
+  position: absolute;
+  inset: 0;
+  background-color: hsl(var(--background) / 0.7);
+  backdrop-filter: blur(12px);
+}
+
+.modalPanel {
+  position: relative;
+  width: 100%;
+  max-width: 32rem;
+  background-color: hsl(var(--card));
+  border: 1px solid hsl(var(--border));
+  border-radius: 1rem;
+  box-shadow: 0 25px 50px -12px rgb(0 0 0 / 0.25);
+  overflow: hidden;
+  transition: all 0.2s;
+}
+
+.navBar {
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  width: 100%;
+  transition: all 0.3s;
+}
+
+.navBarScrolled {
+  background-color: hsl(var(--background) / 0.95);
+  backdrop-filter: blur(24px);
+  border-bottom: 1px solid hsl(var(--border));
+  box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1);
+}
+
+.navBarDefault {
+  background-color: hsl(var(--background) / 0.8);
+  backdrop-filter: blur(24px);
+  border-bottom: 1px solid hsl(var(--border) / 0.5);
+}
+
+.drawer {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  transition: all 0.3s;
+}
+
+.drawerPanel {
+  position: absolute;
+  inset-y: 0;
+  right: 0;
+  width: 85vw;
+  max-width: 24rem;
+  display: flex;
+  flex-direction: column;
+  background-color: hsl(var(--card));
+  border-left: 1px solid hsl(var(--border));
+  box-shadow: 0 25px 50px -12px rgb(0 0 0 / 0.25);
+  transition: transform 0.3s ease-in-out;
+}

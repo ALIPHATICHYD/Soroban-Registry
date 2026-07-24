@@ -3,6 +3,7 @@ use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::Json;
 
+use crate::error::ApiError;
 use crate::state::AppState;
 
 pub async fn get_contract_resources(
@@ -12,12 +13,8 @@ pub async fn get_contract_resources(
     let mgr = state.resource_mgr.read().unwrap();
     match mgr.summary(&id) {
         Some(summary) => (StatusCode::OK, Json(summary)).into_response(),
-        None => (
-            StatusCode::NOT_FOUND,
-            Json(
-                serde_json::json!({ "error": "no resource data for contract", "contract_id": id }),
-            ),
-        )
+        None => ApiError::not_found("RESOURCE_DATA_NOT_FOUND", "No resource data for contract")
+            .with_details(serde_json::json!({ "contract_id": id }))
             .into_response(),
     }
 }
@@ -27,8 +24,12 @@ mod tests {
     use super::*;
     use crate::auth::AuthManager;
     use crate::cache::{CacheConfig, CacheLayer};
+    use crate::contract_events::ContractEventHub;
     use crate::metrics;
+    use crate::rate_limit::RateLimitState;
     use crate::resource_tracking::{ResourceManager, ResourceUsage};
+    use crate::search_client::SearchClient;
+    use crate::search_postgres::PostgresSearchService;
     use axum::extract::{Path, State};
     use axum::response::IntoResponse;
     use chrono::{TimeZone, Utc};
@@ -43,26 +44,48 @@ mod tests {
             .expect("lazy pool")
     }
 
-    fn test_state() -> AppState {
+    async fn test_state() -> AppState {
         let registry = Registry::new_custom(Some("test".into()), None).unwrap();
         metrics::register_all(&registry).unwrap();
         let (job_engine, _rx) = soroban_batch::engine::JobEngine::new();
+        let (event_broadcaster, _) = tokio::sync::broadcast::channel(100);
         AppState {
             db: create_test_pool(),
             started_at: Instant::now(),
-            cache: Arc::new(CacheLayer::new(CacheConfig::default())),
+            cache: Arc::new(CacheLayer::new(CacheConfig::default()).await),
             registry,
             job_engine: Arc::new(job_engine),
             is_shutting_down: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
             health_monitor_status: crate::health_monitor::HealthMonitorStatus::default(),
             resource_mgr: Arc::new(RwLock::new(ResourceManager::new())),
-            auth_mgr: Arc::new(RwLock::new(AuthManager::new("test-secret".to_string()))),
+            auth_mgr: Arc::new(RwLock::new(AuthManager::new(
+                "test-secret-test-secret-test-se".to_string(),
+            ))),
+            contract_events: Arc::new(ContractEventHub::from_env()),
+            source_storage: Arc::new(shared::source_storage::SourceStorage::new().await.unwrap()),
+            event_broadcaster,
+            search: Arc::new(SearchClient::new("http://localhost:9200").unwrap()),
+            pg_search: Arc::new(PostgresSearchService::new(create_test_pool())),
+            ai_service: None,
+            state_monitor: None,
+            rate_limit_state: Arc::new(RateLimitState::from_env()),
+            db_breaker: Arc::new(crate::db_resilience::CircuitBreaker::new(
+                3,
+                std::time::Duration::from_secs(10),
+            )),
+            db_queue: Arc::new(crate::db_resilience::DbQueue::new(
+                10,
+                10,
+                std::time::Duration::from_secs(1),
+            )),
+            feature_flags: Arc::new(crate::feature_flags::FeatureFlagManager::new()),
+            encryption: Arc::new(crate::crypto::EncryptionService::disabled()),
         }
     }
 
     #[tokio::test]
     async fn returns_forecast_payload_for_alias_route() {
-        let state = test_state();
+        let state = test_state().await;
         {
             let base = Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap();
             let mut mgr = state.resource_mgr.write().unwrap();

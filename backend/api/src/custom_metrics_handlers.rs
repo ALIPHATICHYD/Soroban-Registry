@@ -1,3 +1,5 @@
+use crate::validation::extractors::ValidatedJson;
+use crate::validation::handler_requests::RecordMetricsBatchRequest;
 use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
@@ -368,7 +370,7 @@ async fn fetch_metric_type(
 pub async fn record_contract_metric(
     State(state): State<AppState>,
     Path(contract_id): Path<String>,
-    Json(payload): Json<RecordCustomMetricRequest>,
+    ValidatedJson(payload): ValidatedJson<RecordCustomMetricRequest>,
 ) -> ApiResult<Json<CustomMetric>> {
     if payload.contract_id != contract_id {
         return Err(ApiError::bad_request(
@@ -419,7 +421,7 @@ pub async fn record_contract_metric(
 pub async fn record_metrics_batch(
     State(state): State<AppState>,
     Path(contract_id): Path<String>,
-    Json(payload): Json<Vec<RecordCustomMetricRequest>>,
+    ValidatedJson(payload): ValidatedJson<RecordMetricsBatchRequest>,
 ) -> ApiResult<Json<serde_json::Value>> {
     if payload.is_empty() {
         return Ok(Json(serde_json::json!({

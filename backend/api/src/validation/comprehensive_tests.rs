@@ -483,11 +483,17 @@ mod tests {
             FieldError::new("name", "is required"),
         ];
 
-        let response = crate::validation::extractors::ValidationErrorResponse::new(errors);
-        assert_eq!(response.error, "ValidationError");
-        assert_eq!(response.code, 400);
-        assert!(response.errors.len() == 2);
-        assert!(!response.correlation_id.is_empty());
+        let response = crate::validation::extractors::ValidationErrorResponse::new(
+            errors,
+            uuid::Uuid::new_v4().to_string(),
+        );
+        assert_eq!(response.error_code, "BAD_REQUEST");
+        assert_eq!(response.details["reason"], "VALIDATION_ERROR");
+        assert_eq!(
+            response.details["field_errors"].as_array().unwrap().len(),
+            2
+        );
+        assert!(response.details["correlation_id"].as_str().is_some());
     }
 
     #[test]

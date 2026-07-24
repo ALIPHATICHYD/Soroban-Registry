@@ -1,3 +1,4 @@
+use crate::net::RequestBuilderExt;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
@@ -44,7 +45,7 @@ pub async fn estimate_costs(
     optimize: bool,
     forecast: bool,
 ) -> Result<()> {
-    let client = reqwest::Client::new();
+    let client = crate::net::client();
 
     let request = CostEstimateRequest {
         method_name: method.to_string(),
@@ -56,8 +57,7 @@ pub async fn estimate_costs(
     let estimate: CostEstimate = client
         .post(format!("{}/api/contracts/{}/cost-estimate", api_url, contract_id))
         .json(&request)
-        .send()
-        .await?
+        .send_with_retry().await?
         .json()
         .await?;
 
@@ -82,8 +82,7 @@ pub async fn estimate_costs(
         let optimization: CostOptimization = client
             .post(format!("{}/api/contracts/{}/cost-estimate/optimize", api_url, contract_id))
             .json(&estimate)
-            .send()
-            .await?
+            .send_with_retry().await?
             .json()
             .await?;
 
@@ -107,8 +106,7 @@ pub async fn estimate_costs(
         let forecast_data: CostForecast = client
             .post(format!("{}/api/contracts/{}/cost-estimate/forecast", api_url, contract_id))
             .json(&request)
-            .send()
-            .await?
+            .send_with_retry().await?
             .json()
             .await?;
 

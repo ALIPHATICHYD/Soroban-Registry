@@ -1,3 +1,4 @@
+use crate::net::RequestBuilderExt;
 use std::fmt;
 use std::str::FromStr;
 
@@ -62,6 +63,38 @@ pub struct PatchAudit {
     pub applied_at: DateTime<Utc>,
 }
 
+fn lookup_items(data: &serde_json::Value) -> Vec<serde_json::Value> {
+    data.get("items")
+        .and_then(serde_json::Value::as_array)
+        .or_else(|| data.get("contracts").and_then(serde_json::Value::as_array))
+        .cloned()
+        .unwrap_or_default()
+}
+
+fn lookup_total(data: &serde_json::Value) -> usize {
+    data.get("total")
+        .and_then(serde_json::Value::as_u64)
+        .map(|n| n as usize)
+        .unwrap_or_else(|| lookup_items(data).len())
+}
+
+fn ensure_single_contract_match(data: &serde_json::Value, wasm_hash: &str) -> Result<usize> {
+    let total = lookup_total(data);
+
+    match total {
+        0 => bail!(
+            "no contract found for patch target wasm hash '{}'; verify the patch target version/hash before applying",
+            wasm_hash
+        ),
+        1 => Ok(total),
+        n => bail!(
+            "ambiguous contract lookup for patch target wasm hash '{}': {} contracts matched; apply by resolving the target contract before patching",
+            wasm_hash,
+            n
+        ),
+    }
+}
+
 pub struct PatchManager;
 
 impl PatchManager {
@@ -80,7 +113,7 @@ impl PatchManager {
         severity: Severity,
         rollout: u8,
     ) -> Result<SecurityPatch> {
-        let client = reqwest::Client::new();
+        let client = crate::net::client();
         let payload = serde_json::json!({
             "target_version": version,
             "severity": severity,
@@ -91,7 +124,7 @@ impl PatchManager {
         let resp = client
             .post(format!("{}/api/patches", api_url))
             .json(&payload)
-            .send()
+            .send_with_retry()
             .await?;
 
         if !resp.status().is_success() {
@@ -105,11 +138,11 @@ impl PatchManager {
         api_url: &str,
         patch_id: &str,
     ) -> Result<(SecurityPatch, Vec<serde_json::Value>)> {
-        let client = reqwest::Client::new();
+        let client = crate::net::client();
 
         let patch_resp = client
             .get(format!("{}/api/patches/{}", api_url, patch_id))
-            .send()
+            .send_with_retry()
             .await?;
 
         if !patch_resp.status().is_success() {
@@ -123,21 +156,21 @@ impl PatchManager {
                 "{}/api/contracts?wasm_hash={}",
                 api_url, patch.target_version
             ))
-            .send()
+            .send_with_retry()
             .await?;
 
         let data: serde_json::Value = contracts_resp.json().await?;
-        let contracts = data["items"].as_array().cloned().unwrap_or_default();
+        let contracts = lookup_items(&data);
 
         Ok((patch, contracts))
     }
 
     pub async fn apply(api_url: &str, contract_id: &str, patch_id: &str) -> Result<PatchAudit> {
-        let client = reqwest::Client::new();
+        let client = crate::net::client();
 
         let patch_resp = client
             .get(format!("{}/api/patches/{}", api_url, patch_id))
-            .send()
+            .send_with_retry()
             .await?;
 
         if !patch_resp.status().is_success() {
@@ -148,7 +181,7 @@ impl PatchManager {
 
         let audits_resp = client
             .get(format!("{}/api/patches/{}/audits", api_url, patch_id))
-            .send()
+            .send_with_retry()
             .await?;
 
         let audits_data: serde_json::Value = audits_resp.json().await?;
@@ -159,11 +192,11 @@ impl PatchManager {
                 "{}/api/contracts?wasm_hash={}",
                 api_url, patch.target_version
             ))
-            .send()
+            .send_with_retry()
             .await?;
 
         let contracts_data: serde_json::Value = contracts_resp.json().await?;
-        let total = contracts_data["total"].as_u64().unwrap_or(0) as usize;
+        let total = ensure_single_contract_match(&contracts_data, &patch.target_version)?;
 
         if !Self::check_rollout(applied, total, patch.rollout_percentage) {
             bail!(
@@ -183,7 +216,7 @@ impl PatchManager {
         let resp = client
             .post(format!("{}/api/patches/{}/apply", api_url, patch_id))
             .json(&payload)
-            .send()
+            .send_with_retry()
             .await?;
 
         if !resp.status().is_success() {
@@ -254,5 +287,37 @@ mod tests {
     fn rollout_one_contract() {
         assert!(PatchManager::check_rollout(0, 1, 1));
         assert!(!PatchManager::check_rollout(1, 1, 1));
+    }
+
+    #[test]
+    fn contract_lookup_rejects_empty_matches() {
+        let data = serde_json::json!({ "items": [], "total": 0 });
+        let err = ensure_single_contract_match(&data, "hash-a")
+            .unwrap_err()
+            .to_string();
+
+        assert!(err.contains("no contract found"));
+        assert!(err.contains("hash-a"));
+    }
+
+    #[test]
+    fn contract_lookup_rejects_ambiguous_matches() {
+        let data = serde_json::json!({
+            "items": [{"id": "c1"}, {"id": "c2"}],
+            "total": 2
+        });
+        let err = ensure_single_contract_match(&data, "hash-b")
+            .unwrap_err()
+            .to_string();
+
+        assert!(err.contains("ambiguous contract lookup"));
+        assert!(err.contains("2 contracts matched"));
+    }
+
+    #[test]
+    fn contract_lookup_accepts_single_match_without_total() {
+        let data = serde_json::json!({ "contracts": [{"id": "c1"}] });
+
+        assert_eq!(ensure_single_contract_match(&data, "hash-c").unwrap(), 1);
     }
 }

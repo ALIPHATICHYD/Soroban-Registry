@@ -27,6 +27,10 @@ pub fn spawn_aggregation_task(pool: PgPool) {
                 tracing::error!(error = ?err, "aggregation: custom metrics aggregation failed");
             }
 
+            if let Err(err) = run_contract_stats_aggregation(&pool).await {
+                tracing::error!(error = ?err, "aggregation: contract stats aggregation failed");
+            }
+
             // Daily contract health score update (runs at 2 AM UTC)
             if chrono::Utc::now().hour() == 2 {
                 if let Err(err) = crate::health::update_all_health_scores(&pool).await {
@@ -48,7 +52,7 @@ async fn run_aggregation(pool: &PgPool) -> Result<(), sqlx::Error> {
         INSERT INTO analytics_daily_aggregates (
             contract_id, date,
             deployment_count, unique_deployers,
-            verification_count, publish_count, version_count,
+            verification_count, publish_count, version_count, update_count,
             total_events, unique_users,
             network_breakdown, top_users
         )
@@ -64,6 +68,7 @@ async fn run_aggregation(pool: &PgPool) -> Result<(), sqlx::Error> {
             COUNT(*) FILTER (WHERE e.event_type = 'contract_verified') AS verification_count,
             COUNT(*) FILTER (WHERE e.event_type = 'contract_published') AS publish_count,
             COUNT(*) FILTER (WHERE e.event_type = 'version_created') AS version_count,
+            COUNT(*) FILTER (WHERE e.event_type = 'contract_updated') AS update_count,
 
             -- totals
             COUNT(*) AS total_events,
@@ -117,6 +122,7 @@ async fn run_aggregation(pool: &PgPool) -> Result<(), sqlx::Error> {
             verification_count  = EXCLUDED.verification_count,
             publish_count       = EXCLUDED.publish_count,
             version_count       = EXCLUDED.version_count,
+            update_count        = EXCLUDED.update_count,
             total_events        = EXCLUDED.total_events,
             unique_users        = EXCLUDED.unique_users,
             network_breakdown   = EXCLUDED.network_breakdown,
@@ -263,6 +269,86 @@ async fn run_custom_metrics_aggregation(pool: &PgPool) -> Result<(), sqlx::Error
         daily_rows = daily_rows,
         "aggregation: custom metrics rollups updated"
     );
+
+    Ok(())
+}
+
+/// Aggregate contract usage stats into the `contract_usage_stats` table and
+/// refresh the `trending_contracts_mv` materialized view.
+async fn run_contract_stats_aggregation(pool: &PgPool) -> Result<(), sqlx::Error> {
+    use chrono::Utc;
+    use uuid::Uuid;
+
+    let now = Utc::now();
+
+    // Refresh stats for all contracts across the three standard windows
+    for days in &[7i64, 30, 90] {
+        let period_start = now - chrono::Duration::days(*days);
+
+        // Upsert stats for every contract
+        sqlx::query(
+            r#"
+            INSERT INTO contract_usage_stats (
+                contract_id, period_start, period_end,
+                deployment_count, call_count, error_count,
+                unique_callers, unique_deployers, total_interactions,
+                avg_calls_per_day, error_rate
+            )
+            SELECT
+                c.id,
+                $1 AS period_start,
+                $2 AS period_end,
+                COALESCE(SUM(agg.count) FILTER (WHERE agg.interaction_type = 'deploy'), 0),
+                COALESCE(SUM(agg.count) FILTER (WHERE agg.interaction_type IN ('invoke', 'transfer', 'query')), 0),
+                COALESCE(SUM(agg.count) FILTER (WHERE agg.interaction_type = 'publish_failed'), 0),
+                COUNT(DISTINCT ci.user_address) FILTER (WHERE ci.user_address IS NOT NULL AND ci.interaction_type IN ('invoke', 'transfer', 'query')),
+                COUNT(DISTINCT ci.user_address) FILTER (WHERE ci.user_address IS NOT NULL AND ci.interaction_type = 'deploy'),
+                COALESCE(SUM(agg.count), 0),
+                CASE
+                    WHEN COALESCE(SUM(agg.count) FILTER (WHERE agg.interaction_type IN ('invoke', 'transfer', 'query')), 0) > 0
+                    THEN COALESCE(SUM(agg.count) FILTER (WHERE agg.interaction_type IN ('invoke', 'transfer', 'query')), 0)::NUMERIC / GREATEST(EXTRACT(EPOCH FROM ($2 - $1)) / 86400.0, 1.0)
+                    ELSE 0
+                END,
+                CASE
+                    WHEN COALESCE(SUM(agg.count), 0) > 0
+                    THEN COALESCE(SUM(agg.count) FILTER (WHERE agg.interaction_type = 'publish_failed'), 0)::NUMERIC / SUM(agg.count)::NUMERIC
+                    ELSE 0
+                END
+            FROM contracts c
+            LEFT JOIN contract_interaction_daily_aggregates agg
+                ON agg.contract_id = c.id AND agg.day >= $1::DATE AND agg.day <= $2::DATE
+            LEFT JOIN contract_interactions ci
+                ON ci.contract_id = c.id
+                AND DATE(ci.interaction_timestamp) >= $1::DATE
+                AND DATE(ci.interaction_timestamp) <= $2::DATE
+                AND ci.interaction_type IN ('invoke', 'transfer', 'query', 'deploy', 'publish_failed')
+            GROUP BY c.id
+            ON CONFLICT (contract_id, period_start, period_end) DO UPDATE SET
+                deployment_count = EXCLUDED.deployment_count,
+                call_count = EXCLUDED.call_count,
+                error_count = EXCLUDED.error_count,
+                unique_callers = EXCLUDED.unique_callers,
+                unique_deployers = EXCLUDED.unique_deployers,
+                total_interactions = EXCLUDED.total_interactions,
+                avg_calls_per_day = EXCLUDED.avg_calls_per_day,
+                error_rate = EXCLUDED.error_rate,
+                updated_at = NOW()
+            "#,
+        )
+        .bind(period_start)
+        .bind(now)
+        .execute(pool)
+        .await?;
+
+        tracing::debug!(days = days, "stats aggregation: {}d window upserted", days);
+    }
+
+    // Refresh trending materialized view
+    sqlx::query("SELECT refresh_trending_contracts()")
+        .execute(pool)
+        .await?;
+
+    tracing::info!("aggregation: contract usage stats and trending view refreshed");
 
     Ok(())
 }

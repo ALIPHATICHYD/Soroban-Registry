@@ -1,4 +1,4 @@
-import LoadingSkeleton from './LoadingSkeleton';
+import LoadingSkeleton from "./LoadingSkeleton";
 
 export default function ExampleCardSkeleton() {
   return (
@@ -10,10 +10,18 @@ export default function ExampleCardSkeleton() {
             <LoadingSkeleton width="60%" height="1.5rem" className="mb-2" />
             <LoadingSkeleton width="5rem" height="1.5rem" className="rounded" />
           </div>
-          
+
           <div className="flex items-center gap-2">
-            <LoadingSkeleton width="4rem" height="2.5rem" className="rounded-lg" />
-            <LoadingSkeleton width="4rem" height="2.5rem" className="rounded-lg" />
+            <LoadingSkeleton
+              width="4rem"
+              height="2.5rem"
+              className="rounded-lg"
+            />
+            <LoadingSkeleton
+              width="4rem"
+              height="2.5rem"
+              className="rounded-lg"
+            />
           </div>
         </div>
 

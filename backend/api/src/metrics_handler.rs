@@ -29,28 +29,52 @@ pub async fn metrics_endpoint(State(state): State<AppState>) -> impl IntoRespons
 mod tests {
     use super::*;
     use crate::cache::{CacheConfig, CacheLayer};
+    use crate::contract_events::ContractEventHub;
+    use crate::rate_limit::RateLimitState;
+    use crate::search_client::SearchClient;
+    use crate::search_postgres::PostgresSearchService;
     use axum::extract::State;
     use axum::response::IntoResponse;
     use prometheus::Registry;
     use std::sync::{Arc, RwLock};
     use std::time::Instant;
 
-    fn test_state() -> AppState {
+    async fn test_state() -> AppState {
         let registry = Registry::new_custom(Some("test".into()), None).unwrap();
         metrics::register_all(&registry).unwrap();
         let (job_engine, _rx) = soroban_batch::engine::JobEngine::new();
+        let (event_broadcaster, _) = tokio::sync::broadcast::channel(100);
         AppState {
             db: create_test_pool(),
             started_at: Instant::now(),
-            cache: Arc::new(CacheLayer::new(CacheConfig::default())),
+            cache: Arc::new(CacheLayer::new(CacheConfig::default()).await),
             registry,
             job_engine: Arc::new(job_engine),
             is_shutting_down: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             health_monitor_status: crate::health_monitor::HealthMonitorStatus::default(),
             auth_mgr: Arc::new(RwLock::new(crate::auth::AuthManager::new(
-                "test-secret".to_string(),
+                "test-secret-test-secret-test-se".to_string(),
             ))),
             resource_mgr: Arc::new(RwLock::new(crate::resource_tracking::ResourceManager::new())),
+            contract_events: Arc::new(ContractEventHub::from_env()),
+            source_storage: Arc::new(shared::source_storage::SourceStorage::new().await.unwrap()),
+            event_broadcaster,
+            search: Arc::new(SearchClient::new("http://localhost:9200").unwrap()),
+            pg_search: Arc::new(PostgresSearchService::new(create_test_pool())),
+            ai_service: None,
+            state_monitor: None,
+            rate_limit_state: Arc::new(RateLimitState::from_env()),
+            db_breaker: Arc::new(crate::db_resilience::CircuitBreaker::new(
+                3,
+                std::time::Duration::from_secs(10),
+            )),
+            db_queue: Arc::new(crate::db_resilience::DbQueue::new(
+                10,
+                10,
+                std::time::Duration::from_secs(1),
+            )),
+            feature_flags: Arc::new(crate::feature_flags::FeatureFlagManager::new()),
+            encryption: Arc::new(crate::crypto::EncryptionService::disabled()),
         }
     }
 
@@ -63,7 +87,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_metrics_endpoint_returns_200() {
-        let state = test_state();
+        let state = test_state().await;
         let resp = metrics_endpoint(State(state)).await.into_response();
 
         assert_eq!(resp.status(), StatusCode::OK);
@@ -78,7 +102,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_metrics_endpoint_contains_metric_families() {
-        let state = test_state();
+        let state = test_state().await;
         metrics::CONTRACTS_PUBLISHED.inc();
         metrics::observe_http("GET", "/health", 200, 0.001);
 
@@ -93,3 +117,4 @@ mod tests {
         assert!(text.contains("# TYPE"));
     }
 }
+// TODO: resource tracking metrics

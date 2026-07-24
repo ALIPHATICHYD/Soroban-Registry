@@ -1,30 +1,30 @@
 export interface PublisherResponse {
-  address: string
-  displayName: string
-  bio?: string
-  avatarUrl?: string
-  website?: string
-  github?: string
-  verifiedContracts: number
-  failedVerifications: number
-  totalContracts: number
-  createdAt: string
-  contracts: ContractSummary[]
-  activity: ActivityEvent[]
+  address: string;
+  displayName: string;
+  bio?: string;
+  avatarUrl?: string;
+  website?: string;
+  github?: string;
+  verifiedContracts: number;
+  failedVerifications: number;
+  totalContracts: number;
+  createdAt: string;
+  contracts: ContractSummary[];
+  activity: ActivityEvent[];
 }
 
 export interface ContractSummary {
-  id: string
-  name: string
-  description: string
-  verificationStatus: "verified" | "failed" | "pending"
-  deployedAt: string
-  tags: string[]
+  id: string;
+  name: string;
+  description: string;
+  verificationStatus: "verified" | "failed" | "pending";
+  deployedAt: string;
+  tags: string[];
 }
 
 export interface ActivityEvent {
-  id: string
-  type: "verification_success" | "verification_failed" | "contract_published"
-  contractName: string
-  timestamp: string
+  id: string;
+  type: "verification_success" | "verification_failed" | "contract_published";
+  contractName: string;
+  timestamp: string;
 }

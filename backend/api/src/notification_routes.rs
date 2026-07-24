@@ -22,6 +22,18 @@ pub fn notification_routes() -> Router<AppState> {
             post(notification_handlers::send_notification),
         )
         .route(
+            "/api/notifications/batch",
+            post(notification_handlers::send_batch_notifications),
+        )
+        .route(
+            "/api/notifications/batch/:id",
+            get(notification_handlers::get_batch_notification_status),
+        )
+        .route(
+            "/api/notifications/batch/deliveries/:id/read",
+            post(notification_handlers::mark_batch_notification_read),
+        )
+        .route(
             "/api/users/:id/notifications",
             get(notification_handlers::get_user_notifications),
         )

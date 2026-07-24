@@ -1,0 +1,21 @@
+{
+  "navbar": {
+    "contracts": "Contrats",
+    "publish": "Publier",
+    "stats": "Stats",
+    "verification": "Vérification",
+    "search": "Rechercher des contrats...",
+    "language": "Langue"
+  },
+  "home": {
+    "title": "Registre des Contrats Intelligents Soroban",
+    "subtitle": "Découvrez, vérifiez et interagissez avec les contrats intelligents sur le réseau Stellar.",
+    "getStarted": "Commencer",
+    "viewContracts": "Voir les Contrats"
+  },
+  "common": {
+    "loading": "Chargement...",
+    "error": "Une erreur s'est produite",
+    "back": "Retour"
+  }
+}

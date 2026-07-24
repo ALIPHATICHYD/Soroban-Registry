@@ -64,7 +64,7 @@ impl TokenWithIssues {
 ///
 /// - Panics if `amount` is 0
 /// - Panics if `amount` exceeds `MAX_MINT_ITERATIONS`
-       pub fn mint(env: Env, amount: u64) {
+    pub fn mint(env: Env, amount: u64) {
         // Parameter validation
         if amount == 0 {
             panic!("amount must be greater than zero");

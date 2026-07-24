@@ -1,15 +1,23 @@
-import { PublisherResponse, ContractSummary, ActivityEvent } from "@/types/publisher";
+import type {
+  PublisherResponse,
+  ContractSummary,
+  ActivityEvent,
+} from "@/types";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "";
 const USE_MOCKS = process.env.NEXT_PUBLIC_USE_MOCKS === "true";
 
 // ---------------------------------------------------------------------------
 // Real API call (primary path)
 // ---------------------------------------------------------------------------
 
-export async function getPublisher(address: string): Promise<PublisherResponse> {
+export async function getPublisher(
+  address: string,
+): Promise<PublisherResponse> {
   if (!USE_MOCKS) {
-    const res = await fetch(`${API_URL}/api/publishers/${encodeURIComponent(address)}`);
+    const res = await fetch(
+      `${API_URL}/api/publishers/${encodeURIComponent(address)}`,
+    );
     if (!res.ok) {
       throw new Error(`Failed to fetch publisher: ${res.status}`);
     }
@@ -50,8 +58,10 @@ const generateMockContracts = (count: number): ContractSummary[] => {
       name: `Soroban Contract ${i + 1}`,
       description: `A sample Soroban smart contract for demonstration purposes. This contract handles specific logic for the dApp ecosystem.`,
       verificationStatus: status,
-      deployedAt: new Date(Date.now() - Math.random() * 10000000000).toISOString(),
-      tags: ['defi', 'nft', 'governance'].filter(() => Math.random() > 0.5),
+      deployedAt: new Date(
+        Date.now() - Math.random() * 10000000000,
+      ).toISOString(),
+      tags: ["defi", "nft", "governance"].filter(() => Math.random() > 0.5),
     };
   });
 };
@@ -59,7 +69,10 @@ const generateMockContracts = (count: number): ContractSummary[] => {
 const generateMockActivity = (count: number): ActivityEvent[] => {
   return Array.from({ length: count }).map(() => {
     const typeRand = Math.random();
-    let type: "verification_success" | "verification_failed" | "contract_published" = "contract_published";
+    let type:
+      | "verification_success"
+      | "verification_failed"
+      | "contract_published" = "contract_published";
     if (typeRand > 0.6) type = "verification_success";
     else if (typeRand > 0.4) type = "verification_failed";
 
@@ -67,12 +80,14 @@ const generateMockActivity = (count: number): ActivityEvent[] => {
       id: `act_${Math.random().toString(36).substring(2, 9)}`,
       type: type,
       contractName: `Soroban Contract ${Math.floor(Math.random() * 10) + 1}`,
-      timestamp: new Date(Date.now() - Math.random() * 5000000000).toISOString(),
+      timestamp: new Date(
+        Date.now() - Math.random() * 5000000000,
+      ).toISOString(),
     };
   });
 };
 
-const MOCK_PUBLISHER: Omit<PublisherResponse, 'contracts' | 'activity'> = {
+const MOCK_PUBLISHER: Omit<PublisherResponse, "contracts" | "activity"> = {
   address: "GBSX...2J4K", // This will be overwritten by the requested address
   displayName: "Stellar builder",
   bio: "Building decentralized applications on Soroban. Passionate about DeFi and DAO governance structures.",

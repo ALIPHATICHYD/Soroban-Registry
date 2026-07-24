@@ -12,7 +12,7 @@ impl HelloContract {
     pub fn hello(env: Env, to: Symbol) -> Vec<Symbol> {
         vec![&env, symbol_short!("Hello"), to]
     }
-    
+
     /// Returns the contract version
     pub fn version() -> u32 {
         1

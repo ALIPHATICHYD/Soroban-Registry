@@ -66,7 +66,7 @@ mod tests {
             }),
         }];
 
-        let deployments = detect_contract_deployments(&ops, 100);
+        let deployments = detect_contract_deployments(&ops, 100, "2023-10-27T10:00:00Z");
         assert_eq!(deployments.len(), 1);
         assert_eq!(deployments[0].contract_id, contract_id);
         assert_eq!(deployments[0].deployer, deployer);
@@ -92,7 +92,7 @@ mod tests {
             },
         ];
 
-        let deployments = detect_contract_deployments(&ops, 100);
+        let deployments = detect_contract_deployments(&ops, 100, "2023-10-27T10:00:00Z");
         assert_eq!(deployments.len(), 0);
     }
 
@@ -173,7 +173,7 @@ mod tests {
             },
         ];
 
-        let deployments = detect_contract_deployments(&ops, 100);
+        let deployments = detect_contract_deployments(&ops, 100, "2023-10-27T10:00:00Z");
         assert_eq!(deployments.len(), 2);
         assert_eq!(deployments[0].contract_id, c1);
         assert_eq!(deployments[1].contract_id, c2);
@@ -192,7 +192,7 @@ mod tests {
             }),
         }];
 
-        let deployments = detect_contract_deployments(&ops, 100);
+        let deployments = detect_contract_deployments(&ops, 100, "2023-10-27T10:00:00Z");
         assert_eq!(deployments.len(), 0);
     }
 

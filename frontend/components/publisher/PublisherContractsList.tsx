@@ -10,7 +10,9 @@ interface PublisherContractsListProps {
 
 type FilterStatus = "all" | "verified" | "failed" | "pending";
 
-export function PublisherContractsList({ contracts }: PublisherContractsListProps) {
+export function PublisherContractsList({
+  contracts,
+}: PublisherContractsListProps) {
   const [statusFilter, setStatusFilter] = useState<FilterStatus>("all");
   const [searchTerm, setSearchTerm] = useState("");
   const searchInputRef = useRef<HTMLInputElement>(null);
@@ -18,26 +20,33 @@ export function PublisherContractsList({ contracts }: PublisherContractsListProp
   const filteredContracts = useMemo(() => {
     return contracts
       .filter((contract) => {
-        const matchesStatus = statusFilter === "all" || contract.verificationStatus === statusFilter;
-        const matchesSearch = contract.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        const matchesStatus =
+          statusFilter === "all" ||
+          contract.verificationStatus === statusFilter;
+        const matchesSearch =
+          contract.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
           contract.description.toLowerCase().includes(searchTerm.toLowerCase());
         return matchesStatus && matchesSearch;
       })
-      .sort((a, b) => new Date(b.deployedAt).getTime() - new Date(a.deployedAt).getTime());
+      .sort(
+        (a, b) =>
+          new Date(b.deployedAt).getTime() - new Date(a.deployedAt).getTime(),
+      );
   }, [contracts, statusFilter, searchTerm]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       const isSlashShortcut = event.key === "/" || event.code === "Slash";
-      if (!isSlashShortcut || event.ctrlKey || event.metaKey || event.altKey) return;
+      if (!isSlashShortcut || event.ctrlKey || event.metaKey || event.altKey)
+        return;
 
       const activeElement = document.activeElement as HTMLElement | null;
       const isTypingField = Boolean(
         activeElement &&
-          (activeElement.tagName === "INPUT" ||
-            activeElement.tagName === "TEXTAREA" ||
-            activeElement.tagName === "SELECT" ||
-            activeElement.isContentEditable),
+        (activeElement.tagName === "INPUT" ||
+          activeElement.tagName === "TEXTAREA" ||
+          activeElement.tagName === "SELECT" ||
+          activeElement.isContentEditable),
       );
 
       if (isTypingField) return;
@@ -59,7 +68,7 @@ export function PublisherContractsList({ contracts }: PublisherContractsListProp
             {filteredContracts.length}
           </span>
         </h2>
-        
+
         <div className="flex flex-col sm:flex-row gap-3 w-full md:w-auto">
           <div className="relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
@@ -74,7 +83,7 @@ export function PublisherContractsList({ contracts }: PublisherContractsListProp
               className="pl-9 pr-4 py-2 w-full sm:w-64 bg-accent border border-border rounded-lg text-sm focus:ring-2 focus:ring-primary/40 focus:border-transparent outline-none transition-all"
             />
           </div>
-          
+
           <div className="relative">
             <Filter className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
             <select
@@ -103,15 +112,15 @@ export function PublisherContractsList({ contracts }: PublisherContractsListProp
                 <VerificationBadge status={contract.verificationStatus} />
                 <ArrowUpRight className="w-4 h-4 text-muted-foreground group-hover:text-primary transition-colors" />
               </div>
-              
+
               <h3 className="font-semibold text-foreground mb-2 group-hover:text-primary transition-colors truncate">
                 {contract.name}
               </h3>
-              
+
               <p className="text-sm text-muted-foreground line-clamp-2 mb-4 h-10">
                 {contract.description}
               </p>
-              
+
               {contract.tags && contract.tags.length > 0 && (
                 <div className="flex flex-wrap gap-2 mb-4">
                   {contract.tags.slice(0, 3).map((tag) => (
@@ -123,14 +132,18 @@ export function PublisherContractsList({ contracts }: PublisherContractsListProp
                     </span>
                   ))}
                   {contract.tags.length > 3 && (
-                    <span className="text-xs text-muted-foreground flex items-center">+{contract.tags.length - 3}</span>
+                    <span className="text-xs text-muted-foreground flex items-center">
+                      +{contract.tags.length - 3}
+                    </span>
                   )}
                 </div>
               )}
-              
+
               <div className="flex items-center justify-between text-xs text-muted-foreground pt-3 border-t border-border">
                 <span>ID: {contract.id.substring(0, 8)}...</span>
-                <span>{new Date(contract.deployedAt).toLocaleDateString()}</span>
+                <span>
+                  {new Date(contract.deployedAt).toLocaleDateString()}
+                </span>
               </div>
             </Link>
           ))

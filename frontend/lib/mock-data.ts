@@ -190,77 +190,116 @@ export const MOCK_DEPENDENCIES: Record<string, DependencyTreeNode[]> = {
   ],
 };
 
-import { Template } from './api';
+import { Template } from "./api";
 
 export const MOCK_TEMPLATES: Template[] = [
   {
-    id: 'tmpl-1',
-    slug: 'token',
-    name: 'Fungible Token',
-    description: 'SEP-0041 compatible fungible token with mint, transfer, and allowance mechanics.',
-    category: 'token',
-    version: '1.0.0',
+    id: "tmpl-1",
+    slug: "token",
+    name: "Fungible Token",
+    description:
+      "SEP-0041 compatible fungible token with mint, transfer, and allowance mechanics.",
+    category: "token",
+    version: "1.0.0",
     install_count: 843,
     parameters: [
-      { name: 'CONTRACT_NAME', type: 'string', description: 'Contract struct name' },
-      { name: 'SYMBOL', type: 'string', description: 'Token ticker symbol' },
-      { name: 'INITIAL_SUPPLY', type: 'i128', default: '1000000', description: 'Initial token supply' },
+      {
+        name: "CONTRACT_NAME",
+        type: "string",
+        description: "Contract struct name",
+      },
+      { name: "SYMBOL", type: "string", description: "Token ticker symbol" },
+      {
+        name: "INITIAL_SUPPLY",
+        type: "i128",
+        default: "1000000",
+        description: "Initial token supply",
+      },
     ],
     created_at: new Date(Date.now() - 86400000 * 60).toISOString(),
   },
   {
-    id: 'tmpl-2',
-    slug: 'dex',
-    name: 'DEX Liquidity Pool',
-    description: 'Constant-product AMM with LP tokens, 0.3% swap fee, and add/remove liquidity.',
-    category: 'dex',
-    version: '1.0.0',
+    id: "tmpl-2",
+    slug: "dex",
+    name: "DEX Liquidity Pool",
+    description:
+      "Constant-product AMM with LP tokens, 0.3% swap fee, and add/remove liquidity.",
+    category: "dex",
+    version: "1.0.0",
     install_count: 412,
     parameters: [
-      { name: 'CONTRACT_NAME', type: 'string', description: 'Contract struct name' },
+      {
+        name: "CONTRACT_NAME",
+        type: "string",
+        description: "Contract struct name",
+      },
     ],
     created_at: new Date(Date.now() - 86400000 * 45).toISOString(),
   },
   {
-    id: 'tmpl-3',
-    slug: 'bridge',
-    name: 'Cross-Chain Bridge',
-    description: 'Lock-release bridge stub with nonce-based replay protection and admin-controlled release.',
-    category: 'bridge',
-    version: '1.0.0',
+    id: "tmpl-3",
+    slug: "bridge",
+    name: "Cross-Chain Bridge",
+    description:
+      "Lock-release bridge stub with nonce-based replay protection and admin-controlled release.",
+    category: "bridge",
+    version: "1.0.0",
     install_count: 198,
     parameters: [
-      { name: 'CONTRACT_NAME', type: 'string', description: 'Contract struct name' },
+      {
+        name: "CONTRACT_NAME",
+        type: "string",
+        description: "Contract struct name",
+      },
     ],
     created_at: new Date(Date.now() - 86400000 * 30).toISOString(),
   },
   {
-    id: 'tmpl-4',
-    slug: 'oracle',
-    name: 'Price Oracle',
-    description: 'Admin-controlled price oracle with per-asset price feeds and update timestamps.',
-    category: 'oracle',
-    version: '1.0.0',
+    id: "tmpl-4",
+    slug: "oracle",
+    name: "Price Oracle",
+    description:
+      "Admin-controlled price oracle with per-asset price feeds and update timestamps.",
+    category: "oracle",
+    version: "1.0.0",
     install_count: 304,
     parameters: [
-      { name: 'CONTRACT_NAME', type: 'string', description: 'Contract struct name' },
-      { name: 'DECIMALS', type: 'u32', default: '7', description: 'Price decimal places' },
+      {
+        name: "CONTRACT_NAME",
+        type: "string",
+        description: "Contract struct name",
+      },
+      {
+        name: "DECIMALS",
+        type: "u32",
+        default: "7",
+        description: "Price decimal places",
+      },
     ],
     created_at: new Date(Date.now() - 86400000 * 50).toISOString(),
   },
   {
-    id: 'tmpl-5',
-    slug: 'lending',
-    name: 'Lending Pool',
-    description: 'Collateralised lending with configurable LTV ratio, supply, borrow, and repay operations.',
-    category: 'lending',
-    version: '1.0.0',
+    id: "tmpl-5",
+    slug: "lending",
+    name: "Lending Pool",
+    description:
+      "Collateralised lending with configurable LTV ratio, supply, borrow, and repay operations.",
+    category: "lending",
+    version: "1.0.0",
     install_count: 267,
     parameters: [
-      { name: 'CONTRACT_NAME', type: 'string', description: 'Contract struct name' },
-      { name: 'COLLATERAL_FACTOR', type: 'u32', default: '75', description: 'LTV % (0-100)' },
+      {
+        name: "CONTRACT_NAME",
+        type: "string",
+        description: "Contract struct name",
+      },
+      {
+        name: "COLLATERAL_FACTOR",
+        type: "u32",
+        default: "75",
+        description: "LTV % (0-100)",
+      },
     ],
     created_at: new Date(Date.now() - 86400000 * 35).toISOString(),
   },
 ];
-

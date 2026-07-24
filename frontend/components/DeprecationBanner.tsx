@@ -1,8 +1,7 @@
 'use client';
 
-import React from 'react';
 import Link from 'next/link';
-import { DeprecationInfo } from '@/lib/api';
+import type { DeprecationInfo } from '@/types';
 import { AlertTriangle, ArrowUpRight } from 'lucide-react';
 
 function formatDate(value?: string | null) {

@@ -65,3 +65,10 @@ docker-compose.override.yml
 # Test coverage
 coverage/
 .nyc_output/
+local-coverage/
+*storybook.log
+storybook-static
+
+CLAUDE.md
+plan.md
+tasks/

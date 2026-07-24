@@ -13,17 +13,34 @@ fn get_binary_path() -> PathBuf {
         return PathBuf::from(path);
     }
 
-    // Fallback: look in target/debug relative to current dir
-    let mut path = env::current_dir().expect("Failed to get current dir");
-    path.push("target");
-    path.push("debug");
-    path.push(name_hyphen);
-    if path.exists() {
-        return path;
+    let exe_name = if cfg!(windows) {
+        format!("{}.exe", name_hyphen)
+    } else {
+        name_hyphen.to_string()
+    };
+
+    // Fallback: look in target/debug relative to the crate
+    let manifest_dir = env::var("CARGO_MANIFEST_DIR").unwrap_or_else(|_| ".".to_string());
+    let binary_path = PathBuf::from(&manifest_dir)
+        .join("target")
+        .join("debug")
+        .join(&exe_name);
+    if binary_path.exists() {
+        return binary_path;
     }
 
-    // Panic with clear message
-    panic!("Could not find binary path via env var. Ensure `cargo build` has run.");
+    if let Some(workspace_target) = PathBuf::from(&manifest_dir)
+        .parent()
+        .map(|p| p.join("target").join("debug").join(&exe_name))
+        .filter(|p| p.exists())
+    {
+        return workspace_target;
+    }
+
+    panic!(
+        "Could not find {} binary. Run `cargo build` first.",
+        name_hyphen
+    )
 }
 
 #[test]

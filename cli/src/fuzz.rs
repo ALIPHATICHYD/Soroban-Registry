@@ -148,7 +148,7 @@ impl fmt::Display for FuzzValue {
             FuzzValue::Map(entries) => {
                 write!(f, "{{\n        let mut map = Map::new(&env);\n")?;
                 for (k, v) in entries {
-                    write!(f, "        map.set({}, {});\n", k, v)?;
+                    writeln!(f, "        map.set({}, {});", k, v)?;
                 }
                 write!(f, "        map\n    }}")
             }
@@ -336,7 +336,7 @@ impl Fuzzer {
                 {
                     let case_num = cases_run.fetch_add(1, Ordering::Relaxed);
 
-                    if case_num % 1000 == 0 && case_num > 0 {
+                    if case_num.is_multiple_of(1000) && case_num > 0 {
                         print!(
                             "\r  {} Test cases run: {} | Crashes: {}    ",
                             "→".bright_black(),
@@ -567,7 +567,10 @@ impl Fuzzer {
 
     fn generate_reproduction_code(&self, input: &FuzzInput) -> String {
         let imports = Self::collect_imports(&input.args);
-        let func_sig = self.functions.iter().find(|f| f.name == input.function_name);
+        let func_sig = self
+            .functions
+            .iter()
+            .find(|f| f.name == input.function_name);
 
         let arg_bindings = Self::generate_arg_bindings(&input.args, func_sig);
         let arg_names: Vec<String> = (0..input.args.len())
@@ -615,11 +618,7 @@ fn test_crash_reproduction() {{
     // client.{}({});
 }}
 "#,
-            input.seed,
-            imports,
-            arg_bindings,
-            input.function_name,
-            invoke_args_ref,
+            input.seed, imports, arg_bindings, input.function_name, invoke_args_ref,
         )
     }
 
@@ -632,6 +631,7 @@ fn test_crash_reproduction() {{
         let mut needs_map = false;
         let mut needs_bytes_n = false;
 
+        #[allow(clippy::too_many_arguments)]
         fn scan_value(
             v: &FuzzValue,
             needs_address: &mut bool,
@@ -749,10 +749,7 @@ fn test_crash_reproduction() {{
                 .and_then(|sig| sig.inputs.get(i))
                 .map(|t| format!(": {}", t.to_rust_type()))
                 .unwrap_or_default();
-            lines.push(format!(
-                "    let arg_{}{} = {};",
-                i, type_annotation, arg
-            ));
+            lines.push(format!("    let arg_{}{} = {};", i, type_annotation, arg));
         }
         if lines.is_empty() {
             String::new()
@@ -893,14 +890,14 @@ impl Clone for Fuzzer {
 
 fn parse_duration(s: &str) -> Result<Duration> {
     let s = s.trim();
-    let (num, unit) = if s.ends_with("ms") {
-        (&s[..s.len() - 2], "ms")
-    } else if s.ends_with('s') {
-        (&s[..s.len() - 1], "s")
-    } else if s.ends_with('m') {
-        (&s[..s.len() - 1], "m")
-    } else if s.ends_with('h') {
-        (&s[..s.len() - 1], "h")
+    let (num, unit) = if let Some(n) = s.strip_suffix("ms") {
+        (n, "ms")
+    } else if let Some(n) = s.strip_suffix('s') {
+        (n, "s")
+    } else if let Some(n) = s.strip_suffix('m') {
+        (n, "m")
+    } else if let Some(n) = s.strip_suffix('h') {
+        (n, "h")
     } else {
         (s, "s")
     };
@@ -1013,10 +1010,10 @@ mod tests {
     fn test_generate_value() {
         let mut rng = StdRng::from_entropy();
 
-        let val = match Fuzzer::generate_value_static(&ArgType::Bool, &mut rng) {
-            FuzzValue::Bool(_) => true,
-            _ => false,
-        };
+        let val = matches!(
+            Fuzzer::generate_value_static(&ArgType::Bool, &mut rng),
+            FuzzValue::Bool(_)
+        );
         assert!(val);
     }
 
@@ -1065,10 +1062,7 @@ mod tests {
     #[test]
     fn test_fuzz_value_display_string() {
         let val = FuzzValue::String("hello".to_string());
-        assert_eq!(
-            format!("{}", val),
-            "String::from_str(&env, \"hello\")"
-        );
+        assert_eq!(format!("{}", val), "String::from_str(&env, \"hello\")");
     }
 
     #[test]
@@ -1083,19 +1077,13 @@ mod tests {
     #[test]
     fn test_fuzz_value_display_symbol() {
         let val = FuzzValue::Symbol("transfer".to_string());
-        assert_eq!(
-            format!("{}", val),
-            "Symbol::new(&env, \"transfer\")"
-        );
+        assert_eq!(format!("{}", val), "Symbol::new(&env, \"transfer\")");
     }
 
     #[test]
     fn test_fuzz_value_display_vec() {
         let val = FuzzValue::Vec(vec![FuzzValue::I32(1), FuzzValue::I32(2)]);
-        assert_eq!(
-            format!("{}", val),
-            "Vec::from_slice(&env, &[1i32, 2i32])"
-        );
+        assert_eq!(format!("{}", val), "Vec::from_slice(&env, &[1i32, 2i32])");
     }
 
     #[test]
@@ -1307,10 +1295,7 @@ mod tests {
     fn test_reproduction_code_contains_arg_bindings() {
         let input = FuzzInput {
             function_name: "mint".to_string(),
-            args: vec![
-                FuzzValue::Address("GABC".to_string()),
-                FuzzValue::I64(500),
-            ],
+            args: vec![FuzzValue::Address("GABC".to_string()), FuzzValue::I64(500)],
             seed: 99,
         };
 
@@ -1455,10 +1440,7 @@ mod tests {
         };
 
         let code = fuzzer.generate_reproduction_code(&input);
-        assert!(
-            code.contains("Env::default()"),
-            "Should set up Env"
-        );
+        assert!(code.contains("Env::default()"), "Should set up Env");
         assert!(
             code.contains("mock_all_auths()"),
             "Should mock all auths for testing"

@@ -19,18 +19,19 @@ mod detector;
 mod reorg;
 mod rpc;
 mod state;
+mod telemetry;
+mod usdc_scanner;
 
 use anyhow::Result;
 use config::{DatabaseConfig, ServiceConfig};
 use db::DatabaseWriter;
 use reorg::ReorgHandler;
 use rpc::StellarRpcClient;
+use sqlx::ConnectOptions;
 use state::{IndexerState, StateManager};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tracing::{error, info, warn};
-use tracing_subscriber::layer::SubscriberExt;
-use tracing_subscriber::util::SubscriberInitExt;
 
 struct IndexerService {
     config: ServiceConfig,
@@ -45,10 +46,27 @@ struct IndexerService {
 impl IndexerService {
     /// Initialize the indexer service
     async fn new(config: ServiceConfig) -> Result<Self> {
-        // Initialize database connection
+        // Initialize database connection pool (Issue #876)
+        let connect_options = config
+            .database
+            .connection_string
+            .parse::<sqlx::postgres::PgConnectOptions>()?
+            .log_slow_statements(
+                log::LevelFilter::Warn,
+                std::time::Duration::from_millis(config.database.slow_query_threshold_ms as u64),
+            );
+
         let db_pool = sqlx::postgres::PgPoolOptions::new()
+            .min_connections(config.database.min_connections)
             .max_connections(config.database.max_connections)
-            .connect(&config.database.connection_string)
+            .acquire_timeout(std::time::Duration::from_secs(30))
+            .idle_timeout(std::time::Duration::from_secs(
+                config.database.idle_timeout_secs,
+            ))
+            .max_lifetime(std::time::Duration::from_secs(
+                config.database.max_lifetime_secs,
+            ))
+            .connect_with(connect_options)
             .await?;
 
         let rpc_client = StellarRpcClient::new(config.network.rpc_endpoint.clone());
@@ -264,9 +282,15 @@ impl IndexerService {
                         "Fetched ledger operations"
                     );
 
-                    // Detect contract deployments
-                    let deployments =
-                        detector::detect_contract_deployments(&operations, ledger_height);
+                    // Detect contract deployments, then immediately drop `operations` so
+                    // the Vec of serde_json::Value bodies does not linger for the rest of
+                    // the ledger-processing block.
+                    let deployments = detector::detect_contract_deployments(
+                        &operations,
+                        ledger_height,
+                        &ledger.timestamp,
+                    );
+                    drop(operations);
 
                     if !deployments.is_empty() {
                         info!(
@@ -349,19 +373,38 @@ impl IndexerService {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    // Initialize tracing/logging
-    tracing_subscriber::registry()
-        .with(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "indexer=info".into()),
-        )
-        .with(tracing_subscriber::fmt::layer().with_writer(std::io::stdout))
-        .init();
+    // Initialize tracing/logging with optional OTLP export.
+    telemetry::init_tracing("soroban-registry-indexer");
 
     info!("Stellar Blockchain Indexer Service starting...");
 
     // Load configuration
     let config = ServiceConfig::from_env()?;
+
+    // Spawn the marketplace USDC scanner as a parallel task if the
+    // marketplace receiving address is configured. This is opt-in;
+    // deployments without the marketplace simply don't get the task.
+    // The scanner uses its own DB pool (small, since it only reads/
+    // writes the single cursor row) and its own HTTP client. Logged
+    // errors don't terminate the task — it self-heals on the next
+    // poll cycle. See usdc_scanner.rs for the protocol.
+    match usdc_scanner::ScannerConfig::from_env() {
+        Ok(Some(scanner_cfg)) => {
+            let scanner_pool = sqlx::postgres::PgPoolOptions::new()
+                .max_connections(3)
+                .connect(&config.database.connection_string)
+                .await?;
+            let scanner = usdc_scanner::UsdcScanner::new(scanner_cfg, scanner_pool);
+            tokio::spawn(scanner.run());
+            info!("USDC marketplace scanner spawned");
+        }
+        Ok(None) => {
+            info!("MARKETPLACE_USDC_RECEIVING_ADDRESS not set; USDC scanner not started");
+        }
+        Err(e) => {
+            warn!(error = %e, "USDC scanner config invalid; continuing without it");
+        }
+    }
 
     // Initialize service
     let mut service = IndexerService::new(config).await?;

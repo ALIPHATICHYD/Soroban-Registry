@@ -2,21 +2,21 @@ interface LoadingSkeletonProps {
   width?: string;
   height?: string;
   className?: string;
-  variant?: 'rectangular' | 'circular' | 'text';
+  variant?: "rectangular" | "circular" | "text";
 }
 
 export default function LoadingSkeleton({
-  width = '100%',
-  height = '1rem',
-  className = '',
-  variant = 'rectangular',
+  width = "100%",
+  height = "1rem",
+  className = "",
+  variant = "rectangular",
 }: LoadingSkeletonProps) {
-  const baseClasses = 'animate-pulse bg-muted';
-  
+  const baseClasses = "animate-pulse bg-muted";
+
   const variantClasses = {
-    rectangular: 'rounded-md',
-    circular: 'rounded-full',
-    text: 'rounded',
+    rectangular: "rounded-md",
+    circular: "rounded-full",
+    text: "rounded",
   };
 
   return (

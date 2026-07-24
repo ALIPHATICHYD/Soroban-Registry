@@ -1,10 +1,10 @@
 // migration_handlers.rs
-// Database migration versioning, rollback, and validation handlers (Issue #252).
-// Provides schema version tracking, checksum validation, advisory locking,
-// and rollback capability for safe database deployments.
+// Database migration framework: version tracking, checksums, advisory locking,
+// dry-run preview, apply, rollback, audit trail, and startup validation.
+// Issue #877.
 
 use axum::{
-    extract::{Path, State},
+    extract::{Path, Query, State},
     Json,
 };
 use chrono::{DateTime, Utc};
@@ -15,6 +15,7 @@ use sqlx::FromRow;
 use crate::{
     error::{ApiError, ApiResult},
     state::AppState,
+    validation::extractors::{FieldError, Validatable, ValidatedJson},
 };
 
 // ─────────────────────────────────────────────────────────
@@ -42,6 +43,19 @@ pub struct SchemaRollbackScript {
     pub down_sql: String,
     pub checksum: String,
     pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct MigrationAuditEntry {
+    pub id: i64,
+    pub operation: String,
+    pub version: Option<i32>,
+    pub actor: String,
+    pub success: bool,
+    pub detail: Option<String>,
+    pub error_msg: Option<String>,
+    pub duration_ms: Option<i32>,
+    pub occurred_at: DateTime<Utc>,
 }
 
 #[derive(Debug, Serialize)]
@@ -80,10 +94,63 @@ pub struct RegisterMigrationRequest {
     pub down_sql: Option<String>,
 }
 
+// `impl Validatable for RegisterMigrationRequest` lives in
+// validation::handler_requests (the centralized location, issue #893).
+
+#[derive(Debug, Deserialize)]
+pub struct ApplyMigrationRequest {
+    pub version: i32,
+    pub description: String,
+    pub filename: String,
+    pub sql_content: String,
+    pub down_sql: Option<String>,
+    /// When true, parse and return the statements without executing them.
+    #[serde(default)]
+    pub dry_run: bool,
+}
+
+impl Validatable for ApplyMigrationRequest {
+    fn sanitize(&mut self) {
+        self.description = self.description.trim().to_string();
+        self.filename = self.filename.trim().to_string();
+    }
+
+    fn validate(&self) -> Result<(), Vec<FieldError>> {
+        let mut errors = Vec::new();
+        if self.version <= 0 {
+            errors.push(FieldError::new("version", "must be a positive integer"));
+        }
+        if self.description.trim().is_empty() {
+            errors.push(FieldError::new("description", "must not be empty"));
+        }
+        if self.filename.trim().is_empty() {
+            errors.push(FieldError::new("filename", "must not be empty"));
+        }
+        if self.sql_content.trim().is_empty() {
+            errors.push(FieldError::new("sql_content", "must not be empty"));
+        }
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(errors)
+        }
+    }
+}
+
 #[derive(Debug, Serialize)]
 pub struct RegisterMigrationResponse {
     pub version: i32,
     pub checksum: String,
+    pub message: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ApplyMigrationResponse {
+    pub version: i32,
+    pub checksum: String,
+    pub dry_run: bool,
+    pub statements_preview: Vec<String>,
+    pub execution_time_ms: Option<i32>,
     pub message: String,
 }
 
@@ -101,6 +168,20 @@ pub struct LockStatusResponse {
     pub locked_at: Option<DateTime<Utc>>,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct AuditLogQuery {
+    pub limit: Option<i64>,
+    pub offset: Option<i64>,
+    pub operation: Option<String>,
+    pub version: Option<i32>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct AuditLogResponse {
+    pub entries: Vec<MigrationAuditEntry>,
+    pub total: i64,
+}
+
 // ─────────────────────────────────────────────────────────
 // Helpers
 // ─────────────────────────────────────────────────────────
@@ -112,10 +193,17 @@ pub fn compute_checksum(content: &str) -> String {
     hex::encode(hasher.finalize())
 }
 
+/// Split SQL text into individual statements (semicolon-delimited, ignoring empty).
+fn split_statements(sql: &str) -> Vec<String> {
+    sql.split(';')
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect()
+}
+
 /// Advisory lock key for migration operations (arbitrary fixed i64).
 const MIGRATION_ADVISORY_LOCK_KEY: i64 = 252_252_252;
 
-/// Try to acquire the PostgreSQL advisory lock. Returns true if acquired.
 async fn try_acquire_lock(pool: &sqlx::PgPool) -> Result<bool, sqlx::Error> {
     let acquired: bool = sqlx::query_scalar("SELECT pg_try_advisory_lock($1)")
         .bind(MIGRATION_ADVISORY_LOCK_KEY)
@@ -124,7 +212,6 @@ async fn try_acquire_lock(pool: &sqlx::PgPool) -> Result<bool, sqlx::Error> {
     Ok(acquired)
 }
 
-/// Release the PostgreSQL advisory lock.
 async fn release_lock(pool: &sqlx::PgPool) -> Result<(), sqlx::Error> {
     sqlx::query("SELECT pg_advisory_unlock($1)")
         .bind(MIGRATION_ADVISORY_LOCK_KEY)
@@ -133,14 +220,47 @@ async fn release_lock(pool: &sqlx::PgPool) -> Result<(), sqlx::Error> {
     Ok(())
 }
 
+/// Append a row to `migration_audit_log`. Best-effort: failures are logged but
+/// never returned as errors so that auditing never blocks the primary operation.
+async fn audit(
+    pool: &sqlx::PgPool,
+    operation: &str,
+    version: Option<i32>,
+    success: bool,
+    detail: Option<&str>,
+    error_msg: Option<&str>,
+    duration_ms: Option<i32>,
+) {
+    let result = sqlx::query(
+        r#"
+        INSERT INTO migration_audit_log
+            (operation, version, success, detail, error_msg, duration_ms)
+        VALUES ($1, $2, $3, $4, $5, $6)
+        "#,
+    )
+    .bind(operation)
+    .bind(version)
+    .bind(success)
+    .bind(detail)
+    .bind(error_msg)
+    .bind(duration_ms)
+    .execute(pool)
+    .await;
+
+    if let Err(e) = result {
+        tracing::warn!(
+            operation,
+            ?version,
+            "Failed to write migration audit entry: {e}"
+        );
+    }
+}
+
 // ─────────────────────────────────────────────────────────
 // Handlers
 // ─────────────────────────────────────────────────────────
 
 /// GET /api/admin/migrations/status
-///
-/// Returns the current migration status: applied versions, pending count,
-/// lock state, and any warnings about checksum mismatches.
 pub async fn get_migration_status(
     State(state): State<AppState>,
 ) -> ApiResult<Json<MigrationStatusResponse>> {
@@ -173,7 +293,7 @@ pub async fn get_migration_status(
         .filter(|v| v.rolled_back_at.is_some())
         .count() as i64;
 
-    // Check advisory lock status
+    // Check advisory lock status: try-and-immediately-release avoids side effects.
     let has_lock: bool =
         sqlx::query_scalar("SELECT NOT pg_try_advisory_lock($1) OR pg_advisory_unlock($1)")
             .bind(MIGRATION_ADVISORY_LOCK_KEY)
@@ -182,8 +302,6 @@ pub async fn get_migration_status(
             .unwrap_or(false);
 
     let mut warnings = Vec::new();
-
-    // Check for gaps in version numbers
     let active_versions: Vec<i32> = versions
         .iter()
         .filter(|v| v.rolled_back_at.is_none())
@@ -204,7 +322,7 @@ pub async fn get_migration_status(
         current_version,
         total_applied,
         total_rolled_back,
-        pending_count: 0, // Pending is determined by comparing filesystem vs DB
+        pending_count: 0,
         versions,
         has_lock,
         healthy,
@@ -214,29 +332,65 @@ pub async fn get_migration_status(
 
 /// POST /api/admin/migrations/register
 ///
-/// Register a new migration with its SQL content and optional rollback script.
-/// Computes SHA-256 checksum and stores it for future validation.
-/// Uses advisory lock to prevent concurrent registration.
+/// Register migration metadata (checksum, rollback script) without executing it.
+/// Use `/apply` to both register and execute.
 pub async fn register_migration(
     State(state): State<AppState>,
-    Json(body): Json<RegisterMigrationRequest>,
+    ValidatedJson(body): ValidatedJson<RegisterMigrationRequest>,
 ) -> ApiResult<Json<RegisterMigrationResponse>> {
-    // Acquire advisory lock
     let acquired = try_acquire_lock(&state.db)
         .await
         .map_err(|e| ApiError::internal(format!("Lock error: {e}")))?;
 
     if !acquired {
+        audit(
+            &state.db,
+            "register",
+            Some(body.version),
+            false,
+            None,
+            Some("Lock not acquired"),
+            None,
+        )
+        .await;
         return Err(ApiError::conflict(
             "MigrationLocked",
             "Another migration operation is in progress. Please try again later.",
         ));
     }
 
-    // Ensure we release the lock on all exit paths
+    let start = std::time::Instant::now();
     let result = register_migration_inner(&state, &body).await;
+    let elapsed = start.elapsed().as_millis() as i32;
 
     let _ = release_lock(&state.db).await;
+
+    match &result {
+        Ok(r) => {
+            audit(
+                &state.db,
+                "register",
+                Some(body.version),
+                true,
+                Some(&format!("checksum={}", r.checksum)),
+                None,
+                Some(elapsed),
+            )
+            .await;
+        }
+        Err(e) => {
+            audit(
+                &state.db,
+                "register",
+                Some(body.version),
+                false,
+                None,
+                Some(&e.to_string()),
+                Some(elapsed),
+            )
+            .await;
+        }
+    }
 
     result
 }
@@ -245,7 +399,6 @@ async fn register_migration_inner(
     state: &AppState,
     body: &RegisterMigrationRequest,
 ) -> ApiResult<Json<RegisterMigrationResponse>> {
-    // Check if version already exists
     let exists: bool =
         sqlx::query_scalar("SELECT COUNT(*) > 0 FROM schema_versions WHERE version = $1")
             .bind(body.version)
@@ -261,25 +414,21 @@ async fn register_migration_inner(
     }
 
     let checksum = compute_checksum(&body.sql_content);
-    let start = std::time::Instant::now();
 
-    // Register the migration
     sqlx::query(
         r#"
-        INSERT INTO schema_versions (version, description, filename, checksum, execution_time_ms)
-        VALUES ($1, $2, $3, $4, $5)
+        INSERT INTO schema_versions (version, description, filename, checksum)
+        VALUES ($1, $2, $3, $4)
         "#,
     )
     .bind(body.version)
     .bind(&body.description)
     .bind(&body.filename)
     .bind(&checksum)
-    .bind(start.elapsed().as_millis() as i32)
     .execute(&state.db)
     .await
     .map_err(|e| ApiError::internal(format!("DB error: {e}")))?;
 
-    // Register rollback script if provided
     if let Some(down_sql) = &body.down_sql {
         let down_checksum = compute_checksum(down_sql);
         sqlx::query(
@@ -303,29 +452,242 @@ async fn register_migration_inner(
     }))
 }
 
-/// POST /api/admin/migrations/:version/rollback
+/// POST /api/admin/migrations/apply
 ///
-/// Roll back a specific migration version by executing its DOWN script.
-/// Uses advisory lock to prevent concurrent operations.
-pub async fn rollback_migration(
+/// Apply (execute) a migration's SQL against the database and register it.
+/// Pass `dry_run: true` to preview the parsed statements without executing.
+pub async fn apply_migration(
     State(state): State<AppState>,
-    Path(version): Path<i32>,
-) -> ApiResult<Json<RollbackResponse>> {
-    // Acquire advisory lock
+    ValidatedJson(body): ValidatedJson<ApplyMigrationRequest>,
+) -> ApiResult<Json<ApplyMigrationResponse>> {
+    let statements = split_statements(&body.sql_content);
+    let checksum = compute_checksum(&body.sql_content);
+
+    if body.dry_run {
+        audit(
+            &state.db,
+            "dry_run",
+            Some(body.version),
+            true,
+            Some(&format!("{} statements parsed", statements.len())),
+            None,
+            Some(0),
+        )
+        .await;
+
+        return Ok(Json(ApplyMigrationResponse {
+            version: body.version,
+            checksum,
+            dry_run: true,
+            statements_preview: statements,
+            execution_time_ms: None,
+            message: format!(
+                "Dry-run for version {}: {} statement(s) would be executed",
+                body.version,
+                split_statements(&body.sql_content).len()
+            ),
+        }));
+    }
+
     let acquired = try_acquire_lock(&state.db)
         .await
         .map_err(|e| ApiError::internal(format!("Lock error: {e}")))?;
 
     if !acquired {
+        audit(
+            &state.db,
+            "apply",
+            Some(body.version),
+            false,
+            None,
+            Some("Lock not acquired"),
+            None,
+        )
+        .await;
         return Err(ApiError::conflict(
             "MigrationLocked",
             "Another migration operation is in progress. Please try again later.",
         ));
     }
 
-    let result = rollback_migration_inner(&state, version).await;
+    let start = std::time::Instant::now();
+    let result = apply_migration_inner(&state, &body, &checksum, &statements).await;
+    let elapsed = start.elapsed().as_millis() as i32;
 
     let _ = release_lock(&state.db).await;
+
+    match &result {
+        Ok(_) => {
+            audit(
+                &state.db,
+                "apply",
+                Some(body.version),
+                true,
+                Some(&format!(
+                    "checksum={}, statements={}",
+                    checksum,
+                    statements.len()
+                )),
+                None,
+                Some(elapsed),
+            )
+            .await;
+        }
+        Err(e) => {
+            audit(
+                &state.db,
+                "apply",
+                Some(body.version),
+                false,
+                None,
+                Some(&e.to_string()),
+                Some(elapsed),
+            )
+            .await;
+        }
+    }
+
+    result
+}
+
+async fn apply_migration_inner(
+    state: &AppState,
+    body: &ApplyMigrationRequest,
+    checksum: &str,
+    statements: &[String],
+) -> ApiResult<Json<ApplyMigrationResponse>> {
+    let exists: bool =
+        sqlx::query_scalar("SELECT COUNT(*) > 0 FROM schema_versions WHERE version = $1")
+            .bind(body.version)
+            .fetch_one(&state.db)
+            .await
+            .map_err(|e| ApiError::internal(format!("DB error: {e}")))?;
+
+    if exists {
+        return Err(ApiError::conflict(
+            "VersionExists",
+            format!("Migration version {} is already applied", body.version),
+        ));
+    }
+
+    // Execute each statement in sequence.
+    for stmt in statements {
+        sqlx::query(stmt).execute(&state.db).await.map_err(|e| {
+            ApiError::internal(format!(
+                "Failed to execute statement for version {}: {e}",
+                body.version
+            ))
+        })?;
+    }
+
+    let elapsed_ms = 0i32; // timing captured by outer apply_migration
+    sqlx::query(
+        r#"
+        INSERT INTO schema_versions
+            (version, description, filename, checksum, execution_time_ms)
+        VALUES ($1, $2, $3, $4, $5)
+        "#,
+    )
+    .bind(body.version)
+    .bind(&body.description)
+    .bind(&body.filename)
+    .bind(checksum)
+    .bind(elapsed_ms)
+    .execute(&state.db)
+    .await
+    .map_err(|e| ApiError::internal(format!("DB error: {e}")))?;
+
+    if let Some(down_sql) = &body.down_sql {
+        let down_checksum = compute_checksum(down_sql);
+        sqlx::query(
+            r#"
+            INSERT INTO schema_rollback_scripts (version, down_sql, checksum)
+            VALUES ($1, $2, $3)
+            ON CONFLICT (version) DO UPDATE
+                SET down_sql = EXCLUDED.down_sql,
+                    checksum = EXCLUDED.checksum
+            "#,
+        )
+        .bind(body.version)
+        .bind(down_sql)
+        .bind(&down_checksum)
+        .execute(&state.db)
+        .await
+        .map_err(|e| ApiError::internal(format!("DB error: {e}")))?;
+    }
+
+    Ok(Json(ApplyMigrationResponse {
+        version: body.version,
+        checksum: checksum.to_string(),
+        dry_run: false,
+        statements_preview: statements.to_vec(),
+        execution_time_ms: None,
+        message: format!(
+            "Migration version {} applied successfully ({} statement(s))",
+            body.version,
+            statements.len()
+        ),
+    }))
+}
+
+/// POST /api/admin/migrations/:version/rollback
+pub async fn rollback_migration(
+    State(state): State<AppState>,
+    Path(version): Path<i32>,
+) -> ApiResult<Json<RollbackResponse>> {
+    let acquired = try_acquire_lock(&state.db)
+        .await
+        .map_err(|e| ApiError::internal(format!("Lock error: {e}")))?;
+
+    if !acquired {
+        audit(
+            &state.db,
+            "rollback",
+            Some(version),
+            false,
+            None,
+            Some("Lock not acquired"),
+            None,
+        )
+        .await;
+        return Err(ApiError::conflict(
+            "MigrationLocked",
+            "Another migration operation is in progress. Please try again later.",
+        ));
+    }
+
+    let start = std::time::Instant::now();
+    let result = rollback_migration_inner(&state, version).await;
+    let elapsed = start.elapsed().as_millis() as i32;
+
+    let _ = release_lock(&state.db).await;
+
+    match &result {
+        Ok(_) => {
+            audit(
+                &state.db,
+                "rollback",
+                Some(version),
+                true,
+                None,
+                None,
+                Some(elapsed),
+            )
+            .await;
+        }
+        Err(e) => {
+            audit(
+                &state.db,
+                "rollback",
+                Some(version),
+                false,
+                None,
+                Some(&e.to_string()),
+                Some(elapsed),
+            )
+            .await;
+        }
+    }
 
     result
 }
@@ -334,7 +696,6 @@ async fn rollback_migration_inner(
     state: &AppState,
     version: i32,
 ) -> ApiResult<Json<RollbackResponse>> {
-    // Verify migration exists and is not already rolled back
     let migration: Option<SchemaVersion> = sqlx::query_as(
         r#"
         SELECT id, version, description, filename, checksum,
@@ -363,7 +724,6 @@ async fn rollback_migration_inner(
         ));
     }
 
-    // Get the rollback script
     let rollback: Option<SchemaRollbackScript> = sqlx::query_as(
         r#"
         SELECT id, version, down_sql, checksum, created_at
@@ -383,7 +743,6 @@ async fn rollback_migration_inner(
         )
     })?;
 
-    // Validate rollback script checksum
     let actual_checksum = compute_checksum(&rollback.down_sql);
     if actual_checksum != rollback.checksum {
         return Err(ApiError::conflict(
@@ -395,7 +754,6 @@ async fn rollback_migration_inner(
         ));
     }
 
-    // Execute the rollback SQL
     sqlx::query(&rollback.down_sql)
         .execute(&state.db)
         .await
@@ -406,7 +764,6 @@ async fn rollback_migration_inner(
             ))
         })?;
 
-    // Mark migration as rolled back
     let now = Utc::now();
     sqlx::query(
         "UPDATE schema_versions SET rolled_back_at = $1, rollback_by = current_user WHERE version = $2",
@@ -425,9 +782,6 @@ async fn rollback_migration_inner(
 }
 
 /// GET /api/admin/migrations/validate
-///
-/// Validate all applied migrations by recomputing checksums and checking
-/// for mismatches (tampering detection).
 pub async fn validate_migrations(
     State(state): State<AppState>,
 ) -> ApiResult<Json<MigrationValidationResponse>> {
@@ -445,7 +799,6 @@ pub async fn validate_migrations(
     .await
     .map_err(|e| ApiError::internal(format!("DB error: {e}")))?;
 
-    // Check for gaps
     let mut missing = Vec::new();
     if let (Some(first), Some(last)) = (versions.first(), versions.last()) {
         for v in first.version..=last.version {
@@ -454,11 +807,6 @@ pub async fn validate_migrations(
             }
         }
     }
-
-    // Checksums are stored at registration time; we report the stored state.
-    // In a full implementation, we'd re-read migration files from disk and compare.
-    // Here we verify rollback script checksums are consistent.
-    let mut mismatches = Vec::new();
 
     let rollback_scripts: Vec<SchemaRollbackScript> = sqlx::query_as(
         r#"
@@ -471,6 +819,7 @@ pub async fn validate_migrations(
     .await
     .map_err(|e| ApiError::internal(format!("DB error: {e}")))?;
 
+    let mut mismatches = Vec::new();
     for script in &rollback_scripts {
         let actual = compute_checksum(&script.down_sql);
         if actual != script.checksum {
@@ -485,6 +834,22 @@ pub async fn validate_migrations(
 
     let valid = mismatches.is_empty() && missing.is_empty();
 
+    audit(
+        &state.db,
+        "validate",
+        None,
+        true,
+        Some(&format!(
+            "valid={}, mismatches={}, missing={}",
+            valid,
+            mismatches.len(),
+            missing.len()
+        )),
+        None,
+        None,
+    )
+    .await;
+
     Ok(Json(MigrationValidationResponse {
         valid,
         mismatches,
@@ -493,8 +858,6 @@ pub async fn validate_migrations(
 }
 
 /// GET /api/admin/migrations/:version
-///
-/// Get details for a specific migration version.
 pub async fn get_migration_version(
     State(state): State<AppState>,
     Path(version): Path<i32>,
@@ -522,10 +885,7 @@ pub async fn get_migration_version(
 }
 
 /// GET /api/admin/migrations/lock
-///
-/// Check the current advisory lock status.
 pub async fn get_lock_status(State(state): State<AppState>) -> ApiResult<Json<LockStatusResponse>> {
-    // Try to acquire and immediately release to check if lock is free
     let can_lock = try_acquire_lock(&state.db)
         .await
         .map_err(|e| ApiError::internal(format!("Lock error: {e}")))?;
@@ -549,10 +909,109 @@ pub async fn get_lock_status(State(state): State<AppState>) -> ApiResult<Json<Lo
     }))
 }
 
+/// GET /api/admin/migrations/audit
+///
+/// Returns the migration audit trail with optional filtering by operation or version.
+pub async fn get_migration_audit(
+    State(state): State<AppState>,
+    Query(params): Query<AuditLogQuery>,
+) -> ApiResult<Json<AuditLogResponse>> {
+    let limit = params.limit.unwrap_or(50).clamp(1, 500);
+    let offset = params.offset.unwrap_or(0).max(0);
+
+    let total: i64 =
+        match (&params.operation, &params.version) {
+            (Some(op), Some(v)) => sqlx::query_scalar(
+                "SELECT COUNT(*) FROM migration_audit_log WHERE operation = $1 AND version = $2",
+            )
+            .bind(op)
+            .bind(v)
+            .fetch_one(&state.db)
+            .await,
+            (Some(op), None) => {
+                sqlx::query_scalar("SELECT COUNT(*) FROM migration_audit_log WHERE operation = $1")
+                    .bind(op)
+                    .fetch_one(&state.db)
+                    .await
+            }
+            (None, Some(v)) => {
+                sqlx::query_scalar("SELECT COUNT(*) FROM migration_audit_log WHERE version = $1")
+                    .bind(v)
+                    .fetch_one(&state.db)
+                    .await
+            }
+            (None, None) => {
+                sqlx::query_scalar("SELECT COUNT(*) FROM migration_audit_log")
+                    .fetch_one(&state.db)
+                    .await
+            }
+        }
+        .map_err(|e| ApiError::internal(format!("DB error: {e}")))?;
+
+    let entries: Vec<MigrationAuditEntry> = match (&params.operation, &params.version) {
+        (Some(op), Some(v)) => sqlx::query_as(
+            r#"
+            SELECT id, operation, version, actor, success, detail, error_msg, duration_ms, occurred_at
+            FROM migration_audit_log
+            WHERE operation = $1 AND version = $2
+            ORDER BY occurred_at DESC
+            LIMIT $3 OFFSET $4
+            "#,
+        )
+        .bind(op)
+        .bind(v)
+        .bind(limit)
+        .bind(offset)
+        .fetch_all(&state.db)
+        .await,
+        (Some(op), None) => sqlx::query_as(
+            r#"
+            SELECT id, operation, version, actor, success, detail, error_msg, duration_ms, occurred_at
+            FROM migration_audit_log
+            WHERE operation = $1
+            ORDER BY occurred_at DESC
+            LIMIT $2 OFFSET $3
+            "#,
+        )
+        .bind(op)
+        .bind(limit)
+        .bind(offset)
+        .fetch_all(&state.db)
+        .await,
+        (None, Some(v)) => sqlx::query_as(
+            r#"
+            SELECT id, operation, version, actor, success, detail, error_msg, duration_ms, occurred_at
+            FROM migration_audit_log
+            WHERE version = $1
+            ORDER BY occurred_at DESC
+            LIMIT $2 OFFSET $3
+            "#,
+        )
+        .bind(v)
+        .bind(limit)
+        .bind(offset)
+        .fetch_all(&state.db)
+        .await,
+        (None, None) => sqlx::query_as(
+            r#"
+            SELECT id, operation, version, actor, success, detail, error_msg, duration_ms, occurred_at
+            FROM migration_audit_log
+            ORDER BY occurred_at DESC
+            LIMIT $1 OFFSET $2
+            "#,
+        )
+        .bind(limit)
+        .bind(offset)
+        .fetch_all(&state.db)
+        .await,
+    }
+    .map_err(|e| ApiError::internal(format!("DB error: {e}")))?;
+
+    Ok(Json(AuditLogResponse { entries, total }))
+}
+
 /// Startup check: validates migration state and logs warnings.
-/// Called during application startup before serving requests.
 pub async fn check_migrations_on_startup(pool: &sqlx::PgPool) {
-    // Check if schema_versions table exists
     let table_exists: bool = sqlx::query_scalar(
         r#"
         SELECT EXISTS (
@@ -570,7 +1029,6 @@ pub async fn check_migrations_on_startup(pool: &sqlx::PgPool) {
         return;
     }
 
-    // Get current state
     let count: i64 =
         sqlx::query_scalar("SELECT COUNT(*) FROM schema_versions WHERE rolled_back_at IS NULL")
             .fetch_one(pool)
@@ -589,7 +1047,6 @@ pub async fn check_migrations_on_startup(pool: &sqlx::PgPool) {
         "Migration versioning status"
     );
 
-    // Check for rollback script integrity
     let mismatch_count: i64 = sqlx::query_scalar(
         r#"
         SELECT COUNT(*) FROM schema_rollback_scripts s
@@ -607,7 +1064,6 @@ pub async fn check_migrations_on_startup(pool: &sqlx::PgPool) {
         );
     }
 
-    // Check for version gaps
     let versions: Vec<i32> = sqlx::query_scalar(
         "SELECT version FROM schema_versions WHERE rolled_back_at IS NULL ORDER BY version",
     )

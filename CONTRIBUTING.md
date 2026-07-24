@@ -44,13 +44,13 @@ git checkout -b feature/issue-#-kebab-case-title
 
 ### Examples
 
-| Issue | Title | Branch Name |
-|-------|-------|-------------|
-| #37 | Implement Contract Dependency Tracking System | `feature/issue-37-contract-dependency-tracking` |
-| #45 | Create Contract Backup System | `feature/issue-45-contract-backup-system` |
-| #59 | Create Contract Governance Framework | `feature/issue-59-contract-governance-framework` |
-| #2 | Implement Contract Sorting Options | `feature/issue-2-contract-sorting-options` |
-| #10 | Add Contract Interaction History Tracking | `feature/issue-10-interaction-history-tracking` |
+| Issue | Title                                         | Branch Name                                      |
+| ----- | --------------------------------------------- | ------------------------------------------------ |
+| #37   | Implement Contract Dependency Tracking System | `feature/issue-37-contract-dependency-tracking`  |
+| #45   | Create Contract Backup System                 | `feature/issue-45-contract-backup-system`        |
+| #59   | Create Contract Governance Framework          | `feature/issue-59-contract-governance-framework` |
+| #2    | Implement Contract Sorting Options            | `feature/issue-2-contract-sorting-options`       |
+| #10   | Add Contract Interaction History Tracking     | `feature/issue-10-interaction-history-tracking`  |
 
 ### Branch Types
 
@@ -147,6 +147,7 @@ Closes #[issue-number]
 **Types**: `feat`, `fix`, `docs`, `test`, `refactor`, `chore`
 
 **Example**:
+
 ```
 feat: Add contract dependency tracking API endpoint
 
@@ -168,10 +169,10 @@ Closes #37
 
 ```rust
 /// Fetches contract dependencies
-/// 
+///
 /// # Arguments
 /// * `contract_id` - The contract ID to fetch dependencies for
-/// 
+///
 /// # Returns
 /// A vector of contract dependencies
 pub fn get_dependencies(contract_id: &str) -> Result<Vec<Dependency>> {
@@ -291,6 +292,7 @@ git push origin feature/issue-#-your-branch-name
 Then open a PR on GitHub with:
 
 **Title**: Match the issue title or be descriptive
+
 ```
 Implement Contract Dependency Tracking System
 ```
@@ -299,25 +301,31 @@ Implement Contract Dependency Tracking System
 
 ```markdown
 ## Description
+
 Brief explanation of what this PR does.
 
 ## Changes
+
 - List major changes
 - For example: Added GET /contracts/{id}/dependencies endpoint
 - Connect to database schema changes if any
 
 ## Testing
+
 - [ ] Unit tests added/updated
 - [ ] Manual testing completed
 - [ ] All tests passing
 
 ## Related Issues
+
 Closes #37
 
 ## Screenshots (if applicable)
+
 Include UI changes or diagrams if relevant.
 
 ## Checklist
+
 - [ ] Code follows style guidelines
 - [ ] Tests added for new functionality
 - [ ] Documentation updated
@@ -388,6 +396,7 @@ pnpm test
 ### Claiming an Issue
 
 Comment on the issue:
+
 ```
 I'd like to work on this. Can I be assigned?
 ```
@@ -415,6 +424,7 @@ gh pr create --draft
 ## Recognition
 
 Contributors are recognized in:
+
 - The [README.md](README.md) contributors section (for significant contributions)
 - Git commit history
 - GitHub contributors page

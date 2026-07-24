@@ -1,10 +1,29 @@
 use crate::cache::CacheLayer;
 use crate::metrics;
+use sqlx::postgres::PgPoolOptions;
 use sqlx::PgPool;
+use sqlx::Row;
 use std::sync::Arc;
 use std::time::Duration;
+use tracing::{info, warn};
 
-pub fn spawn_db_monitoring_task(pool: PgPool, cache: Arc<CacheLayer>) {
+#[derive(Clone, Debug)]
+pub struct ReplicationMonitorConfig {
+    pub primary_url: String,
+    pub replica_url: String,
+    pub lag_threshold_ms: i64,
+    pub check_interval: Duration,
+}
+
+pub fn spawn_db_monitoring_task(
+    pool: PgPool,
+    cache: Arc<CacheLayer>,
+    replication_monitor: Option<ReplicationMonitorConfig>,
+) {
+    if let Some(config) = replication_monitor {
+        spawn_replication_monitor_task(config);
+    }
+
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(Duration::from_secs(5));
         let max_connections = pool.options().get_max_connections();
@@ -56,6 +75,107 @@ pub fn spawn_db_monitoring_task(pool: PgPool, cache: Arc<CacheLayer>) {
                 cache_entries = abi_entries + ver_entries,
                 "Resource monitoring update"
             );
+        }
+    });
+}
+
+fn spawn_replication_monitor_task(config: ReplicationMonitorConfig) {
+    let primary_pool = PgPoolOptions::new()
+        .max_connections(1)
+        .connect_lazy(&config.primary_url)
+        .expect("failed to create lazy primary replication pool");
+    let replica_pool = PgPoolOptions::new()
+        .max_connections(1)
+        .connect_lazy(&config.replica_url)
+        .expect("failed to create lazy replica replication pool");
+
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(config.check_interval);
+
+        loop {
+            interval.tick().await;
+            metrics::DB_REPLICATION_CHECKS_TOTAL.inc();
+
+            let replica_status = match sqlx::query(
+                r#"
+                SELECT
+                    pg_is_in_recovery() AS in_recovery,
+                    pg_last_wal_replay_lsn()::text AS replay_lsn,
+                    COALESCE(EXTRACT(EPOCH FROM now() - pg_last_xact_replay_timestamp()) * 1000.0, 0) AS lag_ms
+                "#,
+            )
+            .fetch_one(&replica_pool)
+            .await
+            {
+                Ok(row) => {
+                    let in_recovery: bool = row.try_get("in_recovery").unwrap_or(false);
+                    let replay_lsn: Option<String> = row.try_get("replay_lsn").ok();
+                    let lag_ms: f64 = row.try_get("lag_ms").unwrap_or(0.0);
+                    Some((in_recovery, replay_lsn, lag_ms))
+                }
+                Err(err) => {
+                    metrics::DB_REPLICATION_CHECK_FAILURES_TOTAL.inc();
+                    metrics::DB_REPLICATION_HEALTH.set(0);
+                    warn!(error = %err, "Replication monitor failed to query replica status");
+                    None
+                }
+            };
+
+            let Some((in_recovery, replay_lsn, lag_ms)) = replica_status else {
+                continue;
+            };
+
+            let mut wal_lag_bytes = 0_i64;
+            let mut healthy = in_recovery;
+
+            if let Some(replay_lsn) = replay_lsn {
+                match sqlx::query(
+                    r#"
+                    SELECT COALESCE(pg_wal_lsn_diff(pg_current_wal_lsn(), $1::pg_lsn), 0)::bigint AS wal_lag_bytes
+                    "#,
+                )
+                .bind(&replay_lsn)
+                .fetch_one(&primary_pool)
+                .await
+                {
+                    Ok(row) => {
+                        wal_lag_bytes = row.try_get::<i64, _>("wal_lag_bytes").unwrap_or(0);
+                    }
+                    Err(err) => {
+                        metrics::DB_REPLICATION_CHECK_FAILURES_TOTAL.inc();
+                        metrics::DB_REPLICATION_HEALTH.set(0);
+                        warn!(
+                            error = %err,
+                            "Replication monitor failed to compute WAL lag"
+                        );
+                        continue;
+                    }
+                }
+            } else {
+                healthy = false;
+            }
+
+            metrics::DB_REPLICATION_LAG_MS.set(lag_ms.round() as i64);
+            metrics::DB_REPLICATION_WAL_LAG_BYTES.set(wal_lag_bytes);
+
+            if lag_ms > config.lag_threshold_ms as f64 {
+                healthy = false;
+                warn!(
+                    lag_ms = lag_ms.round() as i64,
+                    threshold_ms = config.lag_threshold_ms,
+                    wal_lag_bytes,
+                    "Replication lag exceeded target"
+                );
+            } else {
+                info!(
+                    lag_ms = lag_ms.round() as i64,
+                    threshold_ms = config.lag_threshold_ms,
+                    wal_lag_bytes,
+                    "Replication lag within target"
+                );
+            }
+
+            metrics::DB_REPLICATION_HEALTH.set(if healthy { 1 } else { 0 });
         }
     });
 }

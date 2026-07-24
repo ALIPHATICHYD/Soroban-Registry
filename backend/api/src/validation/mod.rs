@@ -45,15 +45,17 @@
 //!
 //! ```json
 //! {
-//!   "error": "ValidationError",
+//!   "error_code": "BAD_REQUEST",
 //!   "message": "Validation failed for 2 fields",
-//!   "errors": [
-//!     {"field": "contract_id", "message": "must be a valid Stellar contract ID"},
-//!     {"field": "name", "message": "must be at least 1 character"}
-//!   ],
-//!   "code": 400,
-//!   "timestamp": "2026-02-20T10:30:00Z",
-//!   "correlation_id": "uuid-here"
+//!   "details": {
+//!     "reason": "VALIDATION_ERROR",
+//!     "field_errors": [
+//!       {"field": "contract_id", "message": "must be a valid Stellar contract ID"},
+//!       {"field": "name", "message": "must be at least 1 character"}
+//!     ],
+//!     "correlation_id": "uuid-here"
+//!   },
+//!   "timestamp": "2026-02-20T10:30:00Z"
 //! }
 //! ```
 
@@ -61,6 +63,8 @@
 pub mod enhanced_extractors;
 #[allow(dead_code)]
 pub mod extractors;
+#[allow(dead_code)]
+pub mod handler_requests;
 #[allow(dead_code)]
 pub mod payload_size;
 #[allow(dead_code)]
@@ -82,7 +86,14 @@ mod integration_guide;
 
 // Re-export commonly used items
 #[allow(unused_imports)]
-pub use extractors::{FieldError, Validatable, ValidatedJson, ValidationBuilder, ValidationError};
+pub use enhanced_extractors::{validate_request, validate_response_schema_dev, ValidationRule};
+#[allow(unused_imports)]
+pub use extractors::{
+    FieldError, Validatable, ValidatedJson, ValidatedPath, ValidatedQuery, ValidationBuilder,
+    ValidationError,
+};
+#[allow(unused_imports)]
+pub use handler_requests::{BatchContractIdsRequest, RecordMetricsBatchRequest, ValidatedJsonBody};
 #[allow(unused_imports)]
 pub use sanitizers::{
     normalize_contract_id, normalize_stellar_address, sanitize_description,

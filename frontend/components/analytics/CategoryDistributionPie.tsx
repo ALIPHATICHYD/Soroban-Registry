@@ -1,4 +1,3 @@
-import React from 'react';
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from 'recharts';
 
 interface CategoryCount {
@@ -34,7 +33,7 @@ export default function CategoryDistributionPie({ data }: { data: CategoryCount[
           <Tooltip 
             contentStyle={{ backgroundColor: 'hsl(var(--card))', borderColor: 'hsl(var(--border))', borderRadius: '0.5rem' }}
             itemStyle={{ color: 'hsl(var(--foreground))' }}
-            formatter={(value: number) => [value, 'Contracts']}
+            formatter={(value) => [typeof value === 'number' ? value : (value ?? 0), 'Contracts']}
           />
         </PieChart>
       </ResponsiveContainer>

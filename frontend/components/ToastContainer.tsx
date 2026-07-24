@@ -1,11 +1,11 @@
-'use client';
+"use client";
 
-import Toast from './Toast';
+import Toast from "./Toast";
 
 export interface ToastData {
   id: string;
   message: string;
-  type: 'error' | 'warning' | 'success' | 'info';
+  type: "error" | "warning" | "success" | "info";
   duration?: number;
   dismissible?: boolean;
 }
@@ -15,7 +15,10 @@ interface ToastContainerProps {
   onDismiss: (id: string) => void;
 }
 
-export default function ToastContainer({ toasts, onDismiss }: ToastContainerProps) {
+export default function ToastContainer({
+  toasts,
+  onDismiss,
+}: ToastContainerProps) {
   if (toasts.length === 0) return null;
 
   return (

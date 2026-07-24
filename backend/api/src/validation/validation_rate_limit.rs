@@ -14,7 +14,6 @@ use std::{
     sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
-use uuid::Uuid;
 
 const DEFAULT_VALIDATION_FAILURE_LIMIT: u32 = 20;
 const DEFAULT_VALIDATION_FAILURE_WINDOW_SECONDS: u64 = 60;
@@ -156,7 +155,8 @@ impl ValidationRateLimitExceeded {
             ),
             code: 429,
             retry_after_seconds,
-            correlation_id: Uuid::new_v4().to_string(),
+            correlation_id: crate::request_tracing::current_request_id()
+                .unwrap_or_else(crate::request_tracing::generate_request_id),
             timestamp: Utc::now().to_rfc3339_opts(SecondsFormat::Secs, true),
         }
     }

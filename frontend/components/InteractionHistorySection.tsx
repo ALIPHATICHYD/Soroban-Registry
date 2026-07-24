@@ -1,9 +1,10 @@
-'use client';
+"use client";
 
-import { useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
-import { api } from '@/lib/api';
-import type { InteractionsQueryParams } from '@/lib/api';
+import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { api } from "@/lib/api";
+import type { InteractionsQueryParams } from "@/lib/api";
+import { formatPublicKey, formatTransactionHash } from "@/lib/utils/formatting";
 import {
   BarChart,
   Bar,
@@ -12,28 +13,38 @@ import {
   Tooltip,
   ResponsiveContainer,
   CartesianGrid,
-} from 'recharts';
-import { AlertCircle, Users, Activity } from 'lucide-react';
+} from "recharts";
+import { AlertCircle, Users, Activity } from "lucide-react";
 
 interface InteractionHistorySectionProps {
   contractId: string;
 }
 
-export default function InteractionHistorySection({ contractId }: InteractionHistorySectionProps) {
+export default function InteractionHistorySection({
+  contractId,
+}: InteractionHistorySectionProps) {
   const [listParams, setListParams] = useState<InteractionsQueryParams>({
     limit: 20,
     offset: 0,
   });
-  const [accountFilter, setAccountFilter] = useState('');
-  const [methodFilter, setMethodFilter] = useState('');
+  const [accountFilter, setAccountFilter] = useState("");
+  const [methodFilter, setMethodFilter] = useState("");
 
-  const { data: analytics, isLoading: analyticsLoading, error: analyticsError } = useQuery({
-    queryKey: ['contract-analytics', contractId],
+  const {
+    data: analytics,
+    isLoading: analyticsLoading,
+    error: analyticsError,
+  } = useQuery({
+    queryKey: ["contract-analytics", contractId],
     queryFn: () => api.getContractAnalytics(contractId),
   });
 
-  const { data: interactions, isLoading: listLoading, error: listError } = useQuery({
-    queryKey: ['contract-interactions', contractId, listParams],
+  const {
+    data: interactions,
+    isLoading: listLoading,
+    error: listError,
+  } = useQuery({
+    queryKey: ["contract-interactions", contractId, listParams],
     queryFn: () => api.getContractInteractions(contractId, listParams),
   });
 
@@ -82,26 +93,38 @@ export default function InteractionHistorySection({ contractId }: InteractionHis
                     data={analytics.timeline}
                     margin={{ top: 8, right: 8, left: 0, bottom: 0 }}
                   >
-                    <CartesianGrid strokeDasharray="3 3" className="stroke-gray-200 dark:stroke-gray-700" />
+                    <CartesianGrid
+                      strokeDasharray="3 3"
+                      className="stroke-gray-200 dark:stroke-gray-700"
+                    />
                     <XAxis
                       dataKey="date"
-                      tick={{ fontSize: 11, fill: 'currentColor' }}
-                      tickFormatter={(v) => (typeof v === 'string' ? v.slice(5) : v)}
+                      tick={{ fontSize: 11, fill: "currentColor" }}
+                      tickFormatter={(v) =>
+                        typeof v === "string" ? v.slice(5) : v
+                      }
                     />
                     <YAxis
-                      tick={{ fontSize: 11, fill: 'currentColor' }}
+                      tick={{ fontSize: 11, fill: "currentColor" }}
                       allowDecimals={false}
                     />
                     <Tooltip
                       contentStyle={{
-                        backgroundColor: 'var(--tooltip-bg, #1e293b)',
-                        border: '1px solid rgba(255,255,255,0.1)',
-                        borderRadius: '8px',
+                        backgroundColor: "var(--tooltip-bg, #1e293b)",
+                        border: "1px solid rgba(255,255,255,0.1)",
+                        borderRadius: "8px",
                       }}
                       labelFormatter={(v) => `Date: ${v}`}
-                      formatter={(value: unknown) => [String(value), 'Interactions']}
+                      formatter={(value: unknown) => [
+                        String(value),
+                        "Interactions",
+                      ]}
                     />
-                    <Bar dataKey="count" fill="rgb(59, 130, 246)" radius={[4, 4, 0, 0]} />
+                    <Bar
+                      dataKey="count"
+                      fill="rgb(59, 130, 246)"
+                      radius={[4, 4, 0, 0]}
+                    />
                   </BarChart>
                 </ResponsiveContainer>
               )}
@@ -117,10 +140,7 @@ export default function InteractionHistorySection({ contractId }: InteractionHis
           {analyticsLoading && (
             <div className="space-y-2">
               {[1, 2, 3].map((i) => (
-                <div
-                  key={i}
-                  className="h-10 bg-muted rounded animate-pulse"
-                />
+                <div key={i} className="h-10 bg-muted rounded animate-pulse" />
               ))}
             </div>
           )}
@@ -143,8 +163,11 @@ export default function InteractionHistorySection({ contractId }: InteractionHis
                       key={u.address}
                       className="flex justify-between items-center text-sm"
                     >
-                      <span className="font-mono text-muted-foreground truncate max-w-[140px]" title={u.address}>
-                        {u.address.slice(0, 8)}…{u.address.slice(-6)}
+                      <span
+                        className="font-mono text-muted-foreground truncate max-w-[140px]"
+                        title={u.address}
+                      >
+                        {formatPublicKey(u.address)}
                       </span>
                       <span className="font-medium text-foreground tabular-nums">
                         {u.count}
@@ -194,10 +217,7 @@ export default function InteractionHistorySection({ contractId }: InteractionHis
         {listLoading && (
           <div className="space-y-2">
             {[1, 2, 3, 4, 5].map((i) => (
-              <div
-                key={i}
-                className="h-12 bg-muted rounded animate-pulse"
-              />
+              <div key={i} className="h-12 bg-muted rounded animate-pulse" />
             ))}
           </div>
         )}
@@ -226,18 +246,23 @@ export default function InteractionHistorySection({ contractId }: InteractionHis
                   </thead>
                   <tbody>
                     {interactions.items.map((row) => (
-                      <tr
-                        key={row.id}
-                        className="border-b border-border"
-                      >
-                        <td className="py-2 pr-4 font-mono text-xs text-muted-foreground max-w-[120px] truncate" title={row.account ?? ''}>
-                          {row.account ? `${row.account.slice(0, 6)}…${row.account.slice(-4)}` : '—'}
+                      <tr key={row.id} className="border-b border-border">
+                        <td
+                          className="py-2 pr-4 font-mono text-xs text-muted-foreground max-w-[120px] truncate"
+                          title={row.account ?? ""}
+                        >
+                          {row.account ? formatPublicKey(row.account) : "—"}
                         </td>
                         <td className="py-2 pr-4 font-medium text-foreground">
-                          {row.method ?? '—'}
+                          {row.method ?? "—"}
                         </td>
-                        <td className="py-2 pr-4 font-mono text-xs text-muted-foreground max-w-[80px] truncate" title={row.transaction_hash ?? ''}>
-                          {row.transaction_hash ? `${row.transaction_hash.slice(0, 8)}…` : '—'}
+                        <td
+                          className="py-2 pr-4 font-mono text-xs text-muted-foreground max-w-[80px] truncate"
+                          title={row.transaction_hash ?? ""}
+                        >
+                          {row.transaction_hash
+                            ? formatTransactionHash(row.transaction_hash)
+                            : "—"}
                         </td>
                         <td className="py-2 pr-4 text-muted-foreground whitespace-nowrap">
                           {new Date(row.created_at).toLocaleString()}
@@ -251,7 +276,9 @@ export default function InteractionHistorySection({ contractId }: InteractionHis
             {interactions.total > interactions.items.length && (
               <div className="mt-4 flex items-center justify-between">
                 <p className="text-sm text-muted-foreground">
-                  Showing {interactions.offset + 1}–{interactions.offset + interactions.items.length} of {interactions.total}
+                  Showing {interactions.offset + 1}–
+                  {interactions.offset + interactions.items.length} of{" "}
+                  {interactions.total}
                 </p>
                 <div className="flex gap-2">
                   <button
@@ -269,7 +296,10 @@ export default function InteractionHistorySection({ contractId }: InteractionHis
                   </button>
                   <button
                     type="button"
-                    disabled={interactions.offset + interactions.items.length >= interactions.total}
+                    disabled={
+                      interactions.offset + interactions.items.length >=
+                      interactions.total
+                    }
                     onClick={() =>
                       setListParams((p) => ({
                         ...p,

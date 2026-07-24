@@ -1,4 +1,3 @@
-import React from 'react';
 import { StatsResponse } from '@/types/stats';
 
 interface NetworkDistributionProps {

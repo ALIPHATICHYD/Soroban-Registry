@@ -19,22 +19,22 @@ paths:
                 to:
                   type: string
                   description: Symbol
-                  example: ''
+                  example: ""
               required:
-              - to
+                - to
               example:
-                to: ''
+                to: ""
             example:
-              to: ''
+              to: ""
       responses:
-        '200':
-          description: 'Success. Returns: Symbol'
+        "200":
+          description: "Success. Returns: Symbol"
           content:
             application/json:
               schema:
                 type: string
                 description: Symbol
-                example: ''
-              example: ''
+                example: ""
+              example: ""
       tags:
-      - Contract
+        - Contract

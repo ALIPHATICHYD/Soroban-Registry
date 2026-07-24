@@ -1,10 +1,10 @@
 #![allow(dead_code)]
 
+use crate::net::RequestBuilderExt;
 use anyhow::{Context, Result};
 use colored::Colorize;
 use serde::{Deserialize, Serialize};
 use std::fs;
-
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FunctionChange {
@@ -43,7 +43,6 @@ pub struct ReleaseNotesResponse {
     pub published_at: Option<String>,
 }
 
-
 /// Generate release notes for a contract version
 pub async fn generate(
     api_url: &str,
@@ -54,10 +53,7 @@ pub async fn generate(
     contract_address: Option<&str>,
     json_output: bool,
 ) -> Result<()> {
-    println!(
-        "\n{}",
-        "Generating release notes...".bold().cyan()
-    );
+    println!("\n{}", "Generating release notes...".bold().cyan());
     println!("{}", "=".repeat(60).cyan());
 
     // Read changelog file if provided
@@ -68,8 +64,8 @@ pub async fn generate(
     } else {
         // Try to auto-detect CHANGELOG.md in current directory
         if std::path::Path::new("CHANGELOG.md").exists() {
-            let content = fs::read_to_string("CHANGELOG.md")
-                .context("Failed to read CHANGELOG.md")?;
+            let content =
+                fs::read_to_string("CHANGELOG.md").context("Failed to read CHANGELOG.md")?;
             println!("{} Auto-detected CHANGELOG.md", "ℹ".blue());
             Some(content)
         } else {
@@ -84,14 +80,14 @@ pub async fn generate(
         "contract_address": contract_address,
     });
 
-    let client = reqwest::Client::new();
+    let client = crate::net::client();
     let resp = client
         .post(format!(
             "{}/api/contracts/{}/release-notes/generate",
             api_url, contract_id
         ))
         .json(&body)
-        .send()
+        .send_with_retry()
         .await
         .context("Failed to connect to registry API")?;
 
@@ -101,10 +97,7 @@ pub async fn generate(
         anyhow::bail!("API returned {}: {}", status, text);
     }
 
-    let notes: ReleaseNotesResponse = resp
-        .json()
-        .await
-        .context("Failed to parse API response")?;
+    let notes: ReleaseNotesResponse = resp.json().await.context("Failed to parse API response")?;
 
     if json_output {
         println!("{}", serde_json::to_string_pretty(&notes)?);
@@ -122,13 +115,13 @@ pub async fn view(
     version: &str,
     json_output: bool,
 ) -> Result<()> {
-    let client = reqwest::Client::new();
+    let client = crate::net::client();
     let resp = client
         .get(format!(
             "{}/api/contracts/{}/release-notes/{}",
             api_url, contract_id, version
         ))
-        .send()
+        .send_with_retry()
         .await
         .context("Failed to connect to registry API")?;
 
@@ -138,10 +131,7 @@ pub async fn view(
         anyhow::bail!("API returned {}: {}", status, text);
     }
 
-    let notes: ReleaseNotesResponse = resp
-        .json()
-        .await
-        .context("Failed to parse API response")?;
+    let notes: ReleaseNotesResponse = resp.json().await.context("Failed to parse API response")?;
 
     if json_output {
         println!("{}", serde_json::to_string_pretty(&notes)?);
@@ -162,8 +152,7 @@ pub async fn edit(
     json_output: bool,
 ) -> Result<()> {
     let text = if let Some(path) = notes_file {
-        fs::read_to_string(path)
-            .with_context(|| format!("Failed to read notes file: {}", path))?
+        fs::read_to_string(path).with_context(|| format!("Failed to read notes file: {}", path))?
     } else if let Some(t) = notes_text {
         t.to_string()
     } else {
@@ -176,14 +165,14 @@ pub async fn edit(
         "notes_text": text,
     });
 
-    let client = reqwest::Client::new();
+    let client = crate::net::client();
     let resp = client
         .put(format!(
             "{}/api/contracts/{}/release-notes/{}",
             api_url, contract_id, version
         ))
         .json(&body)
-        .send()
+        .send_with_retry()
         .await
         .context("Failed to connect to registry API")?;
 
@@ -193,10 +182,7 @@ pub async fn edit(
         anyhow::bail!("API returned {}: {}", status, text);
     }
 
-    let notes: ReleaseNotesResponse = resp
-        .json()
-        .await
-        .context("Failed to parse API response")?;
+    let notes: ReleaseNotesResponse = resp.json().await.context("Failed to parse API response")?;
 
     if json_output {
         println!("{}", serde_json::to_string_pretty(&notes)?);
@@ -226,14 +212,14 @@ pub async fn publish(
         "update_version_record": !skip_version_update,
     });
 
-    let client = reqwest::Client::new();
+    let client = crate::net::client();
     let resp = client
         .post(format!(
             "{}/api/contracts/{}/release-notes/{}/publish",
             api_url, contract_id, version
         ))
         .json(&body)
-        .send()
+        .send_with_retry()
         .await
         .context("Failed to connect to registry API")?;
 
@@ -243,10 +229,7 @@ pub async fn publish(
         anyhow::bail!("API returned {}: {}", status, text);
     }
 
-    let notes: ReleaseNotesResponse = resp
-        .json()
-        .await
-        .context("Failed to parse API response")?;
+    let notes: ReleaseNotesResponse = resp.json().await.context("Failed to parse API response")?;
 
     if json_output {
         println!("{}", serde_json::to_string_pretty(&notes)?);
@@ -257,10 +240,7 @@ pub async fn publish(
             notes.version
         );
         if !skip_version_update {
-            println!(
-                "{} contract_versions.release_notes updated",
-                "✓".green()
-            );
+            println!("{} contract_versions.release_notes updated", "✓".green());
         }
     }
 
@@ -268,18 +248,14 @@ pub async fn publish(
 }
 
 /// List all release notes for a contract
-pub async fn list(
-    api_url: &str,
-    contract_id: &str,
-    json_output: bool,
-) -> Result<()> {
-    let client = reqwest::Client::new();
+pub async fn list(api_url: &str, contract_id: &str, json_output: bool) -> Result<()> {
+    let client = crate::net::client();
     let resp = client
         .get(format!(
             "{}/api/contracts/{}/release-notes",
             api_url, contract_id
         ))
-        .send()
+        .send_with_retry()
         .await
         .context("Failed to connect to registry API")?;
 
@@ -289,10 +265,8 @@ pub async fn list(
         anyhow::bail!("API returned {}: {}", status, text);
     }
 
-    let all_notes: Vec<ReleaseNotesResponse> = resp
-        .json()
-        .await
-        .context("Failed to parse API response")?;
+    let all_notes: Vec<ReleaseNotesResponse> =
+        resp.json().await.context("Failed to parse API response")?;
 
     if json_output {
         println!("{}", serde_json::to_string_pretty(&all_notes)?);
@@ -300,10 +274,7 @@ pub async fn list(
     }
 
     if all_notes.is_empty() {
-        println!(
-            "{}",
-            "No release notes found for this contract.".yellow()
-        );
+        println!("{}", "No release notes found for this contract.".yellow());
         return Ok(());
     }
 
@@ -337,7 +308,6 @@ pub async fn list(
 
     Ok(())
 }
-
 
 fn print_release_notes(notes: &ReleaseNotesResponse) {
     let status_badge = match notes.status.as_str() {

@@ -4,6 +4,11 @@ import Providers from "@/components/Providers";
 import Script from "next/script";
 import PageViewTracker from "@/components/PageViewTracker";
 import UserInteractionTracker from "@/components/UserInteractionTracker";
+import { cookies, headers } from "next/headers";
+import { fallbackLng, languages, cookieName } from "@/lib/i18n/settings";
+import acceptLanguage from 'accept-language';
+
+acceptLanguage.languages(languages);
 
 const GA_PROVIDER = process.env.NEXT_PUBLIC_ANALYTICS_PROVIDER || 'ga'
 const GA_ID = process.env.NEXT_PUBLIC_GA_ID
@@ -59,10 +64,38 @@ export const metadata: Metadata = {
   },
 };
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default async function RootLayout({ children }: { children: React.ReactNode }) {
+  const cookieStore = await cookies();
+  let lng = cookieStore.get(cookieName)?.value;
+  
+  if (!lng) {
+    const headersList = await headers();
+    lng = acceptLanguage.get(headersList.get('accept-language')) || fallbackLng;
+  }
+
+  const dir = lng === 'ar' ? 'rtl' : 'ltr';
+
   return (
-    <html lang="en">
+    <html lang={lng} dir={dir} suppressHydrationWarning>
       <head>
+        {/* Theme detection script to prevent flash */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `
+              (function() {
+                try {
+                  var theme = localStorage.getItem('soroban-registry-theme');
+                  var supportDarkMode = window.matchMedia('(prefers-color-scheme: dark)').matches;
+                  if (theme === 'dark' || (theme === 'system' && supportDarkMode) || (!theme && supportDarkMode)) {
+                    document.documentElement.classList.add('dark');
+                  } else {
+                    document.documentElement.classList.remove('dark');
+                  }
+                } catch (e) {}
+              })();
+            `,
+          }}
+        />
         {/* Only load GA script if GA is selected */}
         {GA_PROVIDER === 'ga' && GA_ID && (
           <>
@@ -84,7 +117,6 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             />
           </>
         )}
-        {/* You could similarly inject Plausible or Mixpanel scripts here if needed */}
       </head>
       <body className="font-sans antialiased">
         <Providers>

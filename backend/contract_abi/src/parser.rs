@@ -112,16 +112,16 @@ pub fn parse_contract_abi(
             }
             "error_enum" => {
                 let enum_type = parse_error_enum(spec)?;
-                abi.types.insert(spec.name.clone(), enum_type.clone());
-                if let SorobanType::Enum { variants, .. } = enum_type {
+                if let SorobanType::Enum { variants, .. } = &enum_type {
                     for variant in variants {
                         abi.errors.push(ContractError {
                             name: format!("{}::{}", spec.name, variant.name),
                             code: variant.value.unwrap_or(0),
-                            doc: variant.doc,
+                            doc: variant.doc.clone(),
                         });
                     }
                 }
+                abi.types.insert(spec.name.clone(), enum_type);
             }
             _ => {}
         }

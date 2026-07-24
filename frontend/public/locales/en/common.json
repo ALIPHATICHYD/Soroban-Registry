@@ -1,0 +1,121 @@
+{
+  "navbar": {
+    "contracts": "Contracts",
+    "publish": "Publish",
+    "stats": "Stats",
+    "verification": "Verification",
+    "search": "Search contracts...",
+    "language": "Language"
+  },
+  "home": {
+    "title_part1": "Discover & Publish",
+    "title_part2": "Soroban Contracts",
+    "subtitle": "Discover, verify, and interact with smart contracts on the Stellar network.",
+    "getStarted": "Get Started",
+    "viewContracts": "View Contracts",
+    "whyTitle": "Why builders choose the",
+    "whySubtitle": "Everything you need to discover, verify, and integrate Soroban smart contracts.",
+    "features": {
+      "verified": {
+        "title": "Verified Contracts",
+        "desc": "Every contract goes through verification. Source code validation, security scoring, and health monitoring ensure you're using battle-tested code."
+      },
+      "graph": {
+        "title": "Dependency Graph",
+        "desc": "Visualize the entire contract ecosystem. Understand dependencies, discover related contracts, and trace the impact of changes across the network."
+      },
+      "easy": {
+        "title": "Easy Publishing",
+        "desc": "Publish contracts in seconds via CLI or web interface. Add metadata, examples, and documentation to help others integrate your work."
+      }
+    },
+    "recent": "Recent Contracts",
+    "viewAll": "View all"
+  },
+  "contractCard": {
+    "verified": "Verified",
+    "pending": "Pending",
+    "deployments": "Deployments",
+    "updated": "Updated",
+    "quickView": "Quick View",
+    "viewDetails": "View Details",
+    "copied": "Copied",
+    "copyAddress": "Copy Address"
+  },
+  "activityFeed": {
+    "title": "Registry Activity",
+    "liveUpdates": "Live updates active",
+    "allEvents": "All Events",
+    "published": "Published",
+    "verified": "Verified",
+    "deployed": "Deployed",
+    "newVersion": "New Version",
+    "updated": "Updated",
+    "loading": "Loading activity feed...",
+    "failed": "Failed to load activity feed.",
+    "noActivity": "No recent activity found.",
+    "loadMore": "Load More Activity",
+    "by": "by",
+    "type": "Type",
+    "justNow": "just now",
+    "m_ago": "m ago",
+    "h_ago": "h ago"
+  },
+  "verificationBadge": {
+    "verified": "Verified",
+    "underReview": "Under Review",
+    "rejected": "Rejected",
+    "submitted": "Submitted",
+    "draft": "Draft"
+  },
+  "publish": {
+    "title": "Publish Contract",
+    "contractId": "Contract ID",
+    "contractIdPlaceholder": "contract-name",
+    "name": "Name",
+    "version": "Version",
+    "versionPlaceholder": "1.2.3",
+    "sourceUrl": "Source URL",
+    "sourceUrlPlaceholder": "https://github.com/owner/repo",
+    "publisherAddress": "Publisher Stellar Address",
+    "publisherAddressPlaceholder": "G...",
+    "network": "Network",
+    "description": "Description",
+    "submit": "Publish",
+    "success": "Published successfully",
+    "error": "Failed to publish"
+  },
+  "stats": {
+    "title": "Registry Statistics",
+    "subtitle": "Overview of Soroban contract deployments and network activity",
+    "failed": "Failed to load statistics",
+    "tryAgain": "Try Again"
+  },
+  "graph": {
+    "loading": "Loading dependency graph...",
+    "apiUnavailable": "Backend API unavailable",
+    "apiUnavailableDesc": "Could not load contract graph data. You can still explore the visualization using Demo Mode with synthetic data.",
+    "enableDemo": "Enable Demo Mode",
+    "noContracts": "No contracts yet",
+    "noContractsDesc": "Publish some contracts or enable Demo Mode to explore the graph visualization.",
+    "viewDetails": "View Contract Details",
+    "dependents": "Dependents",
+    "dependencies": "Dependencies",
+    "verified": "Verified",
+    "network": "Network",
+    "type": "Type"
+  },
+  "footer": {
+    "registry": "Registry",
+    "explore": "Explore",
+    "developers": "Developers",
+    "community": "Community",
+    "builtFor": "Built for the Stellar Developer Community",
+    "poweredBy": "Powered by Soroban Smart Contracts"
+  },
+  "common": {
+    "loading": "Loading...",
+    "error": "An error occurred",
+    "back": "Back"
+  }
+}
