@@ -4809,6 +4809,102 @@ mod tests {
     use super::*;
     use serde_json;
 
+    // ── deserialize_optional_strings ───────────────────────────────────
+
+    /// Helper: deserialize a single comma-separated string value through the custom deserializer
+    fn deser_comma_separated(input: &str) -> Option<Vec<String>> {
+        use serde::de::value::StrDeserializer;
+        deserialize_optional_strings(StrDeserializer::<serde::de::value::Error>::new(input)).ok().flatten()
+    }
+
+    /// Helper: deserialize repeated params through a sequence
+    fn deser_repeated(inputs: &[&str]) -> Option<Vec<String>> {
+        use serde::de::value::{SeqDeserializer, StringDeserializer};
+        let seq = inputs.iter().map(|s| StringDeserializer::<serde::de::value::Error>::new(s.to_string()));
+        let deserializer = SeqDeserializer::new(seq);
+        deserialize_optional_strings(deserializer).ok().flatten()
+    }
+
+    #[test]
+    fn test_optional_categories_single_value() {
+        let cats = deser_comma_separated("DeFi").unwrap();
+        assert_eq!(cats, vec!["DeFi"]);
+    }
+
+    #[test]
+    fn test_optional_categories_comma_separated() {
+        let cats = deser_comma_separated("DeFi,NFT").unwrap();
+        assert_eq!(cats, vec!["DeFi", "NFT"]);
+    }
+
+    #[test]
+    fn test_optional_categories_repeated_params() {
+        let cats = deser_repeated(&["DeFi", "NFT"]).unwrap();
+        assert_eq!(cats, vec!["DeFi", "NFT"]);
+    }
+
+    #[test]
+    fn test_optional_categories_with_spaces() {
+        let cats = deser_comma_separated("DeFi, NFT").unwrap();
+        assert_eq!(cats, vec!["DeFi", "NFT"]);
+    }
+
+    #[test]
+    fn test_optional_categories_missing() {
+        let cats = deser_comma_separated("");
+        // Empty string should return None or empty vec
+        assert!(cats.is_none() || cats.unwrap().is_empty());
+    }
+
+    #[test]
+    fn test_optional_categories_empty_seq() {
+        let cats = deser_repeated(&[]);
+        assert!(cats.is_none() || cats.unwrap().is_empty());
+    }
+
+    // ── ContractSearchParams filter normalization ──────────────────────
+
+    /// Helper: deserialize ContractSearchParams from a comma-separated query string
+    fn parse_search_params(qs: &str) -> Result<ContractSearchParams, serde_urlencoded::de::Error> {
+        serde_urlencoded::from_str(qs)
+    }
+
+    #[test]
+    fn test_search_params_networks_comma_separated() {
+        let params = parse_search_params("networks=testnet,mainnet").unwrap();
+        let nets = params.networks.unwrap();
+        assert_eq!(nets.len(), 2);
+        assert!(nets.contains(&Network::Testnet));
+        assert!(nets.contains(&Network::Mainnet));
+    }
+
+    #[test]
+    fn test_search_params_invalid_network_fails_gracefully() {
+        let result = parse_search_params("networks=unknown");
+        assert!(result.is_err(), "Invalid network values should fail clearly");
+    }
+
+    #[test]
+    fn test_search_params_categories_normalized() {
+        let params = parse_search_params("categories=lending,dex&network=testnet").unwrap();
+        let cats = params.categories.unwrap();
+        assert_eq!(cats.len(), 2);
+        assert!(cats.contains(&"lending".to_string()));
+        assert!(cats.contains(&"dex".to_string()));
+    }
+
+    #[test]
+    fn test_search_params_combined_network_and_category_filters() {
+        let params = parse_search_params("networks=testnet&categories=DeFi,NFT&verified_only=true&query=swap")
+            .unwrap();
+        assert_eq!(params.query.as_deref(), Some("swap"));
+        assert!(params.verified_only.unwrap_or(false));
+        assert!(params.networks.unwrap().contains(&Network::Testnet));
+        assert!(params.categories.unwrap().contains(&"DeFi".to_string()));
+    }
+
+    // ── Existing tests follow ──────────────────────────────────────────
+
     #[test]
     fn test_contract_usage_count_serialization() {
         // Test that Contract can be serialized with usage_count
