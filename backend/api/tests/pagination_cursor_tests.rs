@@ -150,10 +150,17 @@ where
 
     // Bound the loop defensively so a pagination bug can't hang the suite.
     for _ in 0..100 {
-        let url =
-            format!("{base}{endpoint}?q={marker}&limit={limit}&cursor={cursor}");
-        let res = client.get(&url).send().await.expect("send paginated request");
-        assert_eq!(res.status(), StatusCode::OK, "page request {url} should be 200");
+        let url = format!("{base}{endpoint}?q={marker}&limit={limit}&cursor={cursor}");
+        let res = client
+            .get(&url)
+            .send()
+            .await
+            .expect("send paginated request");
+        assert_eq!(
+            res.status(),
+            StatusCode::OK,
+            "page request {url} should be 200"
+        );
         let body: Value = res.json().await.expect("deserialize page body");
 
         for item in results_of(&body, results_key) {
@@ -208,7 +215,16 @@ async fn test_cursor_pagination_covers_all_rows_without_gaps() {
     let base = Utc::now() - Duration::hours(1);
     let mut ids = Vec::new();
     for i in 0..7 {
-        ids.push(insert_contract(&pool, publisher, &marker, i, base - Duration::seconds(i as i64)).await);
+        ids.push(
+            insert_contract(
+                &pool,
+                publisher,
+                &marker,
+                i,
+                base - Duration::seconds(i as i64),
+            )
+            .await,
+        );
     }
 
     let client = reqwest::Client::new();
@@ -230,8 +246,16 @@ async fn test_cursor_pagination_stable_under_concurrent_inserts() {
     let base = Utc::now() - Duration::hours(1);
     let mut original_ids = Vec::new();
     for i in 0..6 {
-        original_ids
-            .push(insert_contract(&pool, publisher, &marker, i, base - Duration::seconds(i as i64)).await);
+        original_ids.push(
+            insert_contract(
+                &pool,
+                publisher,
+                &marker,
+                i,
+                base - Duration::seconds(i as i64),
+            )
+            .await,
+        );
     }
 
     // After the first page is read, insert 3 more rows dated "now" — newer than
@@ -269,8 +293,16 @@ async fn test_v1_search_cursor_stable_under_concurrent_inserts() {
     let base = Utc::now() - Duration::hours(1);
     let mut original_ids = Vec::new();
     for i in 0..6 {
-        original_ids
-            .push(insert_contract(&pool, publisher, &marker, i, base - Duration::seconds(i as i64)).await);
+        original_ids.push(
+            insert_contract(
+                &pool,
+                publisher,
+                &marker,
+                i,
+                base - Duration::seconds(i as i64),
+            )
+            .await,
+        );
     }
 
     let write_pool = pool.clone();
