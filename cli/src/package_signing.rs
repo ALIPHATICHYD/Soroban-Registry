@@ -2,7 +2,7 @@ use anyhow::{bail, Context, Result};
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use chrono::Utc;
 use colored::Colorize;
-use ed25519_dalek::{Signer, SigningKey};
+use ed25519_dalek::{Signer, SigningKey, Verifier};
 use rand::rngs::OsRng;
 use serde_json::json;
 use sha2::{Digest, Sha256};

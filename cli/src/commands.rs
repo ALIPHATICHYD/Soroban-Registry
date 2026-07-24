@@ -19,6 +19,7 @@ pub enum Network {
 use std::path::Path;
 
 use crate::patch::{PatchManager, Severity};
+use crate::profiler;
 use crate::test_framework;
 
 pub fn generate_flame_graph_file(
@@ -345,30 +346,6 @@ mod upgrade_analyze_tests {
     }
 }
 
-@@ -235,50 +235,61 @@ pub async fn list(api_url: &str, limit: usize, network: Network) -> Result<()> {
-        let network = contract["network"].as_str().unwrap_or("");
-        println!(
-            "\n{}. {} {}",
-            i + 1,
-            name.bold(),
-            if is_verified {
-                "✓".green()
-            } else {
-                "".normal()
-            }
-        );
-        println!(
-            "   {} | {}",
-            contract_id.bright_black(),
-            network.bright_blue()
-        );
-    }
-
-    println!("\n{}", "=".repeat(80).cyan());
-    println!();
-
-    Ok(())
-}
 
 impl fmt::Display for Network {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -404,6 +381,80 @@ fn resolve_smart_routing(current_network: Network) -> String {
     }
 }
 
+/// Maximum number of tags allowed in a publish request (mirrors backend).
+const MAX_PUBLISH_TAGS: usize = 10;
+
+/// Run client-side preflight validation on publish inputs.
+///
+/// These checks mirror the backend `PublishRequest` validators so that
+/// obvious problems are caught *before* we hit the network.
+pub fn validate_publish_inputs(
+    contract_id: &str,
+    name: &str,
+    network: Network,
+    category: Option<&str>,
+    tags: &[String],
+    publisher: &str,
+) -> Result<()> {
+    let mut errors: Vec<String> = Vec::new();
+
+    // ── contract_id: must start with 'C' and be 56 chars (Stellar contract) ─
+    if contract_id.is_empty() {
+        errors.push("contract_id is required".to_string());
+    } else if !contract_id.starts_with('C') || contract_id.len() != 56 {
+        errors.push(format!(
+            "contract_id must be a 56-character Stellar contract address starting with 'C' (got {} chars)",
+            contract_id.len()
+        ));
+    }
+
+    // ── name: required, 1-255 chars ─────────────────────────────────────────
+    if name.trim().is_empty() {
+        errors.push("name is required".to_string());
+    } else if name.len() > 255 {
+        errors.push(format!("name must be at most 255 characters (got {})", name.len()));
+    }
+
+    // ── publisher: must start with 'G' and be 56 chars (Stellar address) ────
+    if publisher.is_empty() {
+        errors.push("publisher address is required".to_string());
+    } else if !publisher.starts_with('G') || publisher.len() != 56 {
+        errors.push(format!(
+            "publisher must be a 56-character Stellar address starting with 'G' (got {} chars)",
+            publisher.len()
+        ));
+    }
+
+    // ── category: if given, must be one of the allowed values ───────────────
+    const ALLOWED_CATEGORIES: &[&str] = &["DEX", "Lending", "Bridge", "Oracle", "Token", "Other"];
+    if let Some(cat) = category {
+        if !ALLOWED_CATEGORIES.iter().any(|c| c.eq_ignore_ascii_case(cat)) {
+            errors.push(format!(
+                "category '{}' is not allowed; valid values: {}",
+                cat,
+                ALLOWED_CATEGORIES.join(", ")
+            ));
+        }
+    }
+
+    // ── tags: at most MAX_PUBLISH_TAGS, each ≤ 50 chars ─────────────────────
+    if tags.len() > MAX_PUBLISH_TAGS {
+        errors.push(format!("at most {} tags are allowed (got {})", MAX_PUBLISH_TAGS, tags.len()));
+    }
+    for (i, tag) in tags.iter().enumerate() {
+        if tag.len() > 50 {
+            errors.push(format!("tag[{}] exceeds 50 characters (got {})", i, tag.len()));
+        }
+    }
+
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        let msg = errors.join("\n  • ");
+        anyhow::bail!("Validation failed:\n  • {}", msg);
+    }
+}
+
 pub async fn publish(
     api_url: &str,
     contract_id: &str,
@@ -413,9 +464,10 @@ pub async fn publish(
     category: Option<&str>,
     tags: Vec<String>,
     publisher: &str,
+    dry_run: bool,
 ) -> Result<()> {
-    let client = reqwest::Client::new();
-    let url = format!("{}/api/contracts", api_url);
+    // ── Preflight validation (runs in both normal and dry-run modes) ─────────
+    validate_publish_inputs(contract_id, name, network, category, &tags, publisher)?;
 
     let payload = json!({
         "contract_id": contract_id,
@@ -426,6 +478,23 @@ pub async fn publish(
         "tags": tags,
         "publisher_address": publisher,
     });
+
+    // ── Dry-run: show payload and exit without hitting the backend ───────────
+    if dry_run {
+        println!("\n{}", "Dry-run mode — no records will be created.".yellow().bold());
+        println!("{}", "=".repeat(80).yellow());
+        println!("\n{}", "Validation passed ✓".green().bold());
+        println!("\n{}", "Payload that would be sent:".bold().cyan());
+        println!("{}", serde_json::to_string_pretty(&payload)?);
+        println!("\n{}: POST {}/api/contracts", "Endpoint".bold(), api_url);
+        println!("{}", "=".repeat(80).yellow());
+        println!();
+        return Ok(());
+    }
+
+    // ── Normal path: send the request ────────────────────────────────────────
+    let client = reqwest::Client::new();
+    let url = format!("{}/api/contracts", api_url);
 
     println!("\n{}", "Publishing contract...".bold().cyan());
 
@@ -627,7 +696,7 @@ pub async fn migrate(
     let wasm_hash = hex::encode(hasher.finalize());
 
     println!("Contract ID: {}", contract_id.green());
-@@ -298,51 +309,51 @@ pub async fn migrate(
+
 
     // 3. Create Migration Record (Pending)
     let client = reqwest::Client::new();
@@ -680,87 +749,6 @@ pub async fn migrate(
             println!("{}", "Simulating SUCCESS...".green());
             (
                 shared::models::MigrationStatus::Success,
-@@ -626,51 +637,54 @@ pub fn doc(contract_path: &str, output_dir: &str) -> Result<()> {
-    println!("{} Documentation generated at {:?}", "✓".green(), out_path);
-    Ok(())
-}
-
-pub async fn profile(
-    contract_path: &str,
-    method: Option<&str>,
-    output: Option<&str>,
-    flamegraph: Option<&str>,
-    compare: Option<&str>,
-    show_recommendations: bool,
-) -> Result<()> {
-    let path = Path::new(contract_path);
-    if !path.exists() {
-        anyhow::bail!("Contract file not found: {}", contract_path);
-    }
-
-    println!("\n{}", "Profiling contract...".bold().cyan());
-    println!("{}", "=".repeat(80).cyan());
-
-    let mut profiler = profiler::Profiler::new();
-    profiler::simulate_execution(path, method, &mut profiler)?;
-    let profile_data = profiler.finish(contract_path.to_string(), method.map(|s| s.to_string()));
-
-    println!("\n{}", "Profile Results:".bold().green());
-    println!(
-        "Total Duration: {:.2}ms",
-        profile_data.total_duration.as_secs_f64() * 1000.0
-    );
-    println!("Overhead: {:.2}%", profile_data.overhead_percent);
-    println!("Functions Profiled: {}", profile_data.functions.len());
-
-    let mut sorted_functions: Vec<_> = profile_data.functions.values().collect();
-    sorted_functions.sort_by(|a, b| b.total_time.cmp(&a.total_time));
-
-    println!("\n{}", "Top Functions:".bold());
-    for (i, func) in sorted_functions.iter().take(10).enumerate() {
-        println!(
-            "{}. {} - {:.2}ms ({} calls, avg: {:.2}μs)",
-            i + 1,
-            func.name.bold(),
-            func.total_time.as_secs_f64() * 1000.0,
-            func.call_count,
-            func.avg_time.as_secs_f64() * 1_000_000.0
-        );
-    }
-
-    if let Some(output_path) = output {
-        let json = serde_json::to_string_pretty(&profile_data)?;
-        std::fs::write(output_path, json)
-            .with_context(|| format!("Failed to write profile to: {}", output_path))?;
-        println!("\n{} Profile exported to: {}", "✓".green(), output_path);
-    }
-
-@@ -687,202 +701,254 @@ pub async fn profile(
-        let comparisons = profiler::compare_profiles(&baseline, &profile_data);
-
-        println!("\n{}", "Comparison Results:".bold().yellow());
-        for comp in comparisons.iter().take(10) {
-            let sign = if comp.time_diff_ns > 0 { "+" } else { "" };
-            println!(
-                "{}: {} ({}{:.2}%, {:.2}ms → {:.2}ms)",
-                comp.function.bold(),
-                comp.status,
-                sign,
-                comp.time_diff_percent,
-                comp.baseline_time.as_secs_f64() * 1000.0,
-                comp.current_time.as_secs_f64() * 1000.0
-            );
-        }
-    }
-
-    if show_recommendations {
-        let recommendations = profiler::generate_recommendations(&profile_data);
-        println!("\n{}", "Recommendations:".bold().magenta());
-        for (i, rec) in recommendations.iter().enumerate() {
-            println!("{}. {}", i + 1, rec);
-        }
-    }
-
                 "Simulation: Migration succeeded.".to_string(),
             )
         }
@@ -813,6 +801,7 @@ pub async fn profile(
 
     Ok(())
 }
+
 
 pub async fn export(
     _api_url: &str,
@@ -1232,14 +1221,12 @@ pub async fn run_tests(
     }
 
     if let Some(junit_path) = junit_output {
-        test_framework::generate_junit_xml(&[result], Path::new(junit_path))?;
+        test_framework::generate_junit_xml(&[result.clone()], Path::new(junit_path))?;
         println!(
             "\n{} JUnit XML report exported to: {}",
             "✓".green(),
             junit_path
         );
-        test_framework::generate_junit_xml(&[result.clone()], Path::new(junit_path))?;
-        println!("\n{} JUnit XML report exported to: {}", "✓".green(), junit_path);
     }
 
     if total_time.as_secs() > 5 {
@@ -1295,6 +1282,155 @@ mod tests {
             .map(|e| e.to_string())
             .unwrap_or_default()
             .contains("Invalid migration response: missing id"));
+    }
+
+    // ── Publish dry-run / validation tests ──────────────────────────────────
+
+    use super::{validate_publish_inputs, Network};
+
+    const VALID_CONTRACT_ID: &str = "CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC";
+    const VALID_PUBLISHER: &str = "GDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC";
+
+    #[test]
+    fn validate_publish_inputs_accepts_valid_inputs() {
+        let result = validate_publish_inputs(
+            VALID_CONTRACT_ID,
+            "My Contract",
+            Network::Testnet,
+            Some("Token"),
+            &["defi".to_string(), "token".to_string()],
+            VALID_PUBLISHER,
+        );
+        assert!(result.is_ok(), "Expected valid inputs to pass: {:?}", result);
+    }
+
+    #[test]
+    fn validate_publish_inputs_rejects_invalid_contract_id() {
+        let result = validate_publish_inputs(
+            "invalid-id",
+            "My Contract",
+            Network::Testnet,
+            None,
+            &[],
+            VALID_PUBLISHER,
+        );
+        assert!(result.is_err());
+        let msg = result.unwrap_err().to_string();
+        assert!(msg.contains("contract_id"), "Error should mention contract_id: {}", msg);
+    }
+
+    #[test]
+    fn validate_publish_inputs_rejects_empty_name() {
+        let result = validate_publish_inputs(
+            VALID_CONTRACT_ID,
+            "",
+            Network::Testnet,
+            None,
+            &[],
+            VALID_PUBLISHER,
+        );
+        assert!(result.is_err());
+        let msg = result.unwrap_err().to_string();
+        assert!(msg.contains("name is required"), "Error should mention name: {}", msg);
+    }
+
+    #[test]
+    fn validate_publish_inputs_rejects_invalid_publisher() {
+        let result = validate_publish_inputs(
+            VALID_CONTRACT_ID,
+            "My Contract",
+            Network::Testnet,
+            None,
+            &[],
+            "not-a-stellar-address",
+        );
+        assert!(result.is_err());
+        let msg = result.unwrap_err().to_string();
+        assert!(msg.contains("publisher"), "Error should mention publisher: {}", msg);
+    }
+
+    #[test]
+    fn validate_publish_inputs_rejects_invalid_category() {
+        let result = validate_publish_inputs(
+            VALID_CONTRACT_ID,
+            "My Contract",
+            Network::Testnet,
+            Some("InvalidCategory"),
+            &[],
+            VALID_PUBLISHER,
+        );
+        assert!(result.is_err());
+        let msg = result.unwrap_err().to_string();
+        assert!(msg.contains("category"), "Error should mention category: {}", msg);
+    }
+
+    #[test]
+    fn validate_publish_inputs_rejects_too_many_tags() {
+        let tags: Vec<String> = (0..11).map(|i| format!("tag{}", i)).collect();
+        let result = validate_publish_inputs(
+            VALID_CONTRACT_ID,
+            "My Contract",
+            Network::Testnet,
+            None,
+            &tags,
+            VALID_PUBLISHER,
+        );
+        assert!(result.is_err());
+        let msg = result.unwrap_err().to_string();
+        assert!(msg.contains("tags"), "Error should mention tags: {}", msg);
+    }
+
+    #[test]
+    fn validate_publish_inputs_collects_multiple_errors() {
+        let result = validate_publish_inputs(
+            "bad",            // invalid contract_id
+            "",               // empty name
+            Network::Testnet,
+            None,
+            &[],
+            "bad-publisher",  // invalid publisher
+        );
+        assert!(result.is_err());
+        let msg = result.unwrap_err().to_string();
+        // All three errors should be present
+        assert!(msg.contains("contract_id"), "missing contract_id error");
+        assert!(msg.contains("name is required"), "missing name error");
+        assert!(msg.contains("publisher"), "missing publisher error");
+    }
+
+    #[tokio::test]
+    async fn publish_dry_run_does_not_send_request() {
+        // dry_run should succeed without a running backend
+        let result = super::publish(
+            "http://localhost:0",   // unreachable URL
+            VALID_CONTRACT_ID,
+            "My Contract",
+            Some("A test contract"),
+            Network::Testnet,
+            Some("Token"),
+            vec!["defi".to_string()],
+            VALID_PUBLISHER,
+            true,
+        )
+        .await;
+        assert!(result.is_ok(), "Dry-run should succeed without backend: {:?}", result);
+    }
+
+    #[tokio::test]
+    async fn publish_dry_run_still_validates() {
+        let result = super::publish(
+            "http://localhost:0",
+            "invalid",
+            "",
+            None,
+            Network::Testnet,
+            None,
+            vec![],
+            "bad",
+            true,
+        )
+        .await;
+        assert!(result.is_err(), "Dry-run should still catch validation errors");
     }
 }
 pub fn incident_trigger(contract_id: &str, severity_str: &str) -> Result<()> {
@@ -1578,8 +1714,8 @@ pub async fn scan_deps(
 
 #[cfg(test)]
 mod flamegraph_and_network_tests {
-mod tests_network {
     use super::*;
+    use crate::profiler;
     use std::collections::HashMap;
     use std::fs;
     use std::time::Duration;

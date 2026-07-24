@@ -114,6 +114,10 @@ pub enum Commands {
         /// Publisher Stellar address
         #[arg(long)]
         publisher: String,
+
+        /// Validate inputs and show the payload without creating records
+        #[arg(long)]
+        dry_run: bool,
     },
 
     /// List recent contracts
@@ -949,15 +953,17 @@ async fn main() -> Result<()> {
             category,
             tags,
             publisher,
+            dry_run,
         } => {
             let tags_vec = tags
                 .map(|t| t.split(',').map(|s| s.trim().to_string()).collect())
                 .unwrap_or_default();
             log::debug!(
-                "Command: publish | contract_id={} name={} tags={:?}",
+                "Command: publish | contract_id={} name={} tags={:?} dry_run={}",
                 contract_id,
                 name,
-                tags_vec
+                tags_vec,
+                dry_run
             );
             commands::publish(
                 &cli.api_url,
@@ -968,6 +974,7 @@ async fn main() -> Result<()> {
                 category.as_deref(),
                 tags_vec,
                 &publisher,
+                dry_run,
             )
             .await?;
         }

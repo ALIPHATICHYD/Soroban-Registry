@@ -22,7 +22,7 @@ pub struct BatchContractEntry {
     pub version: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct BatchVerifyResponse {
     pub batch_id: String,
     pub total: usize,
@@ -35,7 +35,7 @@ pub struct BatchVerifyResponse {
     pub duration_ms: Option<u64>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct ContractVerifyResult {
     pub contract_id: String,
     pub version: Option<String>,
