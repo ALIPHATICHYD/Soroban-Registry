@@ -542,14 +542,22 @@ impl RateLimitConfig {
         let trusted_api_keys = parse_csv_set("RATE_LIMIT_TRUSTED_API_KEYS");
 
         // Issue #1045: per-endpoint tighter limits for publish and search.
-        let publish_anon_limit =
-            env_u32("RATE_LIMIT_PUBLISH_ANON_PER_WINDOW", DEFAULT_PUBLISH_ANON_LIMIT);
-        let publish_auth_limit =
-            env_u32("RATE_LIMIT_PUBLISH_AUTH_PER_WINDOW", DEFAULT_PUBLISH_AUTH_LIMIT);
-        let search_anon_limit =
-            env_u32("RATE_LIMIT_SEARCH_ANON_PER_WINDOW", DEFAULT_SEARCH_ANON_LIMIT);
-        let search_auth_limit =
-            env_u32("RATE_LIMIT_SEARCH_AUTH_PER_WINDOW", DEFAULT_SEARCH_AUTH_LIMIT);
+        let publish_anon_limit = env_u32(
+            "RATE_LIMIT_PUBLISH_ANON_PER_WINDOW",
+            DEFAULT_PUBLISH_ANON_LIMIT,
+        );
+        let publish_auth_limit = env_u32(
+            "RATE_LIMIT_PUBLISH_AUTH_PER_WINDOW",
+            DEFAULT_PUBLISH_AUTH_LIMIT,
+        );
+        let search_anon_limit = env_u32(
+            "RATE_LIMIT_SEARCH_ANON_PER_WINDOW",
+            DEFAULT_SEARCH_ANON_LIMIT,
+        );
+        let search_auth_limit = env_u32(
+            "RATE_LIMIT_SEARCH_AUTH_PER_WINDOW",
+            DEFAULT_SEARCH_AUTH_LIMIT,
+        );
 
         tracing::info!(
             anonymous_limit,
@@ -1651,7 +1659,10 @@ mod tests {
             .route("/api/contracts", get(|| async { "list" }))
             .route("/api/contracts", post(|| async { "published" }))
             .route("/api/v1/contracts/search", get(|| async { "search" }))
-            .route("/api/contracts/suggestions", get(|| async { "suggestions" }))
+            .route(
+                "/api/contracts/suggestions",
+                get(|| async { "suggestions" }),
+            )
             .route("/other", post(|| async { "other write" }))
             .layer(middleware::from_fn_with_state(
                 limiter,
@@ -2026,11 +2037,20 @@ mod tests {
     fn is_search_endpoint_detects_correct_paths() {
         assert!(is_search_endpoint(&Method::GET, "/api/contracts"));
         assert!(is_search_endpoint(&Method::GET, "/api/v1/contracts/search"));
-        assert!(is_search_endpoint(&Method::GET, "/api/contracts/suggestions"));
-        assert!(is_search_endpoint(&Method::GET, "/api/v1/contracts/trending"));
+        assert!(is_search_endpoint(
+            &Method::GET,
+            "/api/contracts/suggestions"
+        ));
+        assert!(is_search_endpoint(
+            &Method::GET,
+            "/api/v1/contracts/trending"
+        ));
         // Not search: wrong method
         assert!(!is_search_endpoint(&Method::POST, "/api/contracts"));
-        assert!(!is_search_endpoint(&Method::DELETE, "/api/v1/contracts/search"));
+        assert!(!is_search_endpoint(
+            &Method::DELETE,
+            "/api/v1/contracts/search"
+        ));
         // Not search: unrelated paths
         assert!(!is_search_endpoint(&Method::GET, "/api/contracts/abc"));
         assert!(!is_search_endpoint(&Method::GET, "/api/publishers"));

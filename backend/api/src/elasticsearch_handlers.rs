@@ -165,6 +165,9 @@ pub async fn elasticsearch_search(
                     .map(|t| t.split(',').map(|s| s.to_string()).collect()),
                 limit: params.limit,
                 offset: params.offset,
+                // This dedicated ES endpoint stays offset-based; cursor pagination
+                // is offered on /api/search and /api/v1/contracts/search.
+                cursor: None,
             };
 
             let pg_result =
