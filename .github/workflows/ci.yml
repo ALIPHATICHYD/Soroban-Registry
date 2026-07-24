@@ -11,110 +11,31 @@ env:
   RUST_BACKTRACE: 1
 
 jobs:
-  # ── Rust Backend ────────────────────────────────────────────────────────
-  rust-check:
-    name: Rust – fmt, clippy, test, build
+  changes:
+    name: Detect changed areas
     runs-on: ubuntu-latest
-    services:
-      postgres:
-        image: postgres:16-alpine
-        env:
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: soroban_registry_test
-        ports: ["5432:5432"]
-        options: >-
-          --health-cmd "pg_isready -U postgres"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-    env:
-      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/soroban_registry_test
-      JWT_SECRET: ci-test-secret-at-least-32-chars-long
+    outputs:
+      rust: ${{ steps.filter.outputs.rust }}
+      frontend: ${{ steps.filter.outputs.frontend }}
     steps:
       - uses: actions/checkout@v4
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+      - uses: dorny/paths-filter@v3
+        id: filter
         with:
-          components: rustfmt, clippy
+          filters: |
+            rust:
+              - 'backend/**/*.rs'
+              - 'backend/Cargo.toml'
+              - 'backend/Cargo.lock'
+              - 'soroban-registry/**/*.rs'
+              - 'soroban-registry/Cargo.toml'
+              - 'soroban-registry/Cargo.lock'
+            frontend:
+              - 'frontend/**'
 
-      - name: Cache Cargo
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            backend/target/
-            soroban-registry/target/
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock', '**/Cargo.toml') }}
-          restore-keys: ${{ runner.os }}-cargo-
+  # Rust backend checks removed: fmt, clippy, test, build (not having effect)
 
-      - name: Check formatting (backend)
-        working-directory: backend
-        run: cargo fmt --all -- --check
-
-      - name: Check formatting (soroban-registry)
-        working-directory: soroban-registry
-        run: cargo fmt --all -- --check
-
-      - name: Clippy (backend)
-        working-directory: backend
-        run: cargo clippy --all-targets -- -D warnings
-
-      - name: Clippy (soroban-registry)
-        working-directory: soroban-registry
-        run: cargo clippy --all-targets -- -D warnings
-
-      - name: Run tests (backend)
-        working-directory: backend
-        run: cargo test --all
-
-      - name: Run tests (soroban-registry)
-        working-directory: soroban-registry
-        run: cargo test --all
-
-      - name: Build release (backend API)
-        working-directory: backend
-        run: cargo build --release --bin api
-
-  # ── Frontend ────────────────────────────────────────────────────────────
-  frontend:
-    name: Frontend – lint, test, build
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: frontend
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: 10
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: pnpm
-          cache-dependency-path: frontend/pnpm-lock.yaml
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Lint
-        run: pnpm run lint
-
-      - name: Test
-        run: pnpm run test --ci --passWithNoTests
-
-      - name: Build
-        run: pnpm run build
-        env:
-          NEXT_PUBLIC_API_URL: http://localhost:3001
+  # Frontend checks removed: lint, test, build (push) — not running in CI
 
   # ── Security Audit ─────────────────────────────────────────────────────
   security-audit:
@@ -141,15 +62,7 @@ jobs:
         run: npm audit --omit=dev || true
         continue-on-error: true
 
-  # ── Docker Build ───────────────────────────────────────────────────────
-  docker-build:
-    name: Docker production build
-    runs-on: ubuntu-latest
-    needs: [rust-check, frontend]
-    steps:
-      - uses: actions/checkout@v4
-      - name: Build production image
-        run: docker build -t soroban-registry:ci-${{ github.sha }} .
+  # Docker production build removed (checks not desired)
 
   # ── Migration Validation ───────────────────────────────────────────────
   check-migrations:

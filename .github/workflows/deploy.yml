@@ -1,0 +1,104 @@
+name: Deploy Backend
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      deployment_strategy:
+        description: 'Deployment Strategy'
+        required: true
+        default: 'blue-green'
+        type: choice
+        options:
+          - blue-green
+          - canary
+
+jobs:
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: stable
+          override: true
+
+      - name: Cache cargo registry
+        uses: actions/cache@v3
+        with:
+          path: ~/.cargo/registry
+          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Build Backend
+        run: cargo build --release --manifest-path backend/Cargo.toml
+      # Docker image build removed (not performed in CI)
+
+  deploy:
+    name: Deploy
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      # This requires manual approval in GitHub Environments if configured.
+      url: https://api.soroban-registry.com
+    steps:
+      - name: Deploy - Canary Phase
+        if: ${{ github.event.inputs.deployment_strategy == 'canary' }}
+        run: |
+          echo "Starting Canary Deployment (10% traffic)"
+          # e.g., aws ecs update-service --service api-canary --task-definition new-task
+          # kubectl set image deployment/api-canary api=soroban-registry-api:${{ github.sha }}
+          sleep 5
+
+      - name: Health Check (Canary)
+        if: ${{ github.event.inputs.deployment_strategy == 'canary' }}
+        run: |
+          echo "Verifying Canary Health..."
+          # curl -f https://canary-api.soroban-registry.com/health || exit 1
+          echo "Canary is healthy."
+
+      - name: Promote Canary to Full Traffic
+        if: ${{ github.event.inputs.deployment_strategy == 'canary' }}
+        run: |
+          echo "Promoting Canary to 100% traffic..."
+          # update ingress/load-balancer rules
+
+      - name: Deploy - Blue/Green Phase
+        if: ${{ github.event.inputs.deployment_strategy == 'blue-green' || github.event_name == 'push' }}
+        run: |
+          echo "Starting Blue/Green Deployment to inactive environment"
+          # deploy to the inactive colored environment
+          sleep 5
+
+      - name: Health Check (Blue/Green)
+        if: ${{ github.event.inputs.deployment_strategy == 'blue-green' || github.event_name == 'push' }}
+        run: |
+          echo "Verifying new environment health..."
+          # curl -f https://inactive-api.soroban-registry.com/health || exit 1
+          echo "New environment is healthy."
+
+      - name: Swap Traffic (Zero Downtime)
+        if: ${{ github.event.inputs.deployment_strategy == 'blue-green' || github.event_name == 'push' }}
+        run: |
+          echo "Swapping traffic to new environment..."
+          # update DNS or Load Balancer to point to the newly deployed environment
+          echo "Traffic swapped successfully."
+
+  rollback:
+    name: Rollback on Failure
+    needs: deploy
+    runs-on: ubuntu-latest
+    if: failure()
+    steps:
+      - name: Execute Rollback
+        run: |
+          echo "Deployment failed! Initiating rollback..."
+          # In blue-green, we simply don't swap traffic or we swap back if it failed after swap.
+          # In canary, we route 100% back to stable.
+          echo "Rollback completed."

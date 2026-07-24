@@ -3,14 +3,14 @@ name: Validate Database Migrations
 on:
   pull_request:
     paths:
-      - 'database/migrations/**'
-      - '.github/scripts/validate-migrations.sh'
-      - '.github/workflows/validate-migrations.yml'
+      - "database/migrations/**"
+      - ".github/scripts/validate-migrations.sh"
+      - ".github/workflows/validate-migrations.yml"
   push:
     branches:
       - main
     paths:
-      - 'database/migrations/**'
+      - "database/migrations/**"
 
 jobs:
   validate:

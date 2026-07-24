@@ -1,0 +1,48 @@
+name: Soroban Registry CI/CD
+
+on:
+  workflow_call:
+    inputs:
+      contract_path:
+        required: false
+        type: string
+        default: "."
+      network:
+        required: false
+        type: string
+        default: "testnet"
+      skip_scan:
+        required: false
+        type: boolean
+        default: false
+    secrets:
+      SOROBAN_REGISTRY_API_TOKEN:
+        required: true
+
+jobs:
+  registry-ci:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Install Soroban CLI
+        run: |
+          cargo install soroban-cli --features opt
+
+      - name: Install Soroban Registry CLI
+        run: |
+          cargo install --path ./cli
+
+      - name: Run Registry CI/CD Pipeline
+        run: |
+          soroban-registry cicd run \
+            --contract-path ${{ inputs.contract_path }} \
+            --network ${{ inputs.network }} \
+            ${{ inputs.skip_scan && '--skip-scan' || '' }}
+        env:
+          SOROBAN_REGISTRY_API_TOKEN: ${{ secrets.SOROBAN_REGISTRY_API_TOKEN }}
