@@ -11,7 +11,7 @@ repository = "https://github.com/ALIPHATICHYD/Soroban-Registry"
 
 [workspace.dependencies]
 # Web framework
-axum = "0.8"
+axum = "0.7"
 tower = "0.5"
 tower-http = { version = "0.6", features = ["cors", "trace"] }
 async-graphql = { version = "7.0", features = ["chrono", "uuid", "dataloader"] }

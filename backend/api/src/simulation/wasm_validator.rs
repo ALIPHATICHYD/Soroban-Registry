@@ -112,10 +112,17 @@ mod tests {
         ];
 
         let result = validate_wasm(&wasm_bytes);
-        
+
         // It shouldn't have WASM parsing errors
-        let has_parse_error = result.errors.iter().any(|e| e.contains("WASM parsing error"));
-        assert!(!has_parse_error, "Should parse successfully, but got errors: {:?}", result.errors);
+        let has_parse_error = result
+            .errors
+            .iter()
+            .any(|e| e.contains("WASM parsing error"));
+        assert!(
+            !has_parse_error,
+            "Should parse successfully, but got errors: {:?}",
+            result.errors
+        );
     }
 
     #[test]
@@ -131,10 +138,16 @@ mod tests {
         ];
 
         let result = validate_wasm(&wasm_bytes);
-        
+
         // This is invalid WASM because the type section needs a count, so we expect a parsing error
-        let has_parse_error = result.errors.iter().any(|e| e.contains("WASM parsing error"));
-        assert!(has_parse_error, "Should fail with a parsing error, but got: {:?}", result.errors);
+        let has_parse_error = result
+            .errors
+            .iter()
+            .any(|e| e.contains("WASM parsing error"));
+        assert!(
+            has_parse_error,
+            "Should fail with a parsing error, but got: {:?}",
+            result.errors
+        );
     }
 }
-

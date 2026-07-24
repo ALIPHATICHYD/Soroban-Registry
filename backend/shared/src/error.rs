@@ -116,7 +116,13 @@ enum RegistryErrorKind {
 
 impl fmt::Display for RegistryError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "[{}] {}: {}", self.error_code, self.category.as_str(), self.kind)
+        write!(
+            f,
+            "[{}] {}: {}",
+            self.error_code,
+            self.category.as_str(),
+            self.kind
+        )
     }
 }
 
@@ -214,7 +220,10 @@ impl RegistryError {
 
     pub fn not_found(msg: impl Into<String>) -> Self {
         let msg_str = msg.into();
-        let error = Self::new(RegistryErrorKind::NotFound(msg_str.clone()), ErrorCategory::NotFound);
+        let error = Self::new(
+            RegistryErrorKind::NotFound(msg_str.clone()),
+            ErrorCategory::NotFound,
+        );
         tracing::warn!(
             category = "not_found",
             error_code = %error.error_code,
@@ -226,7 +235,10 @@ impl RegistryError {
 
     pub fn invalid_input(msg: impl Into<String>) -> Self {
         let msg_str = msg.into();
-        let error = Self::new(RegistryErrorKind::InvalidInput(msg_str.clone()), ErrorCategory::InvalidInput);
+        let error = Self::new(
+            RegistryErrorKind::InvalidInput(msg_str.clone()),
+            ErrorCategory::InvalidInput,
+        );
         tracing::warn!(
             category = "invalid_input",
             error_code = %error.error_code,
@@ -238,7 +250,10 @@ impl RegistryError {
 
     pub fn verification_failed(msg: impl Into<String>) -> Self {
         let msg_str = msg.into();
-        let error = Self::new(RegistryErrorKind::VerificationFailed(msg_str.clone()), ErrorCategory::VerificationFailed);
+        let error = Self::new(
+            RegistryErrorKind::VerificationFailed(msg_str.clone()),
+            ErrorCategory::VerificationFailed,
+        );
         tracing::error!(
             category = "verification_failed",
             error_code = %error.error_code,
@@ -250,7 +265,10 @@ impl RegistryError {
 
     pub fn stellar_rpc(msg: impl Into<String>) -> Self {
         let msg_str = msg.into();
-        let error = Self::new(RegistryErrorKind::StellarRpc(msg_str.clone()), ErrorCategory::StellarRpc);
+        let error = Self::new(
+            RegistryErrorKind::StellarRpc(msg_str.clone()),
+            ErrorCategory::StellarRpc,
+        );
         tracing::error!(
             category = "stellar_rpc",
             error_code = %error.error_code,
@@ -426,7 +444,10 @@ mod tests {
     fn test_error_category_as_str() {
         assert_eq!(ErrorCategory::Database.as_str(), "database");
         assert_eq!(ErrorCategory::Internal.as_str(), "internal");
-        assert_eq!(ErrorCategory::VerificationFailed.as_str(), "verification_failed");
+        assert_eq!(
+            ErrorCategory::VerificationFailed.as_str(),
+            "verification_failed"
+        );
     }
 
     #[test]
@@ -453,8 +474,7 @@ mod tests {
 
     #[test]
     fn test_source_module() {
-        let err = RegistryError::internal("test")
-            .with_source_module("verifier");
+        let err = RegistryError::internal("test").with_source_module("verifier");
         assert_eq!(err.source_module(), Some("verifier"));
     }
 

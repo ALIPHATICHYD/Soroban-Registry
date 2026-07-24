@@ -87,182 +87,217 @@ async fn test_mixed_filter_combinations_and_empty_results() {
     assert_eq!(total, 0, "Expected empty result set total count to be 0");
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Consistency between /api/contracts (list) and /api/v1/contracts/search.
+//
+// Regression coverage for network/category filters drifting between callers:
+// the CLI sends networks comma-joined, which the search endpoint previously
+// parsed as one literal value, silently dropping the filter and returning
+// unfiltered results.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// The list and search endpoints must accept the same filter spellings. The CLI
+/// sends networks comma-joined, so both must parse that form (and tolerate
+/// surrounding whitespace and duplicate values) rather than one silently
+/// treating `"mainnet,testnet"` as a single unknown value.
 #[tokio::test]
 #[ignore = "requires running API + database with contract data"]
-async fn test_network_filter_singular_and_plural() {
+async fn test_both_endpoints_accept_the_same_filter_spellings() {
     let base = api_base_url();
     let client = reqwest::Client::new();
 
-    // Singular network param (backward compatibility)
-    let singular = client
-        .get(format!("{}/api/contracts?network=testnet", base))
-        .send()
-        .await
-        .expect("Singular network param request failed");
-    assert_eq!(singular.status(), StatusCode::OK);
+    let spellings = [
+        "mainnet,testnet",
+        // whitespace around separators
+        "mainnet, testnet",
+        // repeated values collapse rather than erroring
+        "mainnet,mainnet,testnet",
+        // trailing separator / blank entry
+        "mainnet,testnet,",
+    ];
 
-    // Plural networks param with comma-separated
-    let plural_comma = client
-        .get(format!("{}/api/contracts?networks=testnet,mainnet", base))
-        .send()
-        .await
-        .expect("Plural comma-separated networks request failed");
-    assert_eq!(plural_comma.status(), StatusCode::OK);
+    for spelling in spellings {
+        for url in [
+            format!("{}/api/contracts?networks={}", base, spelling),
+            format!(
+                "{}/api/v1/contracts/search?q=token&networks={}",
+                base, spelling
+            ),
+        ] {
+            let res = client
+                .get(&url)
+                .send()
+                .await
+                .expect("filter request failed");
 
-    // Plural networks param with repeated params
-    let plural_repeated = client
-        .get(format!("{}/api/contracts?networks=testnet&networks=mainnet", base))
-        .send()
-        .await
-        .expect("Plural repeated networks request failed");
-    assert_eq!(plural_repeated.status(), StatusCode::OK);
+            assert_eq!(
+                res.status(),
+                StatusCode::OK,
+                "network filter `{spelling}` should be accepted by {url}"
+            );
+        }
+    }
+
+    // Categories must be split the same way on both endpoints.
+    for url in [
+        format!("{}/api/contracts?categories=DeFi,NFT", base),
+        format!(
+            "{}/api/v1/contracts/search?q=token&categories=DeFi,NFT",
+            base
+        ),
+    ] {
+        let res = client
+            .get(&url)
+            .send()
+            .await
+            .expect("category filter request failed");
+
+        assert_eq!(
+            res.status(),
+            StatusCode::OK,
+            "comma-separated categories should be accepted by {url}"
+        );
+    }
 }
 
+/// Search results must respect network and category filters simultaneously.
 #[tokio::test]
 #[ignore = "requires running API + database with contract data"]
-async fn test_category_filter_singular_and_plural() {
+async fn test_search_respects_both_network_and_category_filters() {
     let base = api_base_url();
     let client = reqwest::Client::new();
 
-    // Singular category param (backward compatibility)
-    let singular = client
-        .get(format!("{}/api/contracts?category=DeFi", base))
+    let url = format!(
+        "{}/api/v1/contracts/search?q=token&networks=testnet&categories=DeFi",
+        base
+    );
+
+    let res = client
+        .get(&url)
         .send()
         .await
-        .expect("Singular category param request failed");
-    assert_eq!(singular.status(), StatusCode::OK);
+        .expect("combined filter search request failed");
 
-    // Plural categories param with comma-separated values
-    let plural_comma = client
-        .get(format!("{}/api/contracts?categories=DeFi,NFT", base))
-        .send()
-        .await
-        .expect("Plural comma-separated categories request failed");
-    assert_eq!(plural_comma.status(), StatusCode::OK);
+    assert_eq!(
+        res.status(),
+        StatusCode::OK,
+        "combined network + category search should return 200 OK"
+    );
 
-    // Plural categories param with repeated params
-    let plural_repeated = client
-        .get(format!("{}/api/contracts?categories=DeFi&categories=NFT", base))
-        .send()
-        .await
-        .expect("Plural repeated categories request failed");
-    assert_eq!(plural_repeated.status(), StatusCode::OK);
-}
-
-#[tokio::test]
-#[ignore = "requires running API + database with contract data"]
-async fn test_combined_network_and_category_filters_normalized() {
-    let base = api_base_url();
-    let client = reqwest::Client::new();
-
-    // Combined: network singular + category comma-separated
-    let mixed = client
-        .get(format!(
-            "{}/api/contracts?network=testnet&categories=DeFi,Lending",
-            base
-        ))
-        .send()
-        .await
-        .expect("Mixed singular network + comma categories request failed");
-    assert_eq!(mixed.status(), StatusCode::OK);
-
-    // Combined: networks comma-separated + category singular
-    let mixed2 = client
-        .get(format!(
-            "{}/api/contracts?networks=testnet,mainnet&category=NFT",
-            base
-        ))
-        .send()
-        .await
-        .expect("Mixed comma networks + singular category request failed");
-    assert_eq!(mixed2.status(), StatusCode::OK);
-
-    // Combined: All plural with filters + pagination
-    let mixed3 = client
-        .get(format!(
-            "{}/api/contracts?networks=testnet&categories=DeFi&verified_only=true&limit=10&offset=0",
-            base
-        ))
-        .send()
-        .await
-        .expect("Combined filters with pagination request failed");
-    assert_eq!(mixed3.status(), StatusCode::OK);
-
-    let body3: Value = mixed3
+    let body: Value = res
         .json()
         .await
-        .expect("Failed to deserialize combined filter response");
-    assert!(body3.get("items").is_some(), "Response must include items");
-    assert!(
-        body3.get("total").is_some(),
-        "Response must include total count"
-    );
+        .expect("failed to deserialize search response");
+
+    let results = body
+        .get("results")
+        .and_then(Value::as_array)
+        .expect("search response must include a results array");
+
+    // Vacuously true on an empty dataset, but pins the contract once data exists.
+    for hit in results {
+        assert_eq!(
+            hit.get("network").and_then(Value::as_str),
+            Some("testnet"),
+            "every hit must match the requested network filter: {hit}"
+        );
+        assert_eq!(
+            hit.get("category").and_then(Value::as_str),
+            Some("DeFi"),
+            "every hit must match the requested category filter: {hit}"
+        );
+    }
 }
 
+/// Invalid filter values must fail clearly instead of being silently dropped.
+/// Previously an unparseable network left the filter empty, which returned
+/// every contract rather than reporting the bad input.
 #[tokio::test]
 #[ignore = "requires running API + database with contract data"]
-async fn test_invalid_filter_values_fail_clearly() {
+async fn test_invalid_network_filter_fails_clearly() {
     let base = api_base_url();
     let client = reqwest::Client::new();
 
-    // Invalid network value should return 400 Bad Request
-    let invalid_network = client
-        .get(format!("{}/api/contracts?networks=unknown_network_xyz", base))
-        .send()
-        .await
-        .expect("Invalid network request failed");
+    for bad in ["not_a_network", "mainnet,not_a_network"] {
+        // Both endpoints must reject the same bad input the same way.
+        for url in [
+            format!("{}/api/contracts?networks={}", base, bad),
+            format!("{}/api/v1/contracts/search?q=token&networks={}", base, bad),
+        ] {
+            let res = client
+                .get(&url)
+                .send()
+                .await
+                .expect("invalid network filter request failed");
 
-    assert!(
-        invalid_network.status().is_client_error(),
-        "Invalid network value should produce a client error, got {}",
-        invalid_network.status()
-    );
+            assert_eq!(
+                res.status(),
+                StatusCode::BAD_REQUEST,
+                "invalid network filter `{bad}` must be rejected by {url}, not ignored"
+            );
+
+            let body = res.text().await.unwrap_or_default();
+            assert!(
+                body.contains("not_a_network"),
+                "error from {url} should name the offending value, got: {body}"
+            );
+        }
+    }
 }
 
+/// Pagination must stay stable while filters are applied: the total should not
+/// move between pages and no contract should appear on two pages.
 #[tokio::test]
 #[ignore = "requires running API + database with contract data"]
-async fn test_filtered_pagination_remains_stable() {
+async fn test_filtered_pagination_is_stable() {
     let base = api_base_url();
     let client = reqwest::Client::new();
 
-    // Fetch first page with network filter
-    let page1 = client
-        .get(format!(
-            "{}/api/contracts?networks=testnet&limit=5&offset=0",
-            base
-        ))
-        .send()
-        .await
-        .expect("Page 1 request failed");
-    assert_eq!(page1.status(), StatusCode::OK);
+    let page = |offset: i64| {
+        let url = format!(
+            "{}/api/v1/contracts/search?q=token&networks=mainnet,testnet&categories=DeFi&limit=5&offset={}",
+            base, offset
+        );
+        let client = client.clone();
+        async move {
+            client
+                .get(&url)
+                .send()
+                .await
+                .expect("paginated search request failed")
+                .json::<Value>()
+                .await
+                .expect("failed to deserialize paginated response")
+        }
+    };
 
-    let body1: Value = page1.json().await.expect("Failed to parse page 1");
-    let total1 = body1["total"].as_i64().unwrap_or(0);
-    let items1 = body1["items"].as_array().map(|a| a.len()).unwrap_or(0);
+    let first = page(0).await;
+    let second = page(5).await;
 
-    // Fetch second page
-    let page2 = client
-        .get(format!(
-            "{}/api/contracts?networks=testnet&limit=5&offset=5",
-            base
-        ))
-        .send()
-        .await
-        .expect("Page 2 request failed");
-    assert_eq!(page2.status(), StatusCode::OK);
-
-    let body2: Value = page2.json().await.expect("Failed to parse page 2");
-    let total2 = body2["total"].as_i64().unwrap_or(0);
-
-    // Total count should be consistent across pages
     assert_eq!(
-        total1, total2,
-        "Total contract count should be stable across paginated requests"
+        first.get("total").and_then(Value::as_i64),
+        second.get("total").and_then(Value::as_i64),
+        "total must not change between pages of the same filtered query"
     );
 
-    // Total must be >= items returned
-    assert!(
-        total1 >= items1 as i64,
-        "Total should be >= items returned on page"
-    );
+    let ids = |body: &Value| -> Vec<String> {
+        body.get("results")
+            .and_then(Value::as_array)
+            .map(|results| {
+                results
+                    .iter()
+                    .filter_map(|hit| hit.get("id").and_then(Value::as_str))
+                    .map(str::to_owned)
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+
+    let first_ids = ids(&first);
+    for id in ids(&second) {
+        assert!(
+            !first_ids.contains(&id),
+            "contract {id} appeared on two pages of the same filtered query"
+        );
+    }
 }

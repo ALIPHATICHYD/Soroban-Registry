@@ -1,6 +1,18 @@
 -- Migration: 20260329000000_contract_clone_federation
 -- Features: #487 Contract Mirror/Clone, #499 Federated Contract Registry Protocol
 
+-- No migration in this repo ever creates the `auth_users` table, yet this
+-- migration (and 20260330000000 / 20260330000001) declare foreign keys against
+-- auth_users(id). On a fresh database that FK fails with:
+--   relation "auth_users" does not exist
+-- Create a minimal stub so the referencing constraints resolve. This is only an
+-- FK target (id) — the full auth/user schema is missing from the migration set
+-- and should be added properly as a follow-up.
+CREATE TABLE IF NOT EXISTS auth_users (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
 -- ═══════════════════════════════════════════════════════════════════════════
 -- #487: Contract Clone/Mirror Support
 -- ═══════════════════════════════════════════════════════════════════════════

@@ -77,7 +77,7 @@ impl CacheEntry {
         now_unix().saturating_sub(self.created_at)
     }
 
-    fn expires_in(&self) -> Option<u64> {
+    pub fn expires_in(&self) -> Option<u64> {
         let age = self.age_seconds();
         if age >= self.ttl_seconds {
             None

@@ -5,7 +5,8 @@
 
 #[test]
 fn test_database_validation_migration_exists() {
-    let migration_path = "../../database/migrations/20260601000000_database_validation_constraints.sql";
+    let migration_path =
+        "../../database/migrations/20260601000000_database_validation_constraints.sql";
     assert!(
         std::path::Path::new(migration_path).exists(),
         "Migration file should exist at {}",
@@ -15,7 +16,8 @@ fn test_database_validation_migration_exists() {
 
 #[test]
 fn test_database_validation_migration_contains_core_constraints() {
-    let migration_path = "../../database/migrations/20260601000000_database_validation_constraints.sql";
+    let migration_path =
+        "../../database/migrations/20260601000000_database_validation_constraints.sql";
     let content =
         std::fs::read_to_string(migration_path).expect("Should be able to read migration file");
 
@@ -47,7 +49,8 @@ fn test_database_validation_migration_contains_core_constraints() {
 
 #[test]
 fn test_database_validation_migration_uses_clear_constraint_names() {
-    let migration_path = "../../database/migrations/20260601000000_database_validation_constraints.sql";
+    let migration_path =
+        "../../database/migrations/20260601000000_database_validation_constraints.sql";
     let content =
         std::fs::read_to_string(migration_path).expect("Should be able to read migration file");
 

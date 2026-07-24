@@ -8,6 +8,20 @@
 -- that table is the Ed25519-only package-signing + transparency-log subsystem.
 -- This migration adds the broader verification system (#888) under distinct
 -- table names so the two coexist.
+--
+-- However, the #888 `signing_keys` table below is NOT actually distinct from the
+-- one created by migration 034_package_signing.sql, which already owns the name
+-- with an unrelated schema (publisher_id, key_fingerprint, is_active). Because
+-- the CREATE below uses IF NOT EXISTS, on a fresh database it silently binds to
+-- 034's table and the subsequent index on `owner` fails:
+--   column "owner" does not exist
+-- The backend's signature_verification.rs expects THIS migration's schema
+-- (key_id, owner, status, rotated_to), and 034's table has no backend consumers,
+-- so move 034's table (and its indexes) aside and let #888 own `signing_keys`.
+ALTER TABLE IF EXISTS signing_keys RENAME TO package_signing_keys;
+ALTER INDEX IF EXISTS idx_signing_keys_publisher_id RENAME TO idx_package_signing_keys_publisher_id;
+ALTER INDEX IF EXISTS idx_signing_keys_public_key    RENAME TO idx_package_signing_keys_public_key;
+ALTER INDEX IF EXISTS idx_signing_keys_is_active     RENAME TO idx_package_signing_keys_is_active;
 
 -- ── Signing keys (deployer keys + certificate-chain authorities) ──────────────
 CREATE TABLE IF NOT EXISTS signing_keys (
@@ -71,16 +85,19 @@ CREATE INDEX IF NOT EXISTS idx_contract_signatures_key       ON contract_signatu
 CREATE INDEX IF NOT EXISTS idx_contract_signatures_subject   ON contract_signatures (subject_hash);
 
 -- ── Revocation list ───────────────────────────────────────────────────────────
-CREATE TABLE IF NOT EXISTS signature_revocations (
-    id            BIGSERIAL   PRIMARY KEY,
-    -- Revoked key fingerprint (revokes the key and everything it signed).
-    key_id        TEXT,
-    -- Or a specific revoked signature.
-    signature_id  UUID,
-    reason        TEXT        NOT NULL DEFAULT '',
-    revoked_by    TEXT,
-    revoked_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
+-- Unlike signing_keys, signature_revocations already exists from migration 034
+-- AND is still used by the package-signing path (signing_handlers.rs inserts
+-- signature_id/revoked_by/reason), so it cannot be renamed aside. The original
+-- CREATE TABLE IF NOT EXISTS here silently bound to 034's table, which lacks the
+-- key_id column the #888 index and signature_verification.rs need, failing with:
+--   column "key_id" does not exist
+-- Augment the existing table with the key-based-revocation column instead so both
+-- the package-signing and #888 verification paths share it.
+-- NOTE (follow-up): 034 declares signature_id NOT NULL with an FK to
+-- package_signatures; the #888 key-based revocation path inserts rows with a NULL
+-- signature_id, so fully enabling that path also requires relaxing that
+-- constraint. That is a schema-reconciliation decision left for a dedicated PR.
+ALTER TABLE signature_revocations ADD COLUMN IF NOT EXISTS key_id TEXT;
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_signature_revocations_key
     ON signature_revocations (key_id) WHERE key_id IS NOT NULL;

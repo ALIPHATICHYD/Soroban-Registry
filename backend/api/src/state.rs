@@ -1,8 +1,8 @@
 use crate::ai::service::AIService;
 use crate::auth::AuthManager;
 use crate::cache::{CacheConfig, CacheLayer};
-use crate::crypto::EncryptionService;
 use crate::contract_events::ContractEventHub;
+use crate::crypto::EncryptionService;
 use crate::feature_flags::FeatureFlagManager;
 use crate::health_monitor::HealthMonitorStatus;
 use crate::rate_limit::RateLimitState;

@@ -138,9 +138,7 @@ fn capture_backtrace() -> Option<String> {
 impl ErrorCategory {
     fn from_status(status: StatusCode) -> Self {
         match status {
-            StatusCode::BAD_REQUEST | StatusCode::UNPROCESSABLE_ENTITY => {
-                ErrorCategory::Validation
-            }
+            StatusCode::BAD_REQUEST | StatusCode::UNPROCESSABLE_ENTITY => ErrorCategory::Validation,
             StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN => ErrorCategory::Authentication,
             StatusCode::NOT_FOUND => ErrorCategory::NotFound,
             StatusCode::CONFLICT => ErrorCategory::Conflict,
@@ -187,11 +185,7 @@ fn normalize_error_code(code: impl Into<String>) -> String {
 }
 
 impl ApiError {
-    pub fn new(
-        status: StatusCode,
-        error: impl Into<String>,
-        message: impl Into<String>,
-    ) -> Self {
+    pub fn new(status: StatusCode, error: impl Into<String>, message: impl Into<String>) -> Self {
         let reason = error.into();
         let code = normalize_error_code(reason.clone());
         Self {

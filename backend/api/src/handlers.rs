@@ -16,6 +16,7 @@ use axum::{
     Json,
 };
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
+use chrono::{DateTime, Utc};
 use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use flate2::{write::GzEncoder, Compression};
 use once_cell::sync::Lazy;
@@ -33,10 +34,11 @@ use shared::{
     DeploymentHistoryQueryParams, FavoriteSearch, FieldOperator, GraphResponse,
     InteractionTimeSeriesPoint, InteractionTimeSeriesResponse, InteractionsListResponse,
     InteractionsQueryParams, Network, NetworkConfig, NetworkEndpoints, NetworkHealth,
-    NetworkHealthResponse, NetworkInfo, NetworkListResponse, NetworkStatus, PaginatedResponse,
-    PublishRequest, Publisher, QueryCondition, QueryNode, QueryOperator, SaveFavoriteSearchRequest,
-    SearchSuggestion, SearchSuggestionsResponse, SemVer, TrendingParams,
-    UpdateContractMetadataRequest, UpdateContractStatusRequest, VerifyRequest,
+    NetworkHealthResponse, NetworkInfo, NetworkListResponse, NetworkStatus,
+    PaginatedAuditsResponse, PaginatedResponse, PublishRequest, Publisher, QueryCondition,
+    QueryNode, QueryOperator, SaveFavoriteSearchRequest, SearchSuggestion,
+    SearchSuggestionsResponse, SemVer, TrendingParams, UpdateContractMetadataRequest,
+    UpdateContractStatusRequest, VerifyRequest,
 };
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -88,7 +90,10 @@ use contract_abi::{generate_openapi, parse_json_spec, to_json, to_yaml};
 pub(crate) fn db_internal_error(operation: &str, err: sqlx::Error) -> ApiError {
     tracing::error!(operation = operation, error = ?err, "database operation failed");
     if let sqlx::Error::Database(db_err) = &err {
-        let code = db_err.code().as_deref();
+        // Bind the Cow returned by code() before borrowing it, so the temporary
+        // outlives the `match code` below (fixes E0716: temporary dropped while borrowed).
+        let code = db_err.code();
+        let code = code.as_deref();
         let constraint = db_err.constraint();
         let message = database_constraint_message(operation, constraint, db_err.message());
 
@@ -113,9 +118,7 @@ fn database_constraint_message(
         "chk_publishers_stellar_address_format" => {
             "stellar_address must be a valid Stellar address".to_string()
         }
-        "chk_publishers_email_format" => {
-            "email must be a valid email address".to_string()
-        }
+        "chk_publishers_email_format" => "email must be a valid email address".to_string(),
         "chk_publishers_github_url_format" => {
             "github_url must be a valid http:// or https:// URL".to_string()
         }
@@ -131,42 +134,28 @@ fn database_constraint_message(
         "chk_contracts_slug_format" => {
             "slug must use lowercase letters, numbers, and hyphens".to_string()
         }
-        "chk_contracts_health_score_range" => {
-            "health_score must be between 0 and 100".to_string()
-        }
+        "chk_contracts_health_score_range" => "health_score must be between 0 and 100".to_string(),
         "chk_contracts_deployment_count_non_negative" => {
             "deployment_count must be zero or greater".to_string()
         }
         "chk_contracts_network_configs_object" => {
             "network_configs must be a JSON object".to_string()
         }
-        "chk_contracts_current_version_length" => {
-            "current_version is too long".to_string()
-        }
+        "chk_contracts_current_version_length" => "current_version is too long".to_string(),
         "chk_contributors_stellar_address_format" => {
             "contributor stellar_address must be a valid Stellar address".to_string()
         }
-        "chk_contributors_name_length" => {
-            "contributor name is too long".to_string()
-        }
-        "chk_tags_prefix_not_blank" => {
-            "tag prefix cannot be blank".to_string()
-        }
-        "chk_tags_name_not_blank" => {
-            "tag name cannot be blank".to_string()
-        }
+        "chk_contributors_name_length" => "contributor name is too long".to_string(),
+        "chk_tags_prefix_not_blank" => "tag prefix cannot be blank".to_string(),
+        "chk_tags_name_not_blank" => "tag name cannot be blank".to_string(),
         "chk_tags_usage_count_non_negative" => {
             "tag usage_count must be zero or greater".to_string()
         }
-        "chk_tag_aliases_alias_not_blank" => {
-            "tag alias cannot be blank".to_string()
-        }
+        "chk_tag_aliases_alias_not_blank" => "tag alias cannot be blank".to_string(),
         "chk_tag_usage_log_usage_count_non_negative" => {
             "tag usage log count must be zero or greater".to_string()
         }
-        "chk_organizations_name_not_blank" => {
-            "organization name cannot be blank".to_string()
-        }
+        "chk_organizations_name_not_blank" => "organization name cannot be blank".to_string(),
         "chk_organizations_slug_format" => {
             "organization slug must use lowercase letters, numbers, and hyphens".to_string()
         }
@@ -185,18 +174,10 @@ fn database_constraint_message(
         "chk_contract_versions_source_url_format" => {
             "source_url must be a valid http:// or https:// URL".to_string()
         }
-        "chk_reviews_review_text_length" => {
-            "review_text is too long".to_string()
-        }
-        "chk_reviews_version_length" => {
-            "review version is too long".to_string()
-        }
-        "chk_verifications_error_message_length" => {
-            "error_message is too long".to_string()
-        }
-        "chk_verifications_compiler_version_length" => {
-            "compiler_version is too long".to_string()
-        }
+        "chk_reviews_review_text_length" => "review_text is too long".to_string(),
+        "chk_reviews_version_length" => "review version is too long".to_string(),
+        "chk_verifications_error_message_length" => "error_message is too long".to_string(),
+        "chk_verifications_compiler_version_length" => "compiler_version is too long".to_string(),
         "chk_organization_invitations_email_format" => {
             "organization invitation email must be valid".to_string()
         }
@@ -206,9 +187,7 @@ fn database_constraint_message(
         "chk_organization_invitations_accepted_at_order" => {
             "accepted_at must be null or later than created_at".to_string()
         }
-        "chk_user_preferences_theme" => {
-            "theme must be one of: dark, light, system".to_string()
-        }
+        "chk_user_preferences_theme" => "theme must be one of: dark, light, system".to_string(),
         "chk_user_preferences_language_not_blank" => {
             "language must be between 2 and 10 characters".to_string()
         }
@@ -221,9 +200,7 @@ fn database_constraint_message(
         "chk_user_preferences_webhook_url_format" => {
             "webhook_url must be a valid http:// or https:// URL".to_string()
         }
-        "chk_notification_queue_status" => {
-            "notification queue status is invalid".to_string()
-        }
+        "chk_notification_queue_status" => "notification queue status is invalid".to_string(),
         "chk_notification_queue_priority_range" => {
             "notification queue priority must be between 1 and 10".to_string()
         }
@@ -236,12 +213,8 @@ fn database_constraint_message(
         "chk_notification_delivery_logs_status" => {
             "notification delivery status is invalid".to_string()
         }
-        "chk_contract_version_integrity" => {
-            "contract version data is inconsistent".to_string()
-        }
-        "chk_verification_integrity" => {
-            "verification data is inconsistent".to_string()
-        }
+        "chk_contract_version_integrity" => "contract version data is inconsistent".to_string(),
+        "chk_verification_integrity" => "verification data is inconsistent".to_string(),
         _ => {
             if db_message.trim().is_empty() {
                 format!("{} failed due to a database constraint", operation)
@@ -5461,6 +5434,7 @@ pub async fn verify_contract(
     headers: HeaderMap,
     ValidatedJson(req): ValidatedJson<VerifyRequest>,
 ) -> ApiResult<Json<Value>> {
+    let verification_started = std::time::Instant::now();
     let contract: Contract = sqlx::query_as(
         "SELECT * FROM contracts WHERE contract_id = $1 ORDER BY created_at DESC LIMIT 1",
     )
@@ -5614,6 +5588,11 @@ pub async fn verify_contract(
             )
             .await;
 
+            crate::metrics::observe_verification_latency(
+                "success",
+                verification_started.elapsed().as_secs_f64(),
+            );
+
             Ok(Json(json!({
                 "verified": true,
                 "status": "verified",
@@ -5692,6 +5671,11 @@ pub async fn verify_contract(
                 .map_err(|err| db_internal_error("write failed status audit log", err))?;
             }
 
+            crate::metrics::observe_verification_latency(
+                "failure",
+                verification_started.elapsed().as_secs_f64(),
+            );
+
             Err(ApiError::unprocessable(
                 "VerificationFailed",
                 failure_message,
@@ -5746,6 +5730,11 @@ pub async fn verify_contract(
                     db_internal_error("write verifier error status audit log", db_err)
                 })?;
             }
+
+            crate::metrics::observe_verification_latency(
+                "failure",
+                verification_started.elapsed().as_secs_f64(),
+            );
 
             Err(ApiError::unprocessable(
                 "VerificationFailed",

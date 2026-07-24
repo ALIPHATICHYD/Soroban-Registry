@@ -2,6 +2,21 @@
 -- Issue #526: Contract Statistics CLI Command
 -- Purpose: Pre-computed aggregates for fast statistics queries
 
+-- The contract<->tag junction table is referenced throughout the backend
+-- (INSERT INTO contract_tags ..., and the mv_tag_stats view below) but no
+-- earlier migration ever created it, so `mv_tag_stats` fails on a fresh DB with:
+-- relation "contract_tags" does not exist. Create the standard many-to-many
+-- junction here (idempotent) so the view builds and tag features work.
+CREATE TABLE IF NOT EXISTS contract_tags (
+    contract_id UUID NOT NULL REFERENCES contracts(id) ON DELETE CASCADE,
+    tag_id UUID NOT NULL REFERENCES tags(id) ON DELETE CASCADE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (contract_id, tag_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_contract_tags_contract_id ON contract_tags(contract_id);
+CREATE INDEX IF NOT EXISTS idx_contract_tags_tag_id ON contract_tags(tag_id);
+
 -- Create materialized view for contract statistics (refresh periodically)
 CREATE MATERIALIZED VIEW IF NOT EXISTS mv_contract_stats AS
 SELECT 
@@ -138,10 +153,19 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- Grant permissions
-GRANT SELECT ON mv_contract_stats TO registry_user;
-GRANT SELECT ON mv_network_stats TO registry_user;
-GRANT SELECT ON mv_category_stats TO registry_user;
-GRANT SELECT ON mv_top_contracts TO registry_user;
-GRANT SELECT ON mv_monthly_growth TO registry_user;
-GRANT SELECT ON mv_tag_stats TO registry_user;
+-- Grant permissions.
+-- `registry_user` is the runtime role in the Docker/production deployment; it is
+-- not created by any migration, so an unguarded GRANT fails on databases that do
+-- not provision it (e.g. local dev). Grant only when the role exists. (Migration
+-- 077 side-steps the same issue by commenting its grants out entirely.)
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'registry_user') THEN
+    GRANT SELECT ON mv_contract_stats TO registry_user;
+    GRANT SELECT ON mv_network_stats TO registry_user;
+    GRANT SELECT ON mv_category_stats TO registry_user;
+    GRANT SELECT ON mv_top_contracts TO registry_user;
+    GRANT SELECT ON mv_monthly_growth TO registry_user;
+    GRANT SELECT ON mv_tag_stats TO registry_user;
+  END IF;
+END $$;

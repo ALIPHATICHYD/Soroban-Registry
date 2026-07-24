@@ -9,6 +9,9 @@ use sqlx::PgPool;
 
 use crate::error::ApiError;
 use crate::state::AppState;
+
+/// Full-text search queries slower than this are counted as slow for alerting.
+const SEARCH_SLOW_QUERY_MS: u64 = 500;
 use axum::{
     extract::{Query, State},
     Json,
@@ -90,10 +93,12 @@ impl PostgresSearchService {
                 c.slug,
                 c.verification_status,
                 c.current_version,
+                -- ts_rank returns `real` (FLOAT4); the row struct decodes an f64,
+                -- so cast explicitly or decoding fails once rows are returned.
                 ts_rank(
                     setweight(c.name_search, 'A') || setweight(c.description_search, 'B'),
                     contracts_build_tsquery($1)
-                ) as relevance_score
+                )::float8 as relevance_score
             FROM contracts c
             WHERE contracts_build_tsquery($1) IS NOT NULL
         "#,
@@ -155,18 +160,27 @@ impl PostgresSearchService {
         let offset = query.offset.unwrap_or(0).max(0);
 
         sql.push_str(" ORDER BY relevance_score DESC");
-        sql.push_str(&format!(
-            " LIMIT ${} OFFSET ${}",
-            param_index,
-            param_index + 1
-        ));
-        args.push(limit.to_string());
-        args.push(offset.to_string());
+        // `args` is a Vec<String>, so every element binds as text. Postgres rejects
+        // that for pagination ("argument of OFFSET must be type bigint, not type
+        // text"), which made every fallback search fail. Both values are already
+        // clamped integers, so inline them rather than binding them as text.
+        sql.push_str(&format!(" LIMIT {} OFFSET {}", limit, offset));
 
-        // Count total for pagination
+        // Count total for pagination. Reuse only the WHERE conditions: splitting on
+        // "ORDER BY" alone left the whole SELECT in place, producing
+        // "... WHERE SELECT ..." and a syntax error. Splitting on the first WHERE
+        // keeps any nested one (e.g. the tags EXISTS sub-query) intact.
+        let filter_conditions = sql
+            .split("ORDER BY")
+            .next()
+            .unwrap_or("")
+            .split_once("WHERE")
+            .map(|(_, conditions)| conditions.trim())
+            .unwrap_or("TRUE");
+
         let count_sql = format!(
             "SELECT COUNT(*) FROM contracts c WHERE {}",
-            sql.split("ORDER BY").next().unwrap_or("").trim()
+            filter_conditions
         );
 
         // Execute search query
@@ -178,12 +192,23 @@ impl PostgresSearchService {
         let rows = query_builder.fetch_all(&self.db).await?;
 
         let mut count_query = sqlx::query_scalar::<_, i64>(&count_sql);
-        for arg in args.iter().take(args.len() - 2) {
+        // Previously skipped the trailing two args (limit/offset); those are no
+        // longer bound, so the count query takes the same filter args as the search.
+        for arg in &args {
             count_query = count_query.bind(arg);
         }
         let total = count_query.fetch_one(&self.db).await?;
 
         let took = start_time.elapsed().as_millis() as u64;
+
+        crate::metrics::SEARCH_QUERY_DURATION
+            .with_label_values(&["fulltext"])
+            .observe(took as f64 / 1000.0);
+        if took >= SEARCH_SLOW_QUERY_MS {
+            crate::metrics::SEARCH_SLOW_QUERIES
+                .with_label_values(&["fulltext"])
+                .inc();
+        }
 
         let contracts = rows
             .into_iter()

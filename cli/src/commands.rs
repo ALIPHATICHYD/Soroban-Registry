@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use serde_yaml;
 use std::collections::BTreeMap;
+use std::collections::HashSet;
 use std::fmt;
 use std::fs;
 use std::path::PathBuf;
@@ -121,6 +122,41 @@ pub fn profile(
     Ok(())
 }
 
+/// Split a repeatable filter flag into individual values, so
+/// `--category a,b` and `--category a --category b` produce the same list.
+/// Trims whitespace, drops blanks, and de-duplicates while preserving order.
+fn normalize_filter_values(values: &[String]) -> Vec<String> {
+    let mut seen = HashSet::new();
+    let mut normalized = Vec::new();
+
+    for value in values {
+        for part in value.split(',').map(str::trim).filter(|p| !p.is_empty()) {
+            if seen.insert(part.to_string()) {
+                normalized.push(part.to_string());
+            }
+        }
+    }
+
+    normalized
+}
+
+/// Normalize network filters to their canonical lowercase names, rejecting
+/// unknown values before any request is sent so invalid input fails clearly
+/// and locally instead of silently returning unfiltered results.
+fn normalize_network_filters(values: &[String]) -> Result<Vec<String>> {
+    let mut seen = HashSet::new();
+    let mut normalized = Vec::new();
+
+    for value in normalize_filter_values(values) {
+        let canonical = Network::from_str(&value)?.to_string();
+        if seen.insert(canonical.clone()) {
+            normalized.push(canonical);
+        }
+    }
+
+    Ok(normalized)
+}
+
 #[allow(clippy::too_many_arguments)]
 pub async fn search(
     api_url: &str,
@@ -142,6 +178,13 @@ pub async fn search(
         ("offset", offset.to_string()),
     ];
 
+    // Normalize before sending so comma-separated and repeated flags produce an
+    // identical request, and unknown networks fail here rather than being
+    // silently dropped server-side.
+    let networks = normalize_network_filters(&networks)?;
+    let categories =
+        normalize_filter_values(&category.map(str::to_string).into_iter().collect::<Vec<_>>());
+
     if !networks.is_empty() {
         params.push(("networks", networks.join(",")));
     } else {
@@ -152,10 +195,8 @@ pub async fn search(
         params.push(("verified_only", "true".to_string()));
     }
 
-    if let Some(cat) = category {
-        params.push(("category", cat.to_string()));
-        // Also send normalized categories param for backend consistency
-        params.push(("categories", cat.to_string()));
+    if !categories.is_empty() {
+        params.push(("categories", categories.join(",")));
     }
 
     if let Some(s) = sort {
@@ -163,8 +204,10 @@ pub async fn search(
     }
 
     let url = format!("{}/api/contracts", api_url);
-    let query: Vec<(&str, String)> = params.iter().map(|(k, v)| (*k, v.clone())).collect();
-    let (status, body) = crate::cached_http::cached_get(&url, &query)
+    // Named `query_pairs`, not `query`: it previously shadowed the `query: &str`
+    // parameter, which the result-rendering code below still needs.
+    let query_pairs: Vec<(&str, String)> = params.iter().map(|(k, v)| (*k, v.clone())).collect();
+    let (status, body) = crate::cached_http::cached_get(&url, &query_pairs)
         .await
         .context("Failed to search contracts")?;
 
@@ -211,8 +254,8 @@ pub async fn search(
     if !networks.is_empty() {
         active_filters.push(format!("network: {}", networks.join(", ")));
     }
-    if let Some(cat) = category {
-        active_filters.push(format!("category: {}", cat));
+    if !categories.is_empty() {
+        active_filters.push(format!("category: {}", categories.join(", ")));
     }
     if verified_only {
         active_filters.push("verified only".to_string());
@@ -229,7 +272,7 @@ pub async fn search(
         println!("{}", "No contracts found matching your filters.".yellow());
         println!("\n{}", "Suggestions:".bold());
         println!("  • Try a broader search query");
-        if category.is_some() {
+        if !categories.is_empty() {
             println!("  • Remove the --category filter to see all contract types");
         }
         if !networks.is_empty() {
@@ -998,6 +1041,7 @@ pub async fn contract_list(
     limit: usize,
     offset: usize,
     network: Option<crate::config::Network>,
+    networks: Vec<String>,
     category: Option<String>,
     format: &str,
 ) -> Result<()> {
@@ -1006,11 +1050,20 @@ pub async fn contract_list(
         ("page", ((offset / limit) + 1).to_string()),
     ];
 
-    if let Some(net) = network {
+    // Normalize before sending so comma-separated `--networks`/`--category` and
+    // the singular `--network` flag produce the same request shape as `search`,
+    // and unknown networks fail here rather than being silently dropped server-side.
+    let networks = normalize_network_filters(&networks)?;
+    let categories = normalize_filter_values(&category.into_iter().collect::<Vec<_>>());
+
+    if !networks.is_empty() {
+        query.push(("networks", networks.join(",")));
+    } else if let Some(net) = network {
         query.push(("network", net.to_string()));
     }
-    if let Some(cat) = category {
-        query.push(("category", cat));
+
+    if !categories.is_empty() {
+        query.push(("categories", categories.join(",")));
     }
 
     let url = format!("{}/api/contracts", api_url.trim_end_matches('/'));
@@ -1216,6 +1269,7 @@ pub async fn list(
         limit,
         0,
         Some(network),
+        Vec::new(),
         None,
         if json { "json" } else { "table" },
     )

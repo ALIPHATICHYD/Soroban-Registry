@@ -29,183 +29,135 @@ fn get_binary_path() -> PathBuf {
 }
 
 #[test]
-fn test_search_help() {
+fn test_list_help() {
     let output = Command::new(get_binary_path())
-        .arg("search")
+        .arg("list")
         .arg("--help")
         .output()
         .expect("Failed to execute command");
 
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("--verified-only"));
+    assert!(stdout.contains("--network"));
+    assert!(stdout.contains("--networks"));
     assert!(stdout.contains("--category"));
     assert!(stdout.contains("--limit"));
     assert!(stdout.contains("--offset"));
-    assert!(stdout.contains("--json"));
-    assert!(stdout.contains("--network"));
+    assert!(stdout.contains("--format"));
 }
 
 #[test]
-fn test_search_fails_gracefully_without_api() {
-    let output = Command::new(get_binary_path())
-        .arg("--api-url")
-        .arg("http://127.0.0.1:9999") // Use a port that is unlikely to be in use
-        .arg("search")
-        .arg("token")
-        .output()
-        .expect("Failed to execute command");
-
-    // The command should fail because it can't connect to the API.
-    assert!(!output.status.success());
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    // Check for the expected error message from the `search` function's context.
-    assert!(stderr.contains("Failed to search contracts"));
-    // Ensure it's not an argument parsing error.
-    assert!(!stderr.contains("unexpected argument"));
-}
-
-#[test]
-fn test_search_with_all_flags_parses_correctly() {
+fn test_list_fails_gracefully_without_api() {
     let output = Command::new(get_binary_path())
         .arg("--api-url")
         .arg("http://127.0.0.1:9999")
-        .arg("search")
-        .arg("test-query")
-        .arg("--verified-only")
-        .arg("--category")
-        .arg("defi")
-        .arg("--limit")
-        .arg("5")
-        .arg("--offset")
-        .arg("10")
-        .arg("--network")
-        .arg("testnet")
-        .arg("--json")
+        .arg("list")
         .output()
         .expect("Failed to execute command");
 
     assert!(!output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("Failed to search contracts"));
+    assert!(stderr.contains("Failed to list contracts"));
     assert!(!stderr.contains("unexpected argument"));
 }
 
 #[test]
-fn test_search_with_multiple_networks() {
+fn test_list_with_multiple_networks_parses_correctly() {
     let output = Command::new(get_binary_path())
         .arg("--api-url")
         .arg("http://127.0.0.1:9999")
-        .arg("search")
-        .arg("swap")
+        .arg("list")
         .arg("--networks")
-        .arg("testnet,mainnet,futurenet")
+        .arg("mainnet,testnet,futurenet")
         .output()
         .expect("Failed to execute command");
 
     assert!(!output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("Failed to search contracts"));
+    assert!(stderr.contains("Failed to list contracts"));
     assert!(!stderr.contains("unexpected argument"));
 }
 
 #[test]
-fn test_search_with_verified_and_category_filter() {
+fn test_list_with_comma_separated_categories_parses_correctly() {
     let output = Command::new(get_binary_path())
         .arg("--api-url")
         .arg("http://127.0.0.1:9999")
-        .arg("search")
-        .arg("lending")
-        .arg("--verified-only")
+        .arg("list")
         .arg("--category")
-        .arg("lending")
+        .arg("DeFi,NFT")
         .output()
         .expect("Failed to execute command");
 
     assert!(!output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("Failed to search contracts"));
+    assert!(stderr.contains("Failed to list contracts"));
     assert!(!stderr.contains("unexpected argument"));
 }
 
 #[test]
-fn test_search_with_all_combined_filters() {
+fn test_list_with_combined_network_and_category_filters() {
     let output = Command::new(get_binary_path())
         .arg("--api-url")
         .arg("http://127.0.0.1:9999")
-        .arg("search")
-        .arg("pool")
+        .arg("list")
         .arg("--networks")
         .arg("mainnet,testnet")
-        .arg("--verified-only")
         .arg("--category")
         .arg("dex")
-        .arg("--sort")
-        .arg("updated")
         .arg("--limit")
         .arg("10")
-        .arg("--json")
-        .output()
-        .expect("Failed to execute command");
-
-    assert!(!output.status.success());
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("Failed to search contracts"));
-    assert!(!stderr.contains("unexpected argument"));
-}
-
-#[test]
-fn test_search_json_format_parses_correctly() {
-    let output = Command::new(get_binary_path())
-        .arg("--api-url")
-        .arg("http://127.0.0.1:9999")
-        .arg("search")
-        .arg("token")
-        .arg("--json")
-        .output()
-        .expect("Failed to execute command");
-
-    assert!(!output.status.success());
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("Failed to search contracts"));
-}
-
-#[test]
-fn test_search_with_pagination_parameters() {
-    let output = Command::new(get_binary_path())
-        .arg("--api-url")
-        .arg("http://127.0.0.1:9999")
-        .arg("search")
-        .arg("contract")
-        .arg("--limit")
-        .arg("50")
         .arg("--offset")
-        .arg("100")
+        .arg("20")
         .output()
         .expect("Failed to execute command");
 
     assert!(!output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("Failed to search contracts"));
+    assert!(stderr.contains("Failed to list contracts"));
     assert!(!stderr.contains("unexpected argument"));
 }
 
 #[test]
-fn test_search_sort_by_options() {
-    for sort_option in &["name", "created", "updated", "relevance"] {
-        let output = Command::new(get_binary_path())
-            .arg("--api-url")
-            .arg("http://127.0.0.1:9999")
-            .arg("search")
-            .arg("test")
-            .arg("--sort")
-            .arg(sort_option)
-            .output()
-            .expect("Failed to execute command");
+fn test_list_with_global_network_flag_still_works() {
+    // `list` has no subcommand-local `--network` (it would collide with the
+    // global `--network` arg id and panic — see the comment on `Commands::List`).
+    // A single network is instead selected via the global flag, before the
+    // subcommand name.
+    let output = Command::new(get_binary_path())
+        .arg("--api-url")
+        .arg("http://127.0.0.1:9999")
+        .arg("--network")
+        .arg("testnet")
+        .arg("list")
+        .output()
+        .expect("Failed to execute command");
 
-        assert!(!output.status.success());
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        assert!(stderr.contains("Failed to search contracts"));
-        assert!(!stderr.contains("unexpected argument"), "Failed for sort option: {}", sort_option);
-    }
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("Failed to list contracts"));
+    assert!(!stderr.contains("unexpected argument"));
+    assert!(!stderr.contains("panicked"));
+}
+
+#[test]
+fn test_list_rejects_invalid_network_filter_clearly() {
+    let output = Command::new(get_binary_path())
+        .arg("--api-url")
+        .arg("http://127.0.0.1:9999")
+        .arg("list")
+        .arg("--networks")
+        .arg("bogusnet")
+        .output()
+        .expect("Failed to execute command");
+
+    // Invalid network values should fail locally, with a clear error, before
+    // any request is attempted — not surface as a generic connection failure.
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("Invalid network"),
+        "expected a clear invalid-network error, got: {stderr}"
+    );
+    assert!(!stderr.contains("Failed to list contracts"));
 }

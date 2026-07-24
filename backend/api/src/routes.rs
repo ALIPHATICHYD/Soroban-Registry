@@ -861,6 +861,10 @@ pub fn health_routes() -> Router<AppState> {
         .route("/health/live", get(handlers::health_check_live))
         .route("/health/ready", get(handlers::health_check_ready))
         .route("/health/detailed", get(handlers::health_check_detailed))
+        .route(
+            "/health/services",
+            get(crate::service_health::health_check_services),
+        )
         .route("/api/v1/health", get(v1_contract_handlers::health_v1))
         .route("/api/stats", get(stats::get_stats_handler))
         .route(
@@ -1098,7 +1102,6 @@ pub fn admin_routes() -> Router<AppState> {
             "/api/admin/audit-logs/cleanup",
             post(handlers::handle_retention_cleanup),
         )
-        .merge(migration_routes())
         // Category management (issue #414) – admin-only write endpoints
         .route(
             "/api/admin/categories",

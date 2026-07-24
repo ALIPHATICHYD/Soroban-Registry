@@ -22,18 +22,36 @@ use crate::state::AppState;
 
 // ── Query parameters ──────────────────────────────────────────────────────────
 
+/// Accept a comma-separated list filter, delegating to the same helper
+/// `/api/contracts` uses so both endpoints interpret `networks=`/`categories=`
+/// identically (same splitting, trimming and blank handling).
+fn deserialize_csv_list<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Ok(shared::deserialize_optional_string_list(deserializer)?.unwrap_or_default())
+}
+
 #[derive(Debug, Deserialize)]
 pub struct AdvancedSearchParams {
     /// Full-text search query (name, description, category)
     pub q: Option<String>,
 
-    /// Filter by one or more networks (repeatable: ?networks=mainnet&networks=testnet)
-    #[serde(default)]
+    /// Filter by one or more networks, comma-separated
+    /// (`?networks=mainnet,testnet`), matching `/api/contracts`.
+    #[serde(default, deserialize_with = "deserialize_csv_list")]
     pub networks: Vec<String>,
 
-    /// Filter by one or more categories (repeatable)
-    #[serde(default)]
+    /// Singular alias for `networks`, accepted for parity with `/api/contracts`.
+    pub network: Option<String>,
+
+    /// Filter by one or more categories, comma-separated
+    /// (`?categories=DeFi,NFT`), matching `/api/contracts`.
+    #[serde(default, deserialize_with = "deserialize_csv_list")]
     pub categories: Vec<String>,
+
+    /// Singular alias for `categories`, accepted for parity with `/api/contracts`.
+    pub category: Option<String>,
 
     /// Only return verified contracts
     pub verified_only: Option<bool>,
@@ -125,26 +143,72 @@ pub async fn advanced_search(
     let sort_by = params.sort_by.clone().unwrap_or(SortField::Relevance);
     let explain = params.explain.unwrap_or(false);
 
-    // Parse networks
-    let networks: Option<Vec<Network>> = if params.networks.is_empty() {
+    // Parse networks. The singular `network` alias is folded in so this endpoint
+    // accepts the same filter shapes as `/api/contracts`.
+    let requested_networks: Vec<String> = params
+        .networks
+        .iter()
+        .cloned()
+        .chain(params.network.clone())
+        .flat_map(|value| {
+            value
+                .split(',')
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_owned)
+                .collect::<Vec<_>>()
+        })
+        .collect();
+
+    // Reject unknown values rather than silently dropping them: previously an
+    // unparseable filter (e.g. the CLI's comma-joined "mainnet,testnet") left the
+    // filter empty and returned every contract unfiltered.
+    let invalid_networks: Vec<String> = requested_networks
+        .iter()
+        .filter(|value| parse_network(value).is_none())
+        .cloned()
+        .collect();
+
+    if !invalid_networks.is_empty() {
+        return Err(ApiError::bad_request(
+            "InvalidNetworkFilter",
+            format!(
+                "invalid network filter value(s): {}; expected mainnet, testnet, or futurenet",
+                invalid_networks.join(", ")
+            ),
+        ));
+    }
+
+    let networks: Option<Vec<Network>> = if requested_networks.is_empty() {
         None
     } else {
-        let parsed: Vec<Network> = params
-            .networks
-            .iter()
-            .filter_map(|n| parse_network(n))
-            .collect();
-        if parsed.is_empty() {
-            None
-        } else {
-            Some(parsed)
-        }
+        Some(
+            requested_networks
+                .iter()
+                .filter_map(|value| parse_network(value))
+                .collect(),
+        )
     };
 
-    let categories: Option<Vec<String>> = if params.categories.is_empty() {
+    let requested_categories: Vec<String> = params
+        .categories
+        .iter()
+        .cloned()
+        .chain(params.category.clone())
+        .flat_map(|value| {
+            value
+                .split(',')
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_owned)
+                .collect::<Vec<_>>()
+        })
+        .collect();
+
+    let categories: Option<Vec<String>> = if requested_categories.is_empty() {
         None
     } else {
-        Some(params.categories.clone())
+        Some(requested_categories)
     };
 
     // ── Try Elasticsearch first ───────────────────────────────────────────────

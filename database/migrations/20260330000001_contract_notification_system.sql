@@ -197,33 +197,15 @@ ALTER TABLE webhook_configurations
 -- Notification Templates
 -- ═══════════════════════════════════════════════════════════════════════════
 
--- Templates for different notification types
-CREATE TABLE notification_templates (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    notification_type notification_type NOT NULL UNIQUE,
-    
-    -- Template content
-    subject_template VARCHAR(500) NOT NULL,
-    body_template TEXT NOT NULL,
-    template_variables TEXT[], -- List of supported variables
-    
-    -- Channel-specific templates
-    email_subject_template VARCHAR(500),
-    email_body_template TEXT,
-    webhook_payload_template JSONB,
-    push_title_template VARCHAR(200),
-    push_body_template TEXT,
-    
-    -- Localization
-    language VARCHAR(10) NOT NULL DEFAULT 'en',
-    
-    is_active BOOLEAN NOT NULL DEFAULT TRUE,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
-CREATE INDEX idx_notification_templates_type ON notification_templates(notification_type);
-CREATE INDEX idx_notification_templates_active ON notification_templates(is_active);
+-- NOTE: `notification_templates` is already created by migration
+-- 044_add_disaster_recovery_tables.sql with columns
+-- (name, subject, message_template, channel). Re-creating it here failed with
+-- "relation \"notification_templates\" already exists", and the definition that
+-- previously lived here declared an entirely different, unused schema (the seed
+-- INSERT further down, the backend in notification_handlers.rs, and migration
+-- 069 all use the 044 columns). The duplicate CREATE TABLE and its indexes on
+-- columns that don't exist in the 044 table have been removed; this migration
+-- now reuses the existing table (see the seed INSERT below).
 
 -- ═══════════════════════════════════════════════════════════════════════════
 -- Batch Notification Processing

@@ -121,17 +121,23 @@ impl DatabaseConfig {
         let idle_timeout_secs = env::var("DB_IDLE_TIMEOUT_SECS")
             .unwrap_or_else(|_| "600".to_string())
             .parse::<u64>()
-            .map_err(|e| ConfigError::InvalidConfig(format!("Invalid DB_IDLE_TIMEOUT_SECS: {}", e)))?;
+            .map_err(|e| {
+                ConfigError::InvalidConfig(format!("Invalid DB_IDLE_TIMEOUT_SECS: {}", e))
+            })?;
 
         let max_lifetime_secs = env::var("DB_MAX_LIFETIME_SECS")
             .unwrap_or_else(|_| "1800".to_string())
             .parse::<u64>()
-            .map_err(|e| ConfigError::InvalidConfig(format!("Invalid DB_MAX_LIFETIME_SECS: {}", e)))?;
+            .map_err(|e| {
+                ConfigError::InvalidConfig(format!("Invalid DB_MAX_LIFETIME_SECS: {}", e))
+            })?;
 
         let slow_query_threshold_ms = env::var("DB_SLOW_QUERY_THRESHOLD_MS")
             .unwrap_or_else(|_| "100".to_string())
             .parse::<f64>()
-            .map_err(|e| ConfigError::InvalidConfig(format!("Invalid DB_SLOW_QUERY_THRESHOLD_MS: {}", e)))?;
+            .map_err(|e| {
+                ConfigError::InvalidConfig(format!("Invalid DB_SLOW_QUERY_THRESHOLD_MS: {}", e))
+            })?;
 
         debug!(
             "Database configuration loaded: min_connections={}, max_connections={}, idle_timeout={}s",

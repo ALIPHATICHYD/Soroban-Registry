@@ -37,7 +37,10 @@ fn encrypt_backup_field(
 
 /// Decrypt an encrypted backup field in place, leaving legacy plaintext rows
 /// untouched. Transparent to API consumers.
-fn decrypt_backup_field(enc: &EncryptionService, field: &mut Option<serde_json::Value>) -> ApiResult<()> {
+fn decrypt_backup_field(
+    enc: &EncryptionService,
+    field: &mut Option<serde_json::Value>,
+) -> ApiResult<()> {
     if let Some(serde_json::Value::String(stored)) = field.as_ref() {
         let decrypted = enc
             .decrypt_json(stored)

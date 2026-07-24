@@ -295,17 +295,25 @@ where
     deserializer.deserialize_any(NetworksVisitor)
 }
 
-fn deserialize_optional_strings<'de, D>(deserializer: D) -> Result<Option<Vec<String>>, D::Error>
+/// Deserialize a free-form string filter that may arrive either as a
+/// comma-separated string (`?categories=DeFi,NFT`) or as repeated query
+/// parameters (`?categories=DeFi&categories=NFT`), so both callers agree.
+///
+/// Blank entries are dropped and an all-blank filter deserializes to `None`,
+/// matching `deserialize_optional_networks`.
+pub fn deserialize_optional_string_list<'de, D>(
+    deserializer: D,
+) -> Result<Option<Vec<String>>, D::Error>
 where
     D: serde::Deserializer<'de>,
 {
-    struct StringsVisitor;
+    struct StringListVisitor;
 
-    impl<'de> Visitor<'de> for StringsVisitor {
+    impl<'de> Visitor<'de> for StringListVisitor {
         type Value = Option<Vec<String>>;
 
         fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-            formatter.write_str("a comma-separated string or sequence of strings")
+            formatter.write_str("a comma-separated string or sequence of values")
         }
 
         fn visit_none<E>(self) -> Result<Self::Value, E>
@@ -327,12 +335,17 @@ where
             A: SeqAccess<'de>,
         {
             let mut values = Vec::new();
-            while let Some(v) = seq.next_element::<String>()? {
-                let trimmed = v.trim().to_string();
-                if !trimmed.is_empty() {
-                    values.push(trimmed);
-                }
+            // Repeated params may themselves be comma-separated, so split again.
+            while let Some(value) = seq.next_element::<String>()? {
+                values.extend(
+                    value
+                        .split(',')
+                        .map(str::trim)
+                        .filter(|value| !value.is_empty())
+                        .map(str::to_owned),
+                );
             }
+
             if values.is_empty() {
                 Ok(None)
             } else {
@@ -347,9 +360,10 @@ where
             let values: Vec<String> = value
                 .split(',')
                 .map(str::trim)
-                .filter(|s| !s.is_empty())
-                .map(|s| s.to_string())
+                .filter(|value| !value.is_empty())
+                .map(str::to_owned)
                 .collect();
+
             if values.is_empty() {
                 Ok(None)
             } else {
@@ -372,7 +386,7 @@ where
         }
     }
 
-    deserializer.deserialize_any(StringsVisitor)
+    deserializer.deserialize_any(StringListVisitor)
 }
 
 /// Upgrade strategy for contract upgrades
@@ -1198,16 +1212,20 @@ pub enum SortOrder {
 pub struct ContractSearchParams {
     pub query: Option<String>,
     pub network: Option<Network>,
-    /// Multiple networks filter (e.g. ?networks=mainnet&networks=testnet)
+    /// Multiple networks filter, comma-separated: `?networks=mainnet,testnet`.
+    /// (Repeating the key is rejected by the query extractor as a duplicate
+    /// field; a sequence is still accepted when deserializing from JSON.)
     #[serde(default, deserialize_with = "deserialize_optional_networks")]
     pub networks: Option<Vec<Network>>,
     pub verified_only: Option<bool>,
     /// Filter by verification_status (unverified, pending, verified, failed)
     pub verification_status: Option<VerificationStatus>,
     pub category: Option<String>,
-    /// Multiple categories filter (e.g. ?categories=DeFi&categories=NFT or ?categories=DeFi,NFT)
-    #[serde(default, deserialize_with = "deserialize_optional_strings")]
+    /// Multiple categories filter, comma-separated: `?categories=DeFi,NFT`.
+    #[serde(default, deserialize_with = "deserialize_optional_string_list")]
     pub categories: Option<Vec<String>>,
+    /// Multiple tags filter, comma-separated: `?tags=defi,amm`.
+    #[serde(default, deserialize_with = "deserialize_optional_string_list")]
     pub tags: Option<Vec<String>>,
     pub maturity: Option<MaturityLevel>,
     pub page: Option<i64>,

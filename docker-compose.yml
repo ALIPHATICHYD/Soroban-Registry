@@ -235,9 +235,18 @@ services:
   alertmanager:
     image: prom/alertmanager:v0.26.0
     container_name: soroban-alertmanager
+    # alertmanager.yml points slack_api_url_file/routing_key_file at
+    # /alertmanager/secrets/*; materialize those from env vars before the
+    # binary starts, since Alertmanager's config file has no native env
+    # expansion. Empty values are fine locally — Alertmanager only reads the
+    # file contents when it actually sends a notification.
+    entrypoint: ["/bin/sh", "-c"]
     command:
-      - --config.file=/etc/alertmanager/alertmanager.yml
-      - --storage.path=/alertmanager
+      - |
+        mkdir -p /alertmanager/secrets
+        printf '%s' "$$SLACK_WEBHOOK_URL" > /alertmanager/secrets/slack_webhook_url
+        printf '%s' "$$PAGERDUTY_SERVICE_KEY" > /alertmanager/secrets/pagerduty_routing_key
+        exec /bin/alertmanager --config.file=/etc/alertmanager/alertmanager.yml --storage.path=/alertmanager
     environment:
       SLACK_WEBHOOK_URL: ${SLACK_WEBHOOK_URL:-}
       PAGERDUTY_SERVICE_KEY: ${PAGERDUTY_SERVICE_KEY:-}

@@ -19,3 +19,146 @@ groups:
           summary: Database replication health is degraded
           description: The replica monitor reports an unhealthy replication state.
 
+  - name: registry-uptime
+    rules:
+      - alert: RegistryAPIDown
+        expr: up{job="soroban-registry-api"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: Registry API is unreachable
+          description: Prometheus has failed to scrape {{ $labels.instance }} for at least 1 minute. The registry API is likely down.
+
+      - alert: RegistryAvailabilitySLOBreach
+        expr: avg_over_time(up{job="soroban-registry-api"}[30d]) < 0.995
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: Registry 30-day availability SLO breached
+          description: 30-day scrape availability is {{ $value | humanizePercentage }}, below the 99.5% SLO target.
+
+  - name: registry-error-rate
+    rules:
+      - alert: RegistryHighErrorRate
+        expr: |
+          sum(rate(http_requests_total{status=~"5.."}[5m]))
+            /
+          sum(rate(http_requests_total[5m]))
+          > 0.02
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: Registry API 5xx error rate is elevated
+          description: "{{ $value | humanizePercentage }} of requests over the last 5m returned a 5xx status, above the 2% warning threshold."
+
+      - alert: RegistryCriticalErrorRate
+        expr: |
+          sum(rate(http_requests_total{status=~"5.."}[5m]))
+            /
+          sum(rate(http_requests_total[5m]))
+          > 0.05
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: Registry API 5xx error rate is critical
+          description: "{{ $value | humanizePercentage }} of requests over the last 5m returned a 5xx status, above the 5% critical threshold."
+
+  - name: registry-latency
+    rules:
+      - alert: RegistryHighLatencyP95
+        expr: |
+          histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket[5m])) by (le)) > 1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: Registry API p95 latency is elevated
+          description: p95 request latency over the last 5m is {{ $value }}s, above the 1s warning threshold.
+
+      - alert: RegistryHighLatencyP99
+        expr: |
+          histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket[5m])) by (le)) > 2.5
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: Registry API p99 latency is critical
+          description: p99 request latency over the last 5m is {{ $value }}s, above the 2.5s critical threshold.
+
+  - name: registry-core-services
+    rules:
+      # Per-route error rate for the three core service endpoints, using the
+      # matched-route "path" label emitted by http_metrics_middleware (main.rs)
+      # so these fire on the same live data as the generic error-rate alerts,
+      # scoped to just the endpoint that matters for each service.
+      - alert: PublishServiceErrorRateHigh
+        expr: |
+          sum(rate(http_requests_total{path="/api/contracts", method="POST", status=~"5.."}[10m]))
+            /
+          sum(rate(http_requests_total{path="/api/contracts", method="POST"}[10m]))
+          > 0.05
+        for: 10m
+        labels:
+          severity: critical
+        annotations:
+          summary: Contract publish error rate is critical
+          description: "{{ $value | humanizePercentage }} of POST /api/contracts requests over the last 10m have failed with a 5xx status."
+
+      - alert: SearchServiceErrorRateHigh
+        expr: |
+          sum(rate(http_requests_total{path="/api/search", status=~"5.."}[10m]))
+            /
+          sum(rate(http_requests_total{path="/api/search"}[10m]))
+          > 0.05
+        for: 10m
+        labels:
+          severity: critical
+        annotations:
+          summary: Search service error rate is critical
+          description: "{{ $value | humanizePercentage }} of GET /api/search requests over the last 10m have failed with a 5xx status."
+
+      - alert: SearchServiceLatencyHigh
+        expr: |
+          histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket{path="/api/search"}[10m])) by (le)) > 1.5
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: Search service p95 latency is elevated
+          description: p95 latency for GET /api/search over the last 10m is {{ $value }}s, above the 1.5s warning threshold.
+
+      - alert: VerificationFailureRateHigh
+        expr: |
+          rate(verification_failure_total[10m])
+            /
+          (rate(verification_success_total[10m]) + rate(verification_failure_total[10m]))
+          > 0.1
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: Contract verification failure rate is elevated
+          description: "{{ $value | humanizePercentage }} of verifications over the last 10m have failed, above the 10% warning threshold."
+
+      - alert: VerificationQueueBacklog
+        expr: verification_queue_depth > 50
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: Verification queue is backing up
+          description: Verification queue depth is {{ $value }}, above the 50-job warning threshold for 10 minutes.
+
+      - alert: SearchSlowQueriesHigh
+        expr: sum(rate(search_slow_queries_total[5m])) > 1
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: Search queries are slowing down
+          description: Slow search queries are occurring at {{ $value }}/s over the last 5m, above the 1/s warning threshold.
+

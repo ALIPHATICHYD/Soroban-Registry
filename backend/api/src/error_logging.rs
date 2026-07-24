@@ -337,13 +337,7 @@ fn emit_error_signal(severity: &str, category: &str, message: &str, request_id: 
             backtrace = %backtrace_str.as_deref().unwrap_or("none"),
             "error_reported"
         ),
-        "warning" => tracing::warn!(
-            severity,
-            category,
-            request_id,
-            message,
-            "error_reported"
-        ),
+        "warning" => tracing::warn!(severity, category, request_id, message, "error_reported"),
         _ => tracing::info!(severity, category, request_id, message, "error_reported"),
     }
 }

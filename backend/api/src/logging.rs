@@ -19,12 +19,7 @@ macro_rules! fatal {
 }
 
 /// Log a structured error with full context, category, and backtrace.
-pub fn log_error(
-    message: &str,
-    category: &str,
-    status: u16,
-    request_id: Option<&str>,
-) {
+pub fn log_error(message: &str, category: &str, status: u16, request_id: Option<&str>) {
     let backtrace = capture_backtrace_string();
     tracing::error!(
         category = category,
@@ -36,42 +31,18 @@ pub fn log_error(
 }
 
 /// Log a structured warning with context.
-pub fn log_warn(
-    message: &str,
-    category: &str,
-    request_id: Option<&str>,
-) {
-    tracing::warn!(
-        category = category,
-        request_id = request_id,
-        "{message}",
-    );
+pub fn log_warn(message: &str, category: &str, request_id: Option<&str>) {
+    tracing::warn!(category = category, request_id = request_id, "{message}",);
 }
 
 /// Log a structured info message with context.
-pub fn log_info(
-    message: &str,
-    category: &str,
-    request_id: Option<&str>,
-) {
-    tracing::info!(
-        category = category,
-        request_id = request_id,
-        "{message}",
-    );
+pub fn log_info(message: &str, category: &str, request_id: Option<&str>) {
+    tracing::info!(category = category, request_id = request_id, "{message}",);
 }
 
 /// Log a structured debug message with context.
-pub fn log_debug(
-    message: &str,
-    category: &str,
-    request_id: Option<&str>,
-) {
-    tracing::debug!(
-        category = category,
-        request_id = request_id,
-        "{message}",
-    );
+pub fn log_debug(message: &str, category: &str, request_id: Option<&str>) {
+    tracing::debug!(category = category, request_id = request_id, "{message}",);
 }
 
 /// Capture a full backtrace as a formatted string, if available.
@@ -142,9 +113,7 @@ pub fn sanitize_value(value: &Value) -> Value {
             }
             Value::Object(sanitized)
         }
-        Value::Array(items) => {
-            Value::Array(items.iter().map(sanitize_value).collect())
-        }
+        Value::Array(items) => Value::Array(items.iter().map(sanitize_value).collect()),
         other => other.clone(),
     }
 }
