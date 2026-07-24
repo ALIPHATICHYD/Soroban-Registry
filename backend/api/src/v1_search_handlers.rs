@@ -71,6 +71,12 @@ pub struct AdvancedSearchParams {
     /// Result offset for pagination (default 0)
     pub offset: Option<i64>,
 
+    /// Opaque keyset cursor. When present (even empty, meaning "first page"),
+    /// results are paginated by a stable (created_at, id) key served from
+    /// PostgreSQL — immune to skips/duplicates under concurrent writes. Pass
+    /// back `next_cursor` from the response. Overrides relevance ordering.
+    pub cursor: Option<String>,
+
     /// Include relevance score explanation in each result
     pub explain: Option<bool>,
 }
@@ -211,29 +217,45 @@ pub async fn advanced_search(
         Some(requested_categories)
     };
 
-    // ── Try Elasticsearch first ───────────────────────────────────────────────
-    let es_result = search_via_elasticsearch(
-        &state,
-        &query_str,
-        &params,
-        networks.clone(),
-        categories.clone(),
-        limit,
-        offset,
-        &sort_by,
-        explain,
-    )
-    .await;
-
-    if let Ok(response) = es_result {
-        return Ok(Json(response));
+    // Cursor pagination is served exclusively by the PostgreSQL keyset path
+    // (the Elasticsearch path is offset/`from`-based). A cursor request therefore
+    // bypasses ES entirely. Validate a non-empty cursor up front so a malformed
+    // one returns 400 instead of silently falling back to page one.
+    let cursor_requested = params.cursor.is_some();
+    if let Some(c) = params.cursor.as_deref() {
+        if !c.is_empty() && shared::pagination::Cursor::decode(c).is_err() {
+            return Err(ApiError::bad_request(
+                "InvalidPaginationCursor",
+                "The provided pagination cursor is invalid",
+            ));
+        }
     }
 
-    // ── Fallback: PostgreSQL full-text search ─────────────────────────────────
-    tracing::warn!(
-        query = %query_str,
-        "Elasticsearch unavailable, falling back to PostgreSQL for /api/v1/contracts/search"
-    );
+    // ── Try Elasticsearch first (offset mode only) ────────────────────────────
+    if !cursor_requested {
+        let es_result = search_via_elasticsearch(
+            &state,
+            &query_str,
+            &params,
+            networks.clone(),
+            categories.clone(),
+            limit,
+            offset,
+            &sort_by,
+            explain,
+        )
+        .await;
+
+        if let Ok(response) = es_result {
+            return Ok(Json(response));
+        }
+
+        // ── Fallback: PostgreSQL full-text search ─────────────────────────────
+        tracing::warn!(
+            query = %query_str,
+            "Elasticsearch unavailable, falling back to PostgreSQL for /api/v1/contracts/search"
+        );
+    }
 
     let pg_response = search_via_postgres(
         &state, &query_str, &params, networks, categories, limit, offset, &sort_by, explain,
@@ -435,6 +457,7 @@ async fn search_via_postgres(
         tags: None,
         limit: Some(limit),
         offset: Some(offset),
+        cursor: params.cursor.clone(),
     };
 
     let pg_result = state
@@ -493,7 +516,7 @@ async fn search_via_postgres(
     // Build facets via a separate aggregation query
     let facets = build_pg_facets(state, query_str, params).await;
 
-    Ok(json!({
+    let mut body = json!({
         "query": query_str,
         "total": pg_result.total,
         "limit": limit,
@@ -502,7 +525,14 @@ async fn search_via_postgres(
         "backend": "postgres_fallback",
         "results": results,
         "facets": facets
-    }))
+    });
+
+    // Surface the next-page cursor when this was a cursor-paginated request.
+    if let Some(next) = pg_result.next_cursor {
+        body["next_cursor"] = json!(next);
+    }
+
+    Ok(body)
 }
 
 /// Compute facet counts via PostgreSQL aggregation queries.
