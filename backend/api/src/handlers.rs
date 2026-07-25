@@ -2903,10 +2903,19 @@ pub async fn get_contract(
         if let Some(cached) = state.cache.get_contract_meta(key).await {
             if let Ok(contract) = serde_json::from_str::<Contract>(&cached) {
                 track_contract_access(&state, contract.id).await;
+                let contract_uuid = contract.id;
+                let deprecation_warning =
+                    crate::deprecation_handlers::build_deprecation_warning(
+                        &state,
+                        contract_uuid,
+                        None,
+                    )
+                    .await;
                 return Ok(Json(ContractGetResponse {
                     contract,
                     current_network: None,
                     network_config: None,
+                    deprecation_warning,
                 }));
             }
         }
@@ -3065,10 +3074,16 @@ pub async fn get_contract(
         }
     });
 
+    // Issue #1061: attach a deprecation warning when the contract is deprecated so
+    // callers are notified inline without a separate request to /deprecation-info.
+    let deprecation_warning =
+        crate::deprecation_handlers::build_deprecation_warning(&state, contract.id, None).await;
+
     Ok(Json(ContractGetResponse {
         contract,
         current_network,
         network_config,
+        deprecation_warning,
     }))
 }
 
