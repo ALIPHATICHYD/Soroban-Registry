@@ -5,7 +5,7 @@ use shared::{DeprecationStatus, UndeprecateContractRequest};
 #[test]
 fn migration_file_exists_and_is_additive() {
     let migration_path =
-        "../../database/migrations/20260725000000_issue1090_contract_deprecation_state.sql";
+        "../../database/migrations/20260725010000_issue1090_contract_deprecation_state.sql";
     assert!(
         std::path::Path::new(migration_path).exists(),
         "Migration file should exist at {migration_path}"
@@ -31,6 +31,18 @@ fn migration_file_exists_and_is_additive() {
     assert!(
         content.contains("GENERATED ALWAYS AS"),
         "deprecation_status should be generated from columns"
+    );
+    // #1061 flags rows as deprecated without a timestamp, so the backfill has to
+    // run before the flag/timestamp consistency constraint is applied.
+    let backfill = content
+        .find("SET deprecated_at = NOW()")
+        .expect("migration should backfill deprecated_at");
+    let constraint = content
+        .find("chk_contracts_deprecation_flag_consistency")
+        .expect("migration should add the consistency constraint");
+    assert!(
+        backfill < constraint,
+        "backfill must run before the consistency constraint"
     );
     assert!(
         !content.contains("DROP TABLE"),

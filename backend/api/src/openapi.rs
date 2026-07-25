@@ -136,7 +136,7 @@ use utoipa::OpenApi;
             DeprecationInfo,
             DeprecationStatus,
             DeprecateContractRequest,
-            UndeprecateContractRequest,
+            DeprecationWarning,
             ChangePublisherRequest,
             UpdateContractStatusRequest,
             UpdateContractMetadataRequest,

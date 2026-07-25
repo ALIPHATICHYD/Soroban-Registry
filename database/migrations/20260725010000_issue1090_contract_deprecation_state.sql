@@ -1,7 +1,9 @@
 -- Migration: Contract deprecation state with lineage pointer (Issue #1090)
 -- Additive-only: do not modify previously applied migration files.
--- Denormalizes deprecation onto contracts so list/search/trending can filter
--- and surface status without joining contract_deprecations.
+-- Builds on 20260725000000_issue1061_deprecation_grace_period.sql, which already
+-- added contracts.is_deprecated. This migration adds the lifecycle timestamp,
+-- reason and replacement pointer so list/search responses can surface deprecation
+-- state without joining contract_deprecations.
 
 ALTER TABLE contracts
     ADD COLUMN IF NOT EXISTS deprecated_at TIMESTAMPTZ,
@@ -20,6 +22,26 @@ ALTER TABLE contracts
         END
     ) STORED;
 
+-- Backfill from the contract_deprecations side-table (Issue #65 / #1061) before
+-- the consistency constraint is applied: #1061 already set is_deprecated = TRUE
+-- for those rows, so deprecated_at must be populated to match.
+UPDATE contracts c
+SET
+    deprecated_at = cd.deprecated_at,
+    deprecation_reason = COALESCE(cd.deprecated_reason, cd.notes),
+    replacement_contract_id = cd.replacement_contract_id,
+    is_deprecated = TRUE
+FROM contract_deprecations cd
+WHERE cd.contract_id = c.id
+  AND c.deprecated_at IS NULL;
+
+-- Any row still flagged without a schedule row gets a timestamp so the flag and
+-- the timestamp can never disagree.
+UPDATE contracts
+SET deprecated_at = NOW()
+WHERE is_deprecated = TRUE
+  AND deprecated_at IS NULL;
+
 -- Keep is_deprecated aligned with deprecated_at for callers that filter on the flag.
 DO $$
 BEGIN
@@ -37,10 +59,6 @@ BEGIN
     END IF;
 END $$;
 
-CREATE INDEX IF NOT EXISTS idx_contracts_is_deprecated
-    ON contracts (is_deprecated)
-    WHERE is_deprecated = TRUE;
-
 CREATE INDEX IF NOT EXISTS idx_contracts_replacement_contract_id
     ON contracts (replacement_contract_id)
     WHERE replacement_contract_id IS NOT NULL;
@@ -52,21 +70,8 @@ CREATE INDEX IF NOT EXISTS idx_contracts_deprecation_status
 COMMENT ON COLUMN contracts.deprecated_at IS
     'When this contract version was marked deprecated (Issue #1090). NULL means active.';
 COMMENT ON COLUMN contracts.deprecation_reason IS
-    'Human-readable reason for deprecation; immutable once set unless override undeprecate.';
+    'Denormalized copy of contract_deprecations.deprecated_reason for list/search responses.';
 COMMENT ON COLUMN contracts.replacement_contract_id IS
     'FK-style pointer to the recommended successor contract (lineage).';
-COMMENT ON COLUMN contracts.is_deprecated IS
-    'Denormalized flag for trending/similar/search filters; true iff deprecated_at IS NOT NULL.';
 COMMENT ON COLUMN contracts.deprecation_status IS
     'Generated: active | deprecated | superseded — superseded when a replacement_contract_id is set.';
-
--- Backfill from existing contract_deprecations side-table (Issue #65) when present.
-UPDATE contracts c
-SET
-    deprecated_at = cd.deprecated_at,
-    deprecation_reason = cd.notes,
-    replacement_contract_id = cd.replacement_contract_id,
-    is_deprecated = TRUE
-FROM contract_deprecations cd
-WHERE cd.contract_id = c.id
-  AND c.deprecated_at IS NULL;

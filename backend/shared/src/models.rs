@@ -133,6 +133,10 @@ pub struct ContractGetResponse {
     /// When ?network= is set, that network's config slice
     #[serde(skip_serializing_if = "Option::is_none")]
     pub network_config: Option<NetworkConfig>,
+    /// Populated when the contract is deprecated (issue #1061).
+    /// `null` / absent when the contract is active.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub deprecation_warning: Option<DeprecationWarning>,
 }
 
 /// Per-network config: address, verified status, min/max version (Issue #43)
@@ -1118,9 +1122,11 @@ pub struct DeprecationInfo {
     pub replacement_contract_id: Option<String>,
     pub migration_guide_url: Option<String>,
     pub notes: Option<String>,
-    /// Alias of notes / contracts.deprecation_reason for Issue #1090 consumers.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub deprecation_reason: Option<String>,
+    /// Human-readable deprecation reason message (issue #1061); also mirrored to
+    /// `contracts.deprecation_reason` for search/list responses (issue #1090).
+    pub deprecated_reason: Option<String>,
+    /// Configurable grace period in days before hard deletion (issue #1061).
+    pub grace_period_days: Option<i32>,
     pub days_remaining: Option<i64>,
     pub dependents_notified: i64,
     /// Ordered successor chain starting at the immediate replacement (lineage warnings).
@@ -1137,15 +1143,18 @@ pub struct DeprecateContractRequest {
     pub replacement_contract_id: Option<String>,
     pub migration_guide_url: Option<String>,
     pub notes: Option<String>,
-    /// Preferred reason field (Issue #1090); falls back to `notes` when absent.
-    #[serde(default)]
-    pub deprecation_reason: Option<String>,
+    /// Human-readable reason for the deprecation, shown in API deprecation warnings.
+    pub deprecated_reason: Option<String>,
+    /// Number of days after deprecation before the contract is hard-deleted.
+    /// If `None`, the contract is soft-deleted but never automatically removed.
+    pub grace_period_days: Option<i32>,
 }
 
-/// Request body for clearing deprecation (requires explicit override).
-#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
+/// Query parameters for clearing deprecation. Reactivating a deprecated contract
+/// requires an explicit override so callers cannot silently resurrect a version
+/// that dependents were told to migrate away from (Issue #1090).
+#[derive(Debug, Clone, Default, Serialize, Deserialize, utoipa::IntoParams)]
 pub struct UndeprecateContractRequest {
-    /// Must be true to reactivate a deprecated contract (Issue #1090).
     #[serde(default)]
     pub r#override: bool,
     /// Alias accepted by clients that prefer `force` over `override`.
@@ -1157,6 +1166,29 @@ impl UndeprecateContractRequest {
     pub fn has_override(&self) -> bool {
         self.r#override || self.force
     }
+}
+
+/// Lightweight deprecation warning embedded in contract API responses so that
+/// callers immediately know a contract is deprecated without a separate request.
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct DeprecationWarning {
+    /// Human-readable deprecation message / reason.
+    pub message: String,
+    /// When the contract was deprecated.
+    pub deprecated_at: DateTime<Utc>,
+    /// When the contract will be retired (== removed from active results).
+    pub retirement_at: DateTime<Utc>,
+    /// Days remaining until retirement (0 if already past).
+    pub days_until_retirement: i64,
+    /// Optional replacement contract ID for downstream consumers to migrate to.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub replacement_contract_id: Option<String>,
+    /// Optional migration guide URL.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub migration_guide_url: Option<String>,
+    /// Number of grace-period days before hard deletion (`None` = never deleted).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub grace_period_days: Option<i32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow, utoipa::ToSchema)]

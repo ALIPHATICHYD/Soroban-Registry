@@ -78,6 +78,7 @@ pub struct ContractStatsResponse {
 use crate::{
     analytics,
     breaking_changes::{diff_abi, has_breaking_changes, resolve_abi},
+    cache::IdempotencyClaim,
     contract_events::ContractEventEnvelope,
     dependency,
     error::{ApiError, ApiResult},
@@ -2903,10 +2904,19 @@ pub async fn get_contract(
         if let Some(cached) = state.cache.get_contract_meta(key).await {
             if let Ok(contract) = serde_json::from_str::<Contract>(&cached) {
                 track_contract_access(&state, contract.id).await;
+                let contract_uuid = contract.id;
+                let deprecation_warning =
+                    crate::deprecation_handlers::build_deprecation_warning(
+                        &state,
+                        contract_uuid,
+                        None,
+                    )
+                    .await;
                 return Ok(Json(ContractGetResponse {
                     contract,
                     current_network: None,
                     network_config: None,
+                    deprecation_warning,
                 }));
             }
         }
@@ -3065,10 +3075,16 @@ pub async fn get_contract(
         }
     });
 
+    // Issue #1061: attach a deprecation warning when the contract is deprecated so
+    // callers are notified inline without a separate request to /deprecation-info.
+    let deprecation_warning =
+        crate::deprecation_handlers::build_deprecation_warning(&state, contract.id, None).await;
+
     Ok(Json(ContractGetResponse {
         contract,
         current_network,
         network_config,
+        deprecation_warning,
     }))
 }
 
@@ -4396,6 +4412,41 @@ async fn generate_unique_slug(
     }
 }
 
+/// Maximum accepted length for the `Idempotency-Key` header. Same order of
+/// magnitude as Stripe's limit — long enough for a UUID or a client-side
+/// hash, short enough to keep a header value from becoming a memory/Redis
+/// abuse vector.
+const IDEMPOTENCY_KEY_MAX_LEN: usize = 255;
+
+/// Extracts and validates the optional `Idempotency-Key` header. Returns
+/// `Err` only when the header is present but malformed (not valid UTF-8,
+/// empty, or too long) — a missing header is not an error, it just means
+/// idempotency is opted out of for this request.
+fn extract_idempotency_key(headers: &HeaderMap) -> ApiResult<Option<String>> {
+    let Some(raw) = headers.get("Idempotency-Key") else {
+        return Ok(None);
+    };
+
+    let key = raw.to_str().map_err(|_| {
+        ApiError::bad_request(
+            "InvalidIdempotencyKey",
+            "Idempotency-Key header must be valid UTF-8",
+        )
+    })?;
+
+    if key.is_empty() || key.len() > IDEMPOTENCY_KEY_MAX_LEN {
+        return Err(ApiError::bad_request(
+            "InvalidIdempotencyKey",
+            format!(
+                "Idempotency-Key must be between 1 and {} characters",
+                IDEMPOTENCY_KEY_MAX_LEN
+            ),
+        ));
+    }
+
+    Ok(Some(key.to_string()))
+}
+
 #[utoipa::path(
     post,
     path = "/api/contracts",
@@ -4411,6 +4462,61 @@ pub async fn publish_contract(
     State(state): State<AppState>,
     headers: HeaderMap,
     ValidatedJson(req): ValidatedJson<PublishRequest>,
+) -> ApiResult<Json<Contract>> {
+    let idempotency_key = extract_idempotency_key(&headers)?;
+
+    if let Some(key) = &idempotency_key {
+        match state.cache.claim_idempotency_key(key).await {
+            IdempotencyClaim::Completed(cached_body) => {
+                let contract: Contract = serde_json::from_str(&cached_body).map_err(|err| {
+                    ApiError::internal(format!(
+                        "Failed to decode cached idempotent publish response: {}",
+                        err
+                    ))
+                })?;
+                return Ok(Json(contract));
+            }
+            IdempotencyClaim::InProgress => {
+                return Err(ApiError::conflict(
+                    "IdempotencyKeyInProgress",
+                    "A request with this Idempotency-Key is already being processed. Retry shortly.",
+                ));
+            }
+            IdempotencyClaim::Fresh => {}
+        }
+    }
+
+    let result = publish_contract_inner(&state, &headers, req).await;
+
+    if let Some(key) = &idempotency_key {
+        match &result {
+            Ok(Json(contract)) => match serde_json::to_string(contract) {
+                Ok(body) => state.cache.complete_idempotency_key(key, body).await,
+                Err(err) => {
+                    tracing::warn!(
+                        "Failed to serialize contract for idempotency cache: {}",
+                        err
+                    );
+                    state.cache.release_idempotency_key(key).await;
+                }
+            },
+            Err(_) => {
+                // Don't cache error responses under the key: validation/conflict
+                // errors are cheap to recompute, and releasing the lock lets a
+                // corrected request (or a retry after a transient failure) go
+                // through immediately instead of waiting out the full lock TTL.
+                state.cache.release_idempotency_key(key).await;
+            }
+        }
+    }
+
+    result
+}
+
+async fn publish_contract_inner(
+    state: &AppState,
+    headers: &HeaderMap,
+    req: PublishRequest,
 ) -> ApiResult<Json<Contract>> {
     let mut tx = state
         .db
@@ -4429,6 +4535,61 @@ pub async fn publish_contract(
     .map_err(|err| db_internal_error("upsert publisher", err))?;
 
     let wasm_hash = req.wasm_hash.clone();
+
+    // Duplicate detection (Issue #953): a contract is uniquely identified by
+    // (contract_id, network). If one is already registered, this is either a
+    // retry of a prior successful publish (same wasm_hash - return the
+    // existing record so publish stays idempotent) or an attempt to
+    // re-register the same contract_id with different source code (a real
+    // conflict, reported with a reference to the existing record).
+    if let Some(existing) = sqlx::query_as::<_, Contract>(
+        "SELECT * FROM contracts WHERE contract_id = $1 AND network = $2",
+    )
+    .bind(&req.contract_id)
+    .bind(&req.network)
+    .fetch_optional(&mut *tx)
+    .await
+    .map_err(|err| db_internal_error("check existing contract", err))?
+    {
+        tx.rollback()
+            .await
+            .map_err(|err| db_internal_error("rollback publish tx", err))?;
+
+        if existing.wasm_hash == wasm_hash {
+            return Ok(Json(existing));
+        }
+
+        return Err(ApiError::conflict(
+            "ContractAlreadyRegistered",
+            format!(
+                "Contract {} is already registered for network {}",
+                req.contract_id, req.network
+            ),
+        )
+        .with_details(json!({
+            "existing_contract": {
+                "id": existing.id,
+                "contract_id": existing.contract_id,
+                "slug": existing.slug,
+                "network": existing.network.to_string(),
+                "wasm_hash": existing.wasm_hash,
+                "published_at": existing.created_at,
+            }
+        })));
+    }
+
+    // Pre-existing bug found while verifying #1055 end-to-end, unrelated to
+    // idempotency: `tx` was never committed. Everything below this point
+    // already runs against `&state.db` (a fresh pool connection), not `tx`,
+    // so the upserted publisher row was invisible to it under any pool size
+    // above 1 — the INSERT into `contracts` a few lines down would fail with
+    // a `contracts_publisher_id_fkey` violation for any publisher not
+    // already committed by a prior request. Reproduced directly against a
+    // real Postgres + this exact `main` code before this fix.
+    tx.commit()
+        .await
+        .map_err(|err| db_internal_error("commit publish tx", err))?;
+
     let network_key = req.network.to_string();
     let mut config_map = serde_json::Map::new();
     config_map.insert(
@@ -4547,7 +4708,7 @@ pub async fn publish_contract(
         contract.id,
         publisher.id,
         creation_changes,
-        &extract_ip_address(&headers),
+        &extract_ip_address(headers),
     )
     .await
     .map_err(|err| db_internal_error("write contract_created audit log", err))?;

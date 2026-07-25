@@ -1,11 +1,12 @@
 use crate::validation::extractors::ValidatedJson;
 use axum::{
-    extract::{Path, State},
+    extract::{Path, Query, State},
     Json,
 };
 use chrono::{DateTime, Utc};
 use shared::{
-    DeprecateContractRequest, DeprecationInfo, DeprecationStatus, UndeprecateContractRequest,
+    DeprecateContractRequest, DeprecationInfo, DeprecationStatus, DeprecationWarning,
+    UndeprecateContractRequest,
 };
 use std::collections::HashSet;
 use uuid::Uuid;
@@ -13,11 +14,77 @@ use uuid::Uuid;
 use crate::error::{ApiError, ApiResult};
 use crate::state::AppState;
 
+// ─── Public helper ────────────────────────────────────────────────────────────
+
+/// Build a `DeprecationWarning` from a raw deprecation record.
+///
+/// Returns `None` when the contract has no deprecation record.
+pub async fn build_deprecation_warning(
+    state: &AppState,
+    contract_uuid: Uuid,
+    replacement_contract_id: Option<String>,
+) -> Option<DeprecationWarning> {
+    #[allow(clippy::type_complexity)]
+    let record: Option<(
+        DateTime<Utc>,
+        DateTime<Utc>,
+        Option<Uuid>,
+        Option<String>,
+        Option<String>,
+        Option<i32>,
+    )> = sqlx::query_as(
+        "SELECT deprecated_at, retirement_at, replacement_contract_id, \
+                migration_guide_url, deprecated_reason, grace_period_days \
+         FROM contract_deprecations WHERE contract_id = $1",
+    )
+    .bind(contract_uuid)
+    .fetch_optional(&state.db)
+    .await
+    .ok()
+    .flatten();
+
+    let (deprecated_at, retirement_at, replacement_id, guide_url, reason, grace_period_days) =
+        record?;
+
+    let now = Utc::now();
+    let days_until_retirement = if retirement_at > now {
+        (retirement_at - now).num_days()
+    } else {
+        0
+    };
+
+    let resolved_replacement = replacement_contract_id.or_else(|| {
+        replacement_id.map(|id| {
+            // Best-effort: resolve UUID → contract_id string. Falls back to UUID string.
+            id.to_string()
+        })
+    });
+
+    let message = reason.clone().unwrap_or_else(|| {
+        format!(
+            "This contract is deprecated and will be retired on {}.",
+            retirement_at.format("%Y-%m-%d")
+        )
+    });
+
+    Some(DeprecationWarning {
+        message,
+        deprecated_at,
+        retirement_at,
+        days_until_retirement,
+        replacement_contract_id: resolved_replacement,
+        migration_guide_url: guide_url,
+        grace_period_days,
+    })
+}
+
+// ─── GET /api/contracts/:id/deprecation-info ──────────────────────────────────
+
 #[utoipa::path(
     get,
-    path = "/api/contracts/{id}/deprecation",
+    path = "/api/contracts/{id}/deprecation-info",
     params(
-        ("id" = String, Path, description = "Contract identifier")
+        ("id" = String, Path, description = "Contract identifier (UUID or contract_id)")
     ),
     responses(
         (status = 200, description = "Deprecation status and info", body = DeprecationInfo),
@@ -57,9 +124,12 @@ pub async fn get_deprecation_info(
             Option<Uuid>,
             Option<String>,
             Option<String>,
+            Option<String>,
+            Option<i32>,
         ),
     >(
-        "SELECT deprecated_at, retirement_at, replacement_contract_id, migration_guide_url, notes \
+        "SELECT deprecated_at, retirement_at, replacement_contract_id, migration_guide_url, \
+                notes, deprecated_reason, grace_period_days \
          FROM contract_deprecations WHERE contract_id = $1",
     )
     .bind(contract_uuid)
@@ -75,81 +145,46 @@ pub async fn get_deprecation_info(
     .await
     .map_err(|err| db_internal_error("count notifications", err))?;
 
-    let (
-        deprecated_at,
-        deprecation_reason,
-        replacement_uuid,
-        _is_deprecated,
-        mut status,
-        retirement_at,
-        migration_guide_url,
-        notes,
-    ) = match (contract_row, schedule) {
-        (Some((dep_at, reason, repl, is_dep, st)), Some((s_dep_at, retirement, s_repl, guide, notes))) => {
-            let deprecated_at = dep_at.or(Some(s_dep_at));
-            let replacement = repl.or(s_repl);
-            let reason = reason.or(notes.clone());
-            let status = if Utc::now() >= retirement {
-                DeprecationStatus::Retired
-            } else if is_dep || deprecated_at.is_some() {
-                DeprecationStatus::from_columns(deprecated_at, replacement)
-            } else {
-                st
-            };
-            (
-                deprecated_at,
-                reason,
-                replacement,
-                is_dep,
-                status,
-                Some(retirement),
-                guide,
-                notes,
-            )
-        }
-        (Some((dep_at, reason, repl, is_dep, st)), None) => {
-            let status = if is_dep || dep_at.is_some() {
-                DeprecationStatus::from_columns(dep_at, repl)
-            } else {
-                st
-            };
-            (dep_at, reason, repl, is_dep, status, None, None, None)
-        }
-        (None, Some((s_dep_at, retirement, s_repl, guide, notes))) => {
-            let status = if Utc::now() >= retirement {
-                DeprecationStatus::Retired
-            } else {
-                DeprecationStatus::from_columns(Some(s_dep_at), s_repl)
-            };
-            (
-                Some(s_dep_at),
-                notes.clone(),
-                s_repl,
-                true,
-                status,
-                Some(retirement),
-                guide,
-                notes,
-            )
-        }
-        (None, None) => (
-            None,
-            None,
-            None,
-            false,
-            DeprecationStatus::Active,
-            None,
-            None,
-            None,
-        ),
+    // Contract columns (Issue #1090) are the source of truth for lifecycle status;
+    // the contract_deprecations row (Issue #65/#1061) supplies the retirement
+    // schedule, migration guide and grace period.
+    let (deprecated_at_col, reason_col, replacement_col, is_deprecated_col) = match contract_row {
+        Some((dep_at, reason, repl, is_dep, _status)) => (dep_at, reason, repl, is_dep),
+        None => (None, None, None, false),
     };
 
-    // Schedule retirement can still override to Retired for Issue #65 consumers.
-    if let Some(retirement) = retirement_at {
-        if Utc::now() >= retirement && deprecated_at.is_some() {
-            status = DeprecationStatus::Retired;
-        }
-    }
+    let (
+        schedule_deprecated_at,
+        retirement_at,
+        schedule_replacement,
+        migration_guide_url,
+        notes,
+        schedule_reason,
+        grace_period_days,
+    ) = match schedule {
+        Some((dep_at, retirement, repl, guide, notes, reason, grace)) => (
+            Some(dep_at),
+            Some(retirement),
+            repl,
+            guide,
+            notes,
+            reason,
+            grace,
+        ),
+        None => (None, None, None, None, None, None, None),
+    };
+
+    let deprecated_at = deprecated_at_col.or(schedule_deprecated_at);
+    let replacement_uuid = replacement_col.or(schedule_replacement);
+    let deprecated_reason = schedule_reason.or(reason_col).or_else(|| notes.clone());
+
+    let status = if deprecated_at.is_none() && !is_deprecated_col {
+        DeprecationStatus::Active
+    } else if retirement_at.is_some_and(|retirement| Utc::now() >= retirement) {
+        DeprecationStatus::Retired
+    } else {
+        DeprecationStatus::from_columns(deprecated_at, replacement_uuid)
+    };
 
     let days_remaining = retirement_at.map(|retirement| {
         let now = Utc::now();
@@ -172,7 +207,7 @@ pub async fn get_deprecation_info(
         &contract_id,
         replacement_contract_id.as_deref(),
         &replacement_lineage,
-        deprecation_reason.as_deref(),
+        deprecated_reason.as_deref(),
     );
 
     Ok(Json(DeprecationInfo {
@@ -183,13 +218,16 @@ pub async fn get_deprecation_info(
         replacement_contract_id,
         migration_guide_url,
         notes,
-        deprecation_reason,
+        deprecated_reason,
+        grace_period_days,
         days_remaining,
         dependents_notified,
         replacement_lineage,
         warnings,
     }))
 }
+
+// ─── POST /api/contracts/:id/deprecate ────────────────────────────────────────
 
 #[utoipa::path(
     post,
@@ -212,16 +250,13 @@ pub async fn deprecate_contract(
 ) -> ApiResult<Json<DeprecationInfo>> {
     let (contract_uuid, contract_id) = fetch_contract_identity(&state, &id).await?;
 
-    let reason = req
-        .deprecation_reason
-        .clone()
-        .or_else(|| req.notes.clone());
+    let reason = req.deprecated_reason.clone().or_else(|| req.notes.clone());
 
     if req.migration_guide_url.is_none() && req.replacement_contract_id.is_none() && reason.is_none()
     {
         return Err(ApiError::bad_request(
             "MissingMigrationPath",
-            "Provide replacement_contract_id, migration_guide_url, or deprecation_reason",
+            "Provide replacement_contract_id, migration_guide_url, or deprecated_reason",
         ));
     }
 
@@ -230,6 +265,15 @@ pub async fn deprecate_contract(
             "InvalidRetirementDate",
             "retirement_at must be in the future",
         ));
+    }
+
+    if let Some(days) = req.grace_period_days {
+        if days <= 0 {
+            return Err(ApiError::bad_request(
+                "InvalidGracePeriod",
+                "grace_period_days must be a positive integer",
+            ));
+        }
     }
 
     let replacement_uuid = if let Some(ref selector) = req.replacement_contract_id {
@@ -251,26 +295,34 @@ pub async fn deprecate_contract(
         .await
         .map_err(|err| db_internal_error("begin deprecate tx", err))?;
 
+    // Upsert the deprecation record (retirement schedule, reason and grace period)
     sqlx::query(
-        "INSERT INTO contract_deprecations (contract_id, retirement_at, replacement_contract_id, migration_guide_url, notes) \
-         VALUES ($1, $2, $3, $4, $5) \
+        "INSERT INTO contract_deprecations \
+            (contract_id, retirement_at, replacement_contract_id, migration_guide_url, notes, \
+             deprecated_reason, grace_period_days) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7) \
          ON CONFLICT (contract_id) DO UPDATE SET \
-           retirement_at = EXCLUDED.retirement_at, \
-           replacement_contract_id = EXCLUDED.replacement_contract_id, \
-           migration_guide_url = EXCLUDED.migration_guide_url, \
-           notes = EXCLUDED.notes, \
-           updated_at = NOW()",
+           retirement_at             = EXCLUDED.retirement_at, \
+           replacement_contract_id   = EXCLUDED.replacement_contract_id, \
+           migration_guide_url       = EXCLUDED.migration_guide_url, \
+           notes                     = EXCLUDED.notes, \
+           deprecated_reason         = EXCLUDED.deprecated_reason, \
+           grace_period_days         = EXCLUDED.grace_period_days, \
+           updated_at                = NOW()",
     )
     .bind(contract_uuid)
     .bind(req.retirement_at)
     .bind(replacement_uuid)
     .bind(&req.migration_guide_url)
+    .bind(&req.notes)
     .bind(&reason)
+    .bind(req.grace_period_days)
     .execute(&mut *tx)
     .await
     .map_err(|err| db_internal_error("upsert deprecation schedule", err))?;
 
-    // Denormalize onto contracts for list/search (Issue #1090).
+    // Denormalize onto contracts so list/search/trending can filter and surface
+    // status without joining contract_deprecations (Issue #1090).
     sqlx::query(
         "UPDATE contracts SET \
             deprecated_at = COALESCE(deprecated_at, NOW()), \
@@ -299,15 +351,17 @@ pub async fn deprecate_contract(
     get_deprecation_info(State(state), Path(contract_id)).await
 }
 
+// ─── DELETE /api/contracts/:id/deprecate (undeprecate) ───────────────────────
+
 #[utoipa::path(
-    post,
-    path = "/api/contracts/{id}/undeprecate",
+    delete,
+    path = "/api/contracts/{id}/deprecate",
     params(
-        ("id" = String, Path, description = "Contract identifier")
+        ("id" = String, Path, description = "Contract identifier"),
+        UndeprecateContractRequest
     ),
-    request_body = UndeprecateContractRequest,
     responses(
-        (status = 200, description = "Contract reactivated successfully", body = DeprecationInfo),
+        (status = 200, description = "Contract undeprecated successfully", body = DeprecationInfo),
         (status = 400, description = "Override flag required to reactivate"),
         (status = 404, description = "Contract not found")
     ),
@@ -316,7 +370,7 @@ pub async fn deprecate_contract(
 pub async fn undeprecate_contract(
     State(state): State<AppState>,
     Path(id): Path<String>,
-    ValidatedJson(req): ValidatedJson<UndeprecateContractRequest>,
+    Query(req): Query<UndeprecateContractRequest>,
 ) -> ApiResult<Json<DeprecationInfo>> {
     let (contract_uuid, contract_id) = fetch_contract_identity(&state, &id).await?;
 
@@ -466,6 +520,66 @@ fn build_lineage_warnings(
     warnings
 }
 
+// ─── POST /api/admin/deprecation/purge-expired ────────────────────────────────
+
+/// Hard-delete contracts whose grace period has elapsed.
+///
+/// This endpoint is intended to be called by a scheduled job (cron / k8s CronJob).
+/// It returns the list of contract IDs that were permanently deleted.
+#[utoipa::path(
+    post,
+    path = "/api/admin/deprecation/purge-expired",
+    responses(
+        (status = 200, description = "Expired contracts purged", body = Object),
+        (status = 500, description = "Internal server error")
+    ),
+    tag = "Admin"
+)]
+pub async fn purge_expired_deprecated_contracts(
+    State(state): State<AppState>,
+) -> ApiResult<Json<serde_json::Value>> {
+    // Find contracts whose grace period has fully elapsed:
+    //   deprecated_at + grace_period_days < NOW()
+    let expired: Vec<(Uuid, String)> = sqlx::query_as(
+        "SELECT c.id, c.contract_id \
+         FROM contracts c \
+         JOIN contract_deprecations cd ON cd.contract_id = c.id \
+         WHERE cd.grace_period_days IS NOT NULL \
+           AND (cd.deprecated_at + (cd.grace_period_days || ' days')::INTERVAL) < NOW()",
+    )
+    .fetch_all(&state.db)
+    .await
+    .map_err(|err| db_internal_error("fetch expired deprecations", err))?;
+
+    let count = expired.len();
+    let mut deleted_ids: Vec<String> = Vec::with_capacity(count);
+
+    for (uuid, cid) in expired {
+        // ON DELETE CASCADE on contract_deprecations and related tables will clean
+        // up deprecation records and notifications automatically.
+        sqlx::query("DELETE FROM contracts WHERE id = $1")
+            .bind(uuid)
+            .execute(&state.db)
+            .await
+            .map_err(|err| db_internal_error("hard-delete contract", err))?;
+
+        tracing::info!(
+            contract_id = %cid,
+            uuid = %uuid,
+            "Hard-deleted contract: grace period expired"
+        );
+        deleted_ids.push(cid);
+    }
+
+    Ok(Json(serde_json::json!({
+        "purged": count,
+        "contract_ids": deleted_ids,
+        "purged_at": Utc::now(),
+    })))
+}
+
+// ─── Internal helpers ─────────────────────────────────────────────────────────
+
 async fn notify_dependents(
     state: &AppState,
     deprecated_id: Uuid,
@@ -485,7 +599,8 @@ async fn notify_dependents(
 
     let dependents: Vec<Uuid> = if has_dep_contract_id {
         sqlx::query_scalar(
-            "SELECT DISTINCT contract_id FROM contract_static_dependencies WHERE dependency_contract_id = $1",
+            "SELECT DISTINCT contract_id FROM contract_static_dependencies \
+             WHERE dependency_contract_id = $1",
         )
         .bind(deprecated_id)
         .fetch_all(&state.db)
@@ -524,7 +639,8 @@ async fn notify_dependents(
         );
 
         let _ = sqlx::query(
-            "INSERT INTO contract_deprecation_notifications (contract_id, deprecated_contract_id, message) \
+            "INSERT INTO contract_deprecation_notifications \
+                (contract_id, deprecated_contract_id, message) \
              VALUES ($1, $2, $3) \
              ON CONFLICT (contract_id, deprecated_contract_id) DO NOTHING",
         )
@@ -539,7 +655,10 @@ async fn notify_dependents(
     Ok(())
 }
 
-async fn fetch_contract_identity(state: &AppState, id: &str) -> ApiResult<(Uuid, String)> {
+pub(crate) async fn fetch_contract_identity(
+    state: &AppState,
+    id: &str,
+) -> ApiResult<(Uuid, String)> {
     if let Ok(uuid) = Uuid::parse_str(id) {
         let row = sqlx::query_as::<_, (Uuid, String)>(
             "SELECT id, contract_id FROM contracts WHERE id = $1",
@@ -621,7 +740,8 @@ fn db_internal_error(operation: &str, err: sqlx::Error) -> ApiError {
 
 async fn column_exists(state: &AppState, table: &str, column: &str) -> ApiResult<bool> {
     let exists = sqlx::query_scalar::<_, bool>(
-        "SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = $1 AND column_name = $2)",
+        "SELECT EXISTS (SELECT 1 FROM information_schema.columns \
+          WHERE table_name = $1 AND column_name = $2)",
     )
     .bind(table)
     .bind(column)

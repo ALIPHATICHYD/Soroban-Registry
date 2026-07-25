@@ -106,7 +106,7 @@ pub async fn list_deprecated_contracts(
         SELECT
             c.contract_id,
             c.name,
-            COALESCE(c.deprecation_reason, cd.notes) AS reason,
+            COALESCE(c.deprecation_reason, cd.deprecated_reason, cd.notes) AS reason,
             (
                 SELECT rc.contract_id
                 FROM contracts rc
