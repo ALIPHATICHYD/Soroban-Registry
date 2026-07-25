@@ -272,9 +272,24 @@ async fn test_undeprecate_clears_warning() {
         "warning should be present after deprecation"
     );
 
+    // Reactivating without an explicit override is rejected (issue #1090)
+    let no_override_res = client
+        .delete(format!("{}/api/contracts/{}/deprecate", base, contract_id))
+        .send()
+        .await
+        .expect("undeprecate without override");
+    assert_eq!(
+        no_override_res.status(),
+        StatusCode::BAD_REQUEST,
+        "undeprecate without override should be rejected"
+    );
+
     // Undeprecate
     let undep_res = client
-        .delete(format!("{}/api/contracts/{}/deprecate", base, contract_id))
+        .delete(format!(
+            "{}/api/contracts/{}/deprecate?override=true",
+            base, contract_id
+        ))
         .send()
         .await
         .expect("undeprecate");

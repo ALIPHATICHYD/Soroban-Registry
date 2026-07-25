@@ -89,6 +89,26 @@ pub struct Contract {
     /// Number of times this contract has been accessed via API
     #[serde(default)]
     pub usage_count: i64,
+    /// When this contract was marked deprecated (Issue #1090). NULL = active.
+    #[sqlx(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub deprecated_at: Option<DateTime<Utc>>,
+    /// Human-readable deprecation reason (Issue #1090).
+    #[sqlx(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub deprecation_reason: Option<String>,
+    /// Recommended successor contract UUID (lineage pointer, Issue #1090).
+    #[sqlx(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub replacement_contract_id: Option<Uuid>,
+    /// Denormalized flag for filters (trending/similar/search). True iff deprecated_at is set.
+    #[sqlx(default)]
+    #[serde(default)]
+    pub is_deprecated: bool,
+    /// Lifecycle status: active | deprecated | superseded (Issue #1090).
+    #[sqlx(default)]
+    #[serde(default)]
+    pub deprecation_status: DeprecationStatus,
 }
 
 #[derive(
@@ -1024,12 +1044,73 @@ pub struct RevertVersionRequest {
 // Deprecation management (issue #65)
 // ────────────────────────────────────────────────────────────────────────────
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, utoipa::ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, utoipa::ToSchema, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum DeprecationStatus {
+    #[default]
     Active,
     Deprecated,
+    /// Deprecated with a replacement_contract_id set (lineage successor).
+    Superseded,
+    /// Past scheduled retirement_at (schedule-based deprecation, Issue #65).
     Retired,
+}
+
+impl DeprecationStatus {
+    /// Derive status from denormalized contract columns (Issue #1090).
+    pub fn from_columns(
+        deprecated_at: Option<DateTime<Utc>>,
+        replacement_contract_id: Option<Uuid>,
+    ) -> Self {
+        match (deprecated_at, replacement_contract_id) {
+            (None, _) => Self::Active,
+            (Some(_), Some(_)) => Self::Superseded,
+            (Some(_), None) => Self::Deprecated,
+        }
+    }
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Active => "active",
+            Self::Deprecated => "deprecated",
+            Self::Superseded => "superseded",
+            Self::Retired => "retired",
+        }
+    }
+
+    pub fn parse(value: &str) -> Self {
+        match value {
+            "deprecated" => Self::Deprecated,
+            "superseded" => Self::Superseded,
+            "retired" => Self::Retired,
+            _ => Self::Active,
+        }
+    }
+}
+
+impl From<String> for DeprecationStatus {
+    fn from(value: String) -> Self {
+        Self::parse(&value)
+    }
+}
+
+impl<'r> sqlx::Decode<'r, sqlx::Postgres> for DeprecationStatus {
+    fn decode(
+        value: sqlx::postgres::PgValueRef<'r>,
+    ) -> Result<Self, Box<dyn std::error::Error + 'static + Send + Sync>> {
+        let s = <String as sqlx::Decode<sqlx::Postgres>>::decode(value)?;
+        Ok(Self::parse(&s))
+    }
+}
+
+impl sqlx::Type<sqlx::Postgres> for DeprecationStatus {
+    fn type_info() -> sqlx::postgres::PgTypeInfo {
+        <String as sqlx::Type<sqlx::Postgres>>::type_info()
+    }
+
+    fn compatible(ty: &sqlx::postgres::PgTypeInfo) -> bool {
+        <String as sqlx::Type<sqlx::Postgres>>::compatible(ty)
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
@@ -1041,12 +1122,19 @@ pub struct DeprecationInfo {
     pub replacement_contract_id: Option<String>,
     pub migration_guide_url: Option<String>,
     pub notes: Option<String>,
-    /// Human-readable deprecation reason message (issue #1061).
+    /// Human-readable deprecation reason message (issue #1061); also mirrored to
+    /// `contracts.deprecation_reason` for search/list responses (issue #1090).
     pub deprecated_reason: Option<String>,
     /// Configurable grace period in days before hard deletion (issue #1061).
     pub grace_period_days: Option<i32>,
     pub days_remaining: Option<i64>,
     pub dependents_notified: i64,
+    /// Ordered successor chain starting at the immediate replacement (lineage warnings).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub replacement_lineage: Vec<String>,
+    /// Human-readable warnings for dependents resolving this contract.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub warnings: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
@@ -1060,6 +1148,24 @@ pub struct DeprecateContractRequest {
     /// Number of days after deprecation before the contract is hard-deleted.
     /// If `None`, the contract is soft-deleted but never automatically removed.
     pub grace_period_days: Option<i32>,
+}
+
+/// Query parameters for clearing deprecation. Reactivating a deprecated contract
+/// requires an explicit override so callers cannot silently resurrect a version
+/// that dependents were told to migrate away from (Issue #1090).
+#[derive(Debug, Clone, Default, Serialize, Deserialize, utoipa::IntoParams)]
+pub struct UndeprecateContractRequest {
+    #[serde(default)]
+    pub r#override: bool,
+    /// Alias accepted by clients that prefer `force` over `override`.
+    #[serde(default)]
+    pub force: bool,
+}
+
+impl UndeprecateContractRequest {
+    pub fn has_override(&self) -> bool {
+        self.r#override || self.force
+    }
 }
 
 /// Lightweight deprecation warning embedded in contract API responses so that
@@ -4845,12 +4951,12 @@ mod tests {
     use super::*;
     use serde_json;
 
-    // ── deserialize_optional_strings ───────────────────────────────────
+    // ── deserialize_optional_string_list ───────────────────────────────
 
     /// Helper: deserialize a single comma-separated string value through the custom deserializer
     fn deser_comma_separated(input: &str) -> Option<Vec<String>> {
         use serde::de::value::StrDeserializer;
-        deserialize_optional_strings(StrDeserializer::<serde::de::value::Error>::new(input)).ok().flatten()
+        deserialize_optional_string_list(StrDeserializer::<serde::de::value::Error>::new(input)).ok().flatten()
     }
 
     /// Helper: deserialize repeated params through a sequence
@@ -4858,7 +4964,7 @@ mod tests {
         use serde::de::value::{SeqDeserializer, StringDeserializer};
         let seq = inputs.iter().map(|s| StringDeserializer::<serde::de::value::Error>::new(s.to_string()));
         let deserializer = SeqDeserializer::new(seq);
-        deserialize_optional_strings(deserializer).ok().flatten()
+        deserialize_optional_string_list(deserializer).ok().flatten()
     }
 
     #[test]
@@ -4973,6 +5079,11 @@ mod tests {
             visibility: VisibilityType::Public,
             current_version: Some("1.0.0".to_string()),
             usage_count: 42,
+            deprecated_at: None,
+            deprecation_reason: None,
+            replacement_contract_id: None,
+            is_deprecated: false,
+            deprecation_status: DeprecationStatus::Active,
         };
 
         let json = serde_json::to_string(&contract).expect("Failed to serialize contract");

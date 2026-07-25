@@ -57,6 +57,11 @@ pub struct ContractSearchResult {
     pub category: Option<String>,
     pub network: Network,
     pub is_verified: bool,
+    pub deprecation_status: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub replacement_contract_id: Option<uuid::Uuid>,
+    #[serde(default)]
+    pub is_deprecated: bool,
     pub relevance_score: f64,
     pub matched_terms: Option<Vec<String>>,
     pub highlighted: Option<Value>,
@@ -105,6 +110,9 @@ impl PostgresSearchService {
                 c.slug,
                 c.verification_status,
                 c.current_version,
+                c.is_deprecated,
+                c.deprecation_status,
+                c.replacement_contract_id,
                 -- ts_rank returns `real` (FLOAT4); the row struct decodes an f64,
                 -- so cast explicitly or decoding fails once rows are returned.
                 ts_rank(
@@ -269,6 +277,9 @@ impl PostgresSearchService {
                 category: row.category,
                 network: row.network,
                 is_verified: row.is_verified,
+                deprecation_status: row.deprecation_status,
+                replacement_contract_id: row.replacement_contract_id,
+                is_deprecated: row.is_deprecated,
                 relevance_score: row.relevance_score,
                 matched_terms: None,
                 highlighted: None,
@@ -335,6 +346,9 @@ struct ContractSearchRow {
     category: Option<String>,
     network: Network,
     is_verified: bool,
+    is_deprecated: bool,
+    deprecation_status: String,
+    replacement_contract_id: Option<uuid::Uuid>,
     // Selected already by the query; needed to build the next-page keyset cursor.
     created_at: DateTime<Utc>,
     relevance_score: f64,

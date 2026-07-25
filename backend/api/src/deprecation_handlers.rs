@@ -1,12 +1,14 @@
 use crate::validation::extractors::ValidatedJson;
 use axum::{
-    extract::{Path, State},
+    extract::{Path, Query, State},
     Json,
 };
 use chrono::{DateTime, Utc};
 use shared::{
     DeprecateContractRequest, DeprecationInfo, DeprecationStatus, DeprecationWarning,
+    UndeprecateContractRequest,
 };
+use std::collections::HashSet;
 use uuid::Uuid;
 
 use crate::error::{ApiError, ApiResult};
@@ -96,7 +98,25 @@ pub async fn get_deprecation_info(
 ) -> ApiResult<Json<DeprecationInfo>> {
     let (contract_uuid, contract_id) = fetch_contract_identity(&state, &id).await?;
 
-    let record = sqlx::query_as::<
+    let contract_row = sqlx::query_as::<
+        _,
+        (
+            Option<DateTime<Utc>>,
+            Option<String>,
+            Option<Uuid>,
+            bool,
+            DeprecationStatus,
+        ),
+    >(
+        "SELECT deprecated_at, deprecation_reason, replacement_contract_id, is_deprecated, deprecation_status \
+         FROM contracts WHERE id = $1",
+    )
+    .bind(contract_uuid)
+    .fetch_optional(&state.db)
+    .await
+    .map_err(|err| db_internal_error("fetch contract deprecation columns", err))?;
+
+    let schedule = sqlx::query_as::<
         _,
         (
             DateTime<Utc>,
@@ -115,7 +135,7 @@ pub async fn get_deprecation_info(
     .bind(contract_uuid)
     .fetch_optional(&state.db)
     .await
-    .map_err(|err| db_internal_error("fetch deprecation", err))?;
+    .map_err(|err| db_internal_error("fetch deprecation schedule", err))?;
 
     let dependents_notified: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM contract_deprecation_notifications WHERE deprecated_contract_id = $1",
@@ -125,57 +145,85 @@ pub async fn get_deprecation_info(
     .await
     .map_err(|err| db_internal_error("count notifications", err))?;
 
-    if let Some((
-        deprecated_at,
+    // Contract columns (Issue #1090) are the source of truth for lifecycle status;
+    // the contract_deprecations row (Issue #65/#1061) supplies the retirement
+    // schedule, migration guide and grace period.
+    let (deprecated_at_col, reason_col, replacement_col, is_deprecated_col) = match contract_row {
+        Some((dep_at, reason, repl, is_dep, _status)) => (dep_at, reason, repl, is_dep),
+        None => (None, None, None, false),
+    };
+
+    let (
+        schedule_deprecated_at,
         retirement_at,
-        replacement_id,
-        guide_url,
+        schedule_replacement,
+        migration_guide_url,
         notes,
-        deprecated_reason,
+        schedule_reason,
         grace_period_days,
-    )) = record
-    {
+    ) = match schedule {
+        Some((dep_at, retirement, repl, guide, notes, reason, grace)) => (
+            Some(dep_at),
+            Some(retirement),
+            repl,
+            guide,
+            notes,
+            reason,
+            grace,
+        ),
+        None => (None, None, None, None, None, None, None),
+    };
+
+    let deprecated_at = deprecated_at_col.or(schedule_deprecated_at);
+    let replacement_uuid = replacement_col.or(schedule_replacement);
+    let deprecated_reason = schedule_reason.or(reason_col).or_else(|| notes.clone());
+
+    let status = if deprecated_at.is_none() && !is_deprecated_col {
+        DeprecationStatus::Active
+    } else if retirement_at.is_some_and(|retirement| Utc::now() >= retirement) {
+        DeprecationStatus::Retired
+    } else {
+        DeprecationStatus::from_columns(deprecated_at, replacement_uuid)
+    };
+
+    let days_remaining = retirement_at.map(|retirement| {
         let now = Utc::now();
-        let status = if now >= retirement_at {
-            DeprecationStatus::Retired
-        } else {
-            DeprecationStatus::Deprecated
-        };
-        let days_remaining = Some(if retirement_at > now {
-            (retirement_at - now).num_days()
+        if retirement > now {
+            (retirement - now).num_days()
         } else {
             0
-        });
+        }
+    });
 
-        let replacement_contract_id = replacement_id.map(|id| id.to_string());
+    let replacement_contract_id = match replacement_uuid {
+        Some(id) => Some(resolve_contract_selector(&state, id).await?),
+        None => None,
+    };
 
-        return Ok(Json(DeprecationInfo {
-            contract_id,
-            status,
-            deprecated_at: Some(deprecated_at),
-            retirement_at: Some(retirement_at),
-            replacement_contract_id,
-            migration_guide_url: guide_url,
-            notes,
-            deprecated_reason,
-            grace_period_days,
-            days_remaining,
-            dependents_notified,
-        }));
-    }
+    let replacement_lineage =
+        build_replacement_lineage(&state, replacement_uuid, &contract_id).await?;
+    let warnings = build_lineage_warnings(
+        &status,
+        &contract_id,
+        replacement_contract_id.as_deref(),
+        &replacement_lineage,
+        deprecated_reason.as_deref(),
+    );
 
     Ok(Json(DeprecationInfo {
         contract_id,
-        status: DeprecationStatus::Active,
-        deprecated_at: None,
-        retirement_at: None,
-        replacement_contract_id: None,
-        migration_guide_url: None,
-        notes: None,
-        deprecated_reason: None,
-        grace_period_days: None,
-        days_remaining: None,
+        status,
+        deprecated_at,
+        retirement_at,
+        replacement_contract_id,
+        migration_guide_url,
+        notes,
+        deprecated_reason,
+        grace_period_days,
+        days_remaining,
         dependents_notified,
+        replacement_lineage,
+        warnings,
     }))
 }
 
@@ -202,10 +250,13 @@ pub async fn deprecate_contract(
 ) -> ApiResult<Json<DeprecationInfo>> {
     let (contract_uuid, contract_id) = fetch_contract_identity(&state, &id).await?;
 
-    if req.migration_guide_url.is_none() && req.replacement_contract_id.is_none() {
+    let reason = req.deprecated_reason.clone().or_else(|| req.notes.clone());
+
+    if req.migration_guide_url.is_none() && req.replacement_contract_id.is_none() && reason.is_none()
+    {
         return Err(ApiError::bad_request(
             "MissingMigrationPath",
-            "Provide replacement_contract_id or migration_guide_url",
+            "Provide replacement_contract_id, migration_guide_url, or deprecated_reason",
         ));
     }
 
@@ -226,12 +277,25 @@ pub async fn deprecate_contract(
     }
 
     let replacement_uuid = if let Some(ref selector) = req.replacement_contract_id {
-        Some(fetch_contract_uuid(&state, selector).await?)
+        let uuid = fetch_contract_uuid(&state, selector).await?;
+        if uuid == contract_uuid {
+            return Err(ApiError::bad_request(
+                "InvalidReplacement",
+                "replacement_contract_id cannot reference the same contract",
+            ));
+        }
+        Some(uuid)
     } else {
         None
     };
 
-    // Upsert the deprecation record (now includes reason and grace period)
+    let mut tx = state
+        .db
+        .begin()
+        .await
+        .map_err(|err| db_internal_error("begin deprecate tx", err))?;
+
+    // Upsert the deprecation record (retirement schedule, reason and grace period)
     sqlx::query(
         "INSERT INTO contract_deprecations \
             (contract_id, retirement_at, replacement_contract_id, migration_guide_url, notes, \
@@ -251,20 +315,38 @@ pub async fn deprecate_contract(
     .bind(replacement_uuid)
     .bind(&req.migration_guide_url)
     .bind(&req.notes)
-    .bind(&req.deprecated_reason)
+    .bind(&reason)
     .bind(req.grace_period_days)
-    .execute(&state.db)
+    .execute(&mut *tx)
     .await
-    .map_err(|err| db_internal_error("upsert deprecation", err))?;
+    .map_err(|err| db_internal_error("upsert deprecation schedule", err))?;
 
-    // Set is_deprecated flag on the contracts row for fast filtering
-    sqlx::query("UPDATE contracts SET is_deprecated = TRUE WHERE id = $1")
-        .bind(contract_uuid)
-        .execute(&state.db)
+    // Denormalize onto contracts so list/search/trending can filter and surface
+    // status without joining contract_deprecations (Issue #1090).
+    sqlx::query(
+        "UPDATE contracts SET \
+            deprecated_at = COALESCE(deprecated_at, NOW()), \
+            deprecation_reason = $2, \
+            replacement_contract_id = $3, \
+            is_deprecated = TRUE, \
+            updated_at = NOW() \
+         WHERE id = $1",
+    )
+    .bind(contract_uuid)
+    .bind(&reason)
+    .bind(replacement_uuid)
+    .execute(&mut *tx)
+    .await
+    .map_err(|err| db_internal_error("update contract deprecation columns", err))?;
+
+    tx.commit()
         .await
-        .map_err(|err| db_internal_error("set is_deprecated flag", err))?;
+        .map_err(|err| db_internal_error("commit deprecate tx", err))?;
 
     notify_dependents(&state, contract_uuid, &contract_id, req.retirement_at).await?;
+
+    // Best-effort ES reindex so search paths stay consistent.
+    reindex_contract_search(&state, contract_uuid).await;
 
     get_deprecation_info(State(state), Path(contract_id)).await
 }
@@ -275,10 +357,12 @@ pub async fn deprecate_contract(
     delete,
     path = "/api/contracts/{id}/deprecate",
     params(
-        ("id" = String, Path, description = "Contract identifier")
+        ("id" = String, Path, description = "Contract identifier"),
+        UndeprecateContractRequest
     ),
     responses(
         (status = 200, description = "Contract undeprecated successfully", body = DeprecationInfo),
+        (status = 400, description = "Override flag required to reactivate"),
         (status = 404, description = "Contract not found")
     ),
     tag = "Maintenance"
@@ -286,24 +370,154 @@ pub async fn deprecate_contract(
 pub async fn undeprecate_contract(
     State(state): State<AppState>,
     Path(id): Path<String>,
+    Query(req): Query<UndeprecateContractRequest>,
 ) -> ApiResult<Json<DeprecationInfo>> {
     let (contract_uuid, contract_id) = fetch_contract_identity(&state, &id).await?;
 
-    // Remove the deprecation record
+    let is_deprecated: bool = sqlx::query_scalar(
+        "SELECT COALESCE(is_deprecated, FALSE) FROM contracts WHERE id = $1",
+    )
+    .bind(contract_uuid)
+    .fetch_one(&state.db)
+    .await
+    .map_err(|err| db_internal_error("fetch is_deprecated", err))?;
+
+    if !is_deprecated {
+        return get_deprecation_info(State(state), Path(contract_id)).await;
+    }
+
+    if !req.has_override() {
+        return Err(ApiError::bad_request(
+            "OverrideRequired",
+            "Reactivating a deprecated contract requires override=true (or force=true)",
+        ));
+    }
+
+    let mut tx = state
+        .db
+        .begin()
+        .await
+        .map_err(|err| db_internal_error("begin undeprecate tx", err))?;
+
+    sqlx::query(
+        "UPDATE contracts SET \
+            deprecated_at = NULL, \
+            deprecation_reason = NULL, \
+            replacement_contract_id = NULL, \
+            is_deprecated = FALSE, \
+            updated_at = NOW() \
+         WHERE id = $1",
+    )
+    .bind(contract_uuid)
+    .execute(&mut *tx)
+    .await
+    .map_err(|err| db_internal_error("clear contract deprecation columns", err))?;
+
     sqlx::query("DELETE FROM contract_deprecations WHERE contract_id = $1")
         .bind(contract_uuid)
-        .execute(&state.db)
+        .execute(&mut *tx)
         .await
-        .map_err(|err| db_internal_error("delete deprecation", err))?;
+        .map_err(|err| db_internal_error("delete deprecation schedule", err))?;
 
-    // Clear is_deprecated flag
-    sqlx::query("UPDATE contracts SET is_deprecated = FALSE WHERE id = $1")
-        .bind(contract_uuid)
-        .execute(&state.db)
+    tx.commit()
         .await
-        .map_err(|err| db_internal_error("clear is_deprecated flag", err))?;
+        .map_err(|err| db_internal_error("commit undeprecate tx", err))?;
+
+    reindex_contract_search(&state, contract_uuid).await;
 
     get_deprecation_info(State(state), Path(contract_id)).await
+}
+
+async fn reindex_contract_search(state: &AppState, contract_uuid: Uuid) {
+    if let Ok(Some(contract)) =
+        sqlx::query_as::<_, shared::Contract>("SELECT * FROM contracts WHERE id = $1")
+            .bind(contract_uuid)
+            .fetch_optional(&state.db)
+            .await
+    {
+        let _ = state.search.index_contract(&contract, None).await;
+    }
+}
+
+async fn build_replacement_lineage(
+    state: &AppState,
+    mut next: Option<Uuid>,
+    origin_contract_id: &str,
+) -> ApiResult<Vec<String>> {
+    let mut lineage = Vec::new();
+    let mut seen = HashSet::new();
+    seen.insert(origin_contract_id.to_string());
+
+    // Cap depth to avoid pathological graphs.
+    for _ in 0..16 {
+        let Some(id) = next else {
+            break;
+        };
+        let row = sqlx::query_as::<_, (String, Option<Uuid>)>(
+            "SELECT contract_id, replacement_contract_id FROM contracts WHERE id = $1",
+        )
+        .bind(id)
+        .fetch_optional(&state.db)
+        .await
+        .map_err(|err| db_internal_error("fetch replacement lineage", err))?;
+
+        let Some((selector, replacement)) = row else {
+            break;
+        };
+        if !seen.insert(selector.clone()) {
+            lineage.push(format!("{selector} (cycle detected)"));
+            break;
+        }
+        lineage.push(selector);
+        next = replacement;
+    }
+
+    Ok(lineage)
+}
+
+fn build_lineage_warnings(
+    status: &DeprecationStatus,
+    contract_id: &str,
+    replacement: Option<&str>,
+    lineage: &[String],
+    reason: Option<&str>,
+) -> Vec<String> {
+    let mut warnings = Vec::new();
+    match status {
+        DeprecationStatus::Active => {}
+        DeprecationStatus::Deprecated => {
+            warnings.push(format!(
+                "Contract {contract_id} is deprecated and has no replacement successor"
+            ));
+        }
+        DeprecationStatus::Superseded => {
+            if let Some(repl) = replacement {
+                warnings.push(format!(
+                    "Contract {contract_id} is superseded; resolve to {repl} instead"
+                ));
+            } else {
+                warnings.push(format!("Contract {contract_id} is superseded"));
+            }
+        }
+        DeprecationStatus::Retired => {
+            warnings.push(format!(
+                "Contract {contract_id} is retired and should not be used for new deployments"
+            ));
+        }
+    }
+    if let Some(reason) = reason {
+        if !reason.is_empty() {
+            warnings.push(format!("Deprecation reason: {reason}"));
+        }
+    }
+    if lineage.len() > 1 {
+        warnings.push(format!(
+            "Replacement lineage: {} → {}",
+            contract_id,
+            lineage.join(" → ")
+        ));
+    }
+    warnings
 }
 
 // ─── POST /api/admin/deprecation/purge-expired ────────────────────────────────
@@ -479,7 +693,19 @@ pub(crate) async fn fetch_contract_identity(
 
 async fn fetch_contract_uuid(state: &AppState, contract_id: &str) -> ApiResult<Uuid> {
     if let Ok(uuid) = Uuid::parse_str(contract_id) {
-        return Ok(uuid);
+        let exists: bool =
+            sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM contracts WHERE id = $1)")
+                .bind(uuid)
+                .fetch_one(&state.db)
+                .await
+                .map_err(|err| db_internal_error("fetch contract", err))?;
+        if exists {
+            return Ok(uuid);
+        }
+        return Err(ApiError::not_found(
+            "ContractNotFound",
+            format!("Contract '{}' not found", contract_id),
+        ));
     }
 
     let uuid = sqlx::query_scalar::<_, Uuid>("SELECT id FROM contracts WHERE contract_id = $1")
@@ -495,6 +721,16 @@ async fn fetch_contract_uuid(state: &AppState, contract_id: &str) -> ApiResult<U
         })?;
 
     Ok(uuid)
+}
+
+async fn resolve_contract_selector(state: &AppState, id: Uuid) -> ApiResult<String> {
+    let selector = sqlx::query_scalar::<_, String>("SELECT contract_id FROM contracts WHERE id = $1")
+        .bind(id)
+        .fetch_optional(&state.db)
+        .await
+        .map_err(|err| db_internal_error("resolve replacement selector", err))?
+        .unwrap_or_else(|| id.to_string());
+    Ok(selector)
 }
 
 fn db_internal_error(operation: &str, err: sqlx::Error) -> ApiError {
@@ -514,4 +750,58 @@ async fn column_exists(state: &AppState, table: &str, column: &str) -> ApiResult
     .map_err(|err| db_internal_error("check column", err))?;
 
     Ok(exists)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn status_from_columns_covers_transitions() {
+        assert_eq!(
+            DeprecationStatus::from_columns(None, None),
+            DeprecationStatus::Active
+        );
+        assert_eq!(
+            DeprecationStatus::from_columns(Some(Utc::now()), None),
+            DeprecationStatus::Deprecated
+        );
+        assert_eq!(
+            DeprecationStatus::from_columns(Some(Utc::now()), Some(Uuid::nil())),
+            DeprecationStatus::Superseded
+        );
+    }
+
+    #[test]
+    fn undeprecate_requires_override_flag() {
+        assert!(!UndeprecateContractRequest {
+            r#override: false,
+            force: false
+        }
+        .has_override());
+        assert!(UndeprecateContractRequest {
+            r#override: true,
+            force: false
+        }
+        .has_override());
+        assert!(UndeprecateContractRequest {
+            r#override: false,
+            force: true
+        }
+        .has_override());
+    }
+
+    #[test]
+    fn lineage_warnings_include_successor_chain() {
+        let warnings = build_lineage_warnings(
+            &DeprecationStatus::Superseded,
+            "C_OLD",
+            Some("C_NEW"),
+            &["C_NEW".into(), "C_NEWER".into()],
+            Some("security advisory"),
+        );
+        assert!(warnings.iter().any(|w| w.contains("superseded")));
+        assert!(warnings.iter().any(|w| w.contains("security advisory")));
+        assert!(warnings.iter().any(|w| w.contains("C_NEW → C_NEWER")));
+    }
 }

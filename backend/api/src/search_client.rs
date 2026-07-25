@@ -2,7 +2,7 @@ use anyhow::Result;
 use chrono::{DateTime, Utc};
 use elasticsearch::{
     http::transport::Transport,
-    indices::{IndicesCreateParts, IndicesDeleteParts, IndicesExistsParts},
+    indices::{IndicesCreateParts, IndicesDeleteParts, IndicesExistsParts, IndicesPutMappingParts},
     params::Refresh,
     Elasticsearch, IndexParts, SearchParts,
 };
@@ -22,6 +22,12 @@ pub struct ContractDocument {
     pub tags: Vec<String>,
     pub network: Network,
     pub is_verified: bool,
+    pub is_deprecated: bool,
+    pub deprecation_status: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub replacement_contract_id: Option<Uuid>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub deprecated_at: Option<DateTime<Utc>>,
     pub created_at: chrono::DateTime<chrono::Utc>,
 }
 
@@ -94,6 +100,10 @@ impl SearchClient {
                         "tags": { "type": "keyword", "boost": 2.0 },
                         "network": { "type": "keyword" },
                         "is_verified": { "type": "boolean" },
+                        "is_deprecated": { "type": "boolean" },
+                        "deprecation_status": { "type": "keyword" },
+                        "replacement_contract_id": { "type": "keyword" },
+                        "deprecated_at": { "type": "date" },
                         "created_at": { "type": "date" }
                     }
                 }
@@ -105,6 +115,22 @@ impl SearchClient {
                 .body(body)
                 .send()
                 .await?;
+        } else {
+            // Additive mapping update for Issue #1090 deprecation fields on existing indexes.
+            let _ = self
+                .client
+                .indices()
+                .put_mapping(IndicesPutMappingParts::Index(&[index_name]))
+                .body(json!({
+                    "properties": {
+                        "is_deprecated": { "type": "boolean" },
+                        "deprecation_status": { "type": "keyword" },
+                        "replacement_contract_id": { "type": "keyword" },
+                        "deprecated_at": { "type": "date" }
+                    }
+                }))
+                .send()
+                .await;
         }
         Ok(())
     }
@@ -120,6 +146,10 @@ impl SearchClient {
             tags: contract.tags.iter().map(|t| t.name.clone()).collect(),
             network: contract.network.clone(),
             is_verified: contract.is_verified,
+            is_deprecated: contract.is_deprecated,
+            deprecation_status: contract.deprecation_status.as_str().to_string(),
+            replacement_contract_id: contract.replacement_contract_id,
+            deprecated_at: contract.deprecated_at,
             created_at: contract.created_at,
         };
 

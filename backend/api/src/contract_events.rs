@@ -595,6 +595,11 @@ mod tests {
             visibility: shared::VisibilityType::Public,
             current_version: None,
             usage_count: 0,
+            deprecated_at: None,
+            deprecation_reason: None,
+            replacement_contract_id: None,
+            is_deprecated: false,
+            deprecation_status: shared::DeprecationStatus::Active,
         }
     }
 

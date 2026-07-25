@@ -706,7 +706,7 @@ export interface MetricSeriesResponse {
   samples?: MetricSample[];
 }
 
-export type DeprecationStatus = "active" | "deprecated" | "retired";
+export type DeprecationStatus = "active" | "deprecated" | "superseded" | "retired";
 
 export type ReleaseNotesStatus = "draft" | "published";
 
@@ -768,8 +768,12 @@ export interface DeprecationInfo {
   replacement_contract_id?: string | null;
   migration_guide_url?: string | null;
   notes?: string | null;
+  deprecated_reason?: string | null;
+  grace_period_days?: number | null;
   days_remaining?: number | null;
   dependents_notified: number;
+  replacement_lineage?: string[];
+  warnings?: string[];
 }
 
 export interface LegacyStatsResponse extends StatsResponse {
