@@ -45,6 +45,7 @@ use std::{
     collections::{HashMap, HashSet, VecDeque},
     env,
     net::{IpAddr, SocketAddr},
+    sync::atomic::{AtomicU64, Ordering},
     time::{Duration, Instant},
 };
 
@@ -61,6 +62,7 @@ use axum::{
 use tokio::sync::Mutex;
 
 use crate::error::ApiError;
+use crate::metrics::RATE_LIMIT_BYPASS_TOTAL;
 
 // Issue #891: 1,000 requests per minute per IP/API key by default.
 const DEFAULT_ANON_LIMIT: u32 = 1_000;
@@ -84,6 +86,14 @@ const BURST_WINDOW_SECONDS: u64 = 60; // 1 minute burst window
 
 /// How often the background task sweeps for expired buckets.
 const EVICTION_INTERVAL: Duration = Duration::from_secs(5 * 60); // every 5 minutes
+
+// ── Bypass spike-detection (issue #1054) ─────────────────────────────────
+/// Number of bypass requests in the current minute-window that triggers a
+/// warning alert.  Configurable via `RATE_LIMIT_BYPASS_SPIKE_THRESHOLD`
+/// (default: 100 per minute).
+const DEFAULT_BYPASS_SPIKE_THRESHOLD: u64 = 100;
+/// Duration of the rolling window used to measure bypass spike rate.
+const BYPASS_SPIKE_WINDOW: Duration = Duration::from_secs(60);
 
 const HEADER_RATE_LIMIT_LIMIT: HeaderName = HeaderName::from_static("x-ratelimit-limit");
 const HEADER_RATE_LIMIT_REMAINING: HeaderName = HeaderName::from_static("x-ratelimit-remaining");
@@ -131,6 +141,16 @@ pub struct RateLimitState {
     config: std::sync::Arc<RateLimitConfig>,
     /// Shared bucket map — protected by a *tokio* Mutex so it is async-safe.
     buckets: std::sync::Arc<Mutex<HashMap<BucketKey, BucketState>>>,
+    // ── Bypass spike detection (issue #1054) ──────────────────────────────
+    /// Total bypass events recorded in the current rolling window.
+    bypass_window_count: std::sync::Arc<AtomicU64>,
+    /// Unix-millisecond timestamp of when the current spike-detection window
+    /// started.  Protected by a `tokio::sync::Mutex` so only one task resets
+    /// it at a time.
+    bypass_window_start_ms: std::sync::Arc<AtomicU64>,
+    /// Spike threshold (bypasses per minute).  Copied from config at
+    /// construction time so the hot path avoids an indirect through the Arc.
+    bypass_spike_threshold: u64,
 }
 
 /// Snapshot of quota usage for a client key (used by the /api/quota endpoint).
@@ -151,9 +171,18 @@ impl RateLimitState {
     }
 
     fn new(config: RateLimitConfig) -> Self {
+        let bypass_spike_threshold = env_u64(
+            "RATE_LIMIT_BYPASS_SPIKE_THRESHOLD",
+            DEFAULT_BYPASS_SPIKE_THRESHOLD,
+        );
         Self {
             config: std::sync::Arc::new(config),
             buckets: std::sync::Arc::new(Mutex::new(HashMap::new())),
+            bypass_window_count: std::sync::Arc::new(AtomicU64::new(0)),
+            bypass_window_start_ms: std::sync::Arc::new(AtomicU64::new(
+                now_unix_millis(),
+            )),
+            bypass_spike_threshold,
         }
     }
 
@@ -208,6 +237,47 @@ impl RateLimitState {
                 }
             }
         });
+    }
+
+    /// Record one bypass event and emit a warning if the rate exceeds the
+    /// configured spike threshold within the rolling 60-second window.
+    ///
+    /// This is intentionally lock-free (two `AtomicU64`s) so it cannot add
+    /// latency to the hot path even under heavy trusted-client traffic.
+    pub fn record_bypass_and_check_spike(&self, token_type: &str, token_identity: &str) {
+        let now_ms = now_unix_millis();
+        let window_start = self.bypass_window_start_ms.load(Ordering::Relaxed);
+        let window_age_ms = now_ms.saturating_sub(window_start);
+
+        if window_age_ms >= BYPASS_SPIKE_WINDOW.as_millis() as u64 {
+            // Window expired — reset.  Use compare-and-swap so only one thread
+            // resets; the rest simply proceed with the counter already at 0.
+            if self
+                .bypass_window_start_ms
+                .compare_exchange(window_start, now_ms, Ordering::AcqRel, Ordering::Relaxed)
+                .is_ok()
+            {
+                self.bypass_window_count.store(1, Ordering::Relaxed);
+                return; // Fresh window; no spike possible yet.
+            }
+        }
+
+        let count = self.bypass_window_count.fetch_add(1, Ordering::Relaxed) + 1;
+
+        if count >= self.bypass_spike_threshold {
+            // Emit a structured warning that AlertManager / log-based alerting
+            // can pick up.  We warn every time the counter crosses the threshold
+            // (not just once) so the spike remains visible in the log stream.
+            tracing::warn!(
+                bypass_count_in_window = count,
+                threshold = self.bypass_spike_threshold,
+                token_type,
+                token_identity,
+                window_seconds = BYPASS_SPIKE_WINDOW.as_secs(),
+                "RATE_LIMIT_BYPASS_SPIKE: trusted-client bypass volume exceeds threshold; \
+                 possible token leak or misconfiguration"
+            );
+        }
     }
 
     async fn check_request(
@@ -490,6 +560,11 @@ impl RateLimitConfig {
             write_anonymous_limit: anonymous_limit / 10,
             write_auth_limit: auth_limit / 3,
             window,
+            enterprise_limit: 100_000,
+            burst_window: Duration::from_secs(BURST_WINDOW_SECONDS),
+            per_api_key_limits: HashMap::new(),
+            trusted_client_ips: HashSet::new(),
+            trusted_api_keys: HashSet::new(),
         }
     }
 
@@ -562,6 +637,32 @@ impl RateLimitConfig {
             })
             .unwrap_or(false)
     }
+
+    /// If the request matches a trusted bypass, returns `(token_type, masked_identity)`.
+    /// `token_type` is `"trusted_ip"` or `"trusted_api_key"`.
+    /// The identity is masked — only the first 4 chars of the key are shown —
+    /// so that tokens are not written verbatim to logs.
+    fn bypass_identity<B>(&self, request: &Request<B>) -> Option<(&'static str, String)> {
+        let client_ip = extract_client_ip(request);
+        if self.trusted_client_ips.contains(&client_ip) {
+            return Some(("trusted_ip", client_ip));
+        }
+
+        extract_auth_token(request).and_then(|token| {
+            let normalized = token
+                .strip_prefix("Bearer ")
+                .or_else(|| token.strip_prefix("ApiKey "))
+                .unwrap_or(&token)
+                .trim()
+                .to_string();
+            if self.trusted_api_keys.contains(&normalized) {
+                let masked = mask_token(&normalized);
+                Some(("trusted_api_key", masked))
+            } else {
+                None
+            }
+        })
+    }
 }
 
 #[derive(Hash, Eq, PartialEq)]
@@ -588,6 +689,42 @@ pub async fn rate_limit_middleware(
     next: Next,
 ) -> Response {
     if rate_limiter.config.is_whitelisted(&request) {
+        // ── Bypass audit trail (issue #1054) ──────────────────────────────
+        // Determine the bypass identity before consuming the request.
+        let (token_type, masked_identity) = rate_limiter
+            .config
+            .bypass_identity(&request)
+            .unwrap_or_else(|| ("unknown", "unknown".to_string()));
+
+        let client_ip = extract_client_ip(&request);
+        let method = request.method().as_str().to_owned();
+        let path = request.uri().path().to_owned();
+
+        // 1. Structured audit log entry — written to the tracing stream so it
+        //    ends up in whatever log sink the operator has configured (stdout,
+        //    OTLP, etc.).  The `audit_event = "rate_limit.bypass"` field makes
+        //    it easy to filter in Grafana / CloudWatch.
+        tracing::info!(
+            audit_event = "rate_limit.bypass",
+            token_type,
+            token_identity = %masked_identity,
+            client_ip = %client_ip,
+            method = %method,
+            path = %path,
+            timestamp = %chrono::Utc::now().to_rfc3339(),
+            "Trusted-client rate-limit bypass: request passed without quota check"
+        );
+
+        // 2. Prometheus counter — increment the bypass metric with the
+        //    token_type label so dashboards can track volume over time.
+        RATE_LIMIT_BYPASS_TOTAL
+            .with_label_values(&[token_type])
+            .inc();
+
+        // 3. Spike detection — warn if bypass volume exceeds threshold within
+        //    the rolling window.
+        rate_limiter.record_bypass_and_check_spike(token_type, &masked_identity);
+
         return next.run(request).await;
     }
 
@@ -874,13 +1011,30 @@ fn ceil_duration_to_seconds(duration: Duration) -> u64 {
     }
 }
 
+/// Returns the current time as Unix milliseconds.  Used for the lock-free
+/// bypass spike-detection window.
+fn now_unix_millis() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64
+}
+
+/// Masks a token so that at most the first 4 characters are logged, followed
+/// by `***`.  This prevents full token values from appearing in structured
+/// logs while still giving operators enough context to correlate bypass events.
+fn mask_token(token: &str) -> String {
+    let visible_chars = 4.min(token.len());
+    format!("{}***", &token[..visible_chars])
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use axum::{
         http::{Request, StatusCode},
         middleware,
-        routing::get,
+        routing::{get, post},
         Router,
     };
     use tower::Service;
