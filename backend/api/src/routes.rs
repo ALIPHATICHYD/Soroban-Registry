@@ -486,6 +486,14 @@ pub fn contract_routes() -> Router<AppState> {
             "/api/contracts/:id/deprecate",
             post(deprecation_handlers::deprecate_contract),
         )
+        .route(
+            "/api/contracts/:id/undeprecate",
+            post(deprecation_handlers::undeprecate_contract),
+        )
+        .route(
+            "/api/contracts/:id/deprecation",
+            get(deprecation_handlers::get_deprecation_info),
+        )
         // AI-Powered Contract Code Assistant
         .route(
             "/api/contracts/:id/ai/chat",

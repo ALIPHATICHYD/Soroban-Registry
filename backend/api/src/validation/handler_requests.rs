@@ -10,6 +10,7 @@ use shared::models::{
     CreateContributorRequest, CreateOrganizationRequest, CreateReviewRequest,
     CreateSecurityScannerRequest, CreateWebhookRequest, DeprecateContractRequest,
     FederationOptRequest, FlagReviewRequest, InviteMemberRequest, MethodParamHint,
+    UndeprecateContractRequest,
     ModerateReviewRequest, RecordAbTestMetricRequest, RecordCanaryMetricRequest,
     RecordCustomMetricRequest, RecordPerformanceBenchmarkRequest, RecordPerformanceMetricRequest,
     RegisterFederatedRegistryRequest, RestoreBackupRequest, RevertVersionRequest,
@@ -971,6 +972,7 @@ impl Validatable for DeprecateContractRequest {
         trim_optional(&mut self.replacement_contract_id);
         sanitize_url_optional(&mut self.migration_guide_url);
         trim_optional(&mut self.notes);
+        trim_optional(&mut self.deprecation_reason);
     }
 
     fn validate(&self) -> Result<(), Vec<FieldError>> {
@@ -982,7 +984,23 @@ impl Validatable for DeprecateContractRequest {
             validate_url_optional(&self.migration_guide_url)
         });
         validate_optional_text(&mut builder, "notes", &self.notes, MAX_DESCRIPTION_LENGTH);
+        validate_optional_text(
+            &mut builder,
+            "deprecation_reason",
+            &self.deprecation_reason,
+            MAX_DESCRIPTION_LENGTH,
+        );
         builder.build()
+    }
+}
+
+impl Validatable for UndeprecateContractRequest {
+    fn sanitize(&mut self) {}
+
+    fn validate(&self) -> Result<(), Vec<FieldError>> {
+        // Override presence is enforced in the handler so clients get a clear
+        // OverrideRequired error code rather than a generic validation failure.
+        Ok(())
     }
 }
 

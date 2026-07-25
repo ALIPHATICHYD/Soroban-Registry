@@ -147,7 +147,7 @@ export interface ContractSearchParams {
   date_to?: string;
 }
 
-export type DeprecationStatus = "active" | "deprecated" | "retired";
+export type DeprecationStatus = "active" | "deprecated" | "superseded" | "retired";
 
 export interface DeprecationInfo {
   contract_id: string;
@@ -157,8 +157,11 @@ export interface DeprecationInfo {
   replacement_contract_id?: string | null;
   migration_guide_url?: string | null;
   notes?: string | null;
+  deprecation_reason?: string | null;
   days_remaining?: number | null;
   dependents_notified: number;
+  replacement_lineage?: string[];
+  warnings?: string[];
 }
 
 export interface ContractInteraction {

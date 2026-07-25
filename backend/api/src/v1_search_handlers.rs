@@ -113,6 +113,11 @@ pub struct SearchHit {
     pub category: Option<String>,
     pub network: String,
     pub is_verified: bool,
+    pub deprecation_status: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub replacement_contract_id: Option<String>,
+    #[serde(default)]
+    pub is_deprecated: bool,
     pub relevance_score: f64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub explain: Option<RelevanceExplain>,
@@ -388,6 +393,14 @@ async fn search_via_elasticsearch(
                 category: src["category"].as_str().map(|s| s.to_string()),
                 network: src["network"].as_str().unwrap_or("").to_string(),
                 is_verified: src["is_verified"].as_bool().unwrap_or(false),
+                deprecation_status: src["deprecation_status"]
+                    .as_str()
+                    .unwrap_or("active")
+                    .to_string(),
+                replacement_contract_id: src["replacement_contract_id"]
+                    .as_str()
+                    .map(|s| s.to_string()),
+                is_deprecated: src["is_deprecated"].as_bool().unwrap_or(false),
                 relevance_score: score,
                 explain: explain_detail,
             }
@@ -497,6 +510,9 @@ async fn search_via_postgres(
                 category: c.category,
                 network: c.network.to_string(),
                 is_verified: c.is_verified,
+                deprecation_status: c.deprecation_status,
+                replacement_contract_id: c.replacement_contract_id.map(|id| id.to_string()),
+                is_deprecated: c.is_deprecated,
                 relevance_score: score,
                 explain: explain_detail,
             }

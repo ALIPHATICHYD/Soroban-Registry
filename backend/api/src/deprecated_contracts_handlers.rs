@@ -87,12 +87,13 @@ pub async fn list_deprecated_contracts(
         }
     }
 
-    // Total count
+    // Total count — include denormalized contract flags (Issue #1090) and schedule rows (#65).
     let total: i64 = sqlx::query_scalar(
         r#"
         SELECT COUNT(*)
         FROM contracts c
-        INNER JOIN contract_deprecations cd ON cd.contract_id = c.id
+        LEFT JOIN contract_deprecations cd ON cd.contract_id = c.id
+        WHERE c.is_deprecated = TRUE OR cd.id IS NOT NULL
         "#,
     )
     .fetch_one(&state.db)
@@ -105,13 +106,13 @@ pub async fn list_deprecated_contracts(
         SELECT
             c.contract_id,
             c.name,
-            cd.notes          AS reason,
+            COALESCE(c.deprecation_reason, cd.notes) AS reason,
             (
                 SELECT rc.contract_id
                 FROM contracts rc
-                WHERE rc.id = cd.replacement_contract_id
+                WHERE rc.id = COALESCE(c.replacement_contract_id, cd.replacement_contract_id)
             )                 AS replacement_contract_id,
-            cd.deprecated_at,
+            COALESCE(c.deprecated_at, cd.deprecated_at) AS deprecated_at,
             cd.retirement_at  AS removal_date,
             cd.migration_guide_url AS migration_guide,
             COALESCE(
@@ -121,8 +122,9 @@ pub async fn list_deprecated_contracts(
                 0
             )                 AS dependent_count
         FROM contracts c
-        INNER JOIN contract_deprecations cd ON cd.contract_id = c.id
-        ORDER BY cd.deprecated_at DESC
+        LEFT JOIN contract_deprecations cd ON cd.contract_id = c.id
+        WHERE c.is_deprecated = TRUE OR cd.id IS NOT NULL
+        ORDER BY COALESCE(c.deprecated_at, cd.deprecated_at) DESC NULLS LAST
         LIMIT $1 OFFSET $2
         "#,
     )

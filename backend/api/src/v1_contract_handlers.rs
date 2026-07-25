@@ -1024,6 +1024,11 @@ fn metadata_as_contract(row: &ContractMetadataRow) -> shared::Contract {
         visibility: shared::VisibilityType::Public,
         current_version: row.current_version.clone(),
         usage_count: row.usage_count,
+        deprecated_at: None,
+        deprecation_reason: None,
+        replacement_contract_id: None,
+        is_deprecated: false,
+        deprecation_status: shared::DeprecationStatus::Active,
     }
 }
 
