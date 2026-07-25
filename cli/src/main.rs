@@ -24,6 +24,7 @@ mod commands;
 mod compare;
 mod completion;
 mod config;
+mod contract_audit;
 mod contract_dependency;
 mod contract_deploy;
 mod contract_highlight;
@@ -2140,6 +2141,38 @@ pub enum ContractCommands {
         /// Directory for archive extraction (archive format only)
         #[arg(long, default_value = "./imported")]
         output_dir: String,
+    },
+
+    /// Detect drift between local lockfile and registry state (#1060)
+    ///
+    /// Compares a local `soroban-registry.lock.json` against the live registry
+    /// and reports added, removed, and changed contract metadata.
+    ///
+    /// Usage: soroban-registry contract audit [--lockfile PATH] [--fix] [--init --contracts a,b]
+    Audit {
+        /// Path to lockfile (default: soroban-registry.lock.json)
+        #[arg(long, default_value = "soroban-registry.lock.json")]
+        lockfile: String,
+
+        /// Auto-sync lockfile to match current registry state
+        #[arg(long)]
+        fix: bool,
+
+        /// Generate an initial lockfile from the given contract IDs
+        #[arg(long)]
+        init: bool,
+
+        /// Contract IDs for --init (comma-separated)
+        #[arg(long, value_delimiter = ',')]
+        contracts: Vec<String>,
+
+        /// Output format: text, json
+        #[arg(long, default_value = "text")]
+        format: String,
+
+        /// Output results as machine-readable JSON
+        #[arg(long)]
+        json: bool,
     },
 }
 
@@ -4267,6 +4300,24 @@ pub async fn dispatch_command(
                     report_output,
                 };
                 crate::import::run(opts).await?;
+            }
+            ContractCommands::Audit {
+                lockfile,
+                fix,
+                init,
+                contracts,
+                format,
+                json,
+            } => {
+                log::debug!(
+                    "Command: contract audit | lockfile={} fix={} init={} contracts={:?}",
+                    lockfile,
+                    fix,
+                    init,
+                    contracts
+                );
+                let fmt = if json { "json" } else { &format };
+                contract_audit::run(&cli.api_url, &lockfile, fix, init, &contracts, fmt).await?;
             }
         },
         Commands::ApiKey { action } => match action {
