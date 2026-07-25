@@ -4429,6 +4429,49 @@ pub async fn publish_contract(
     .map_err(|err| db_internal_error("upsert publisher", err))?;
 
     let wasm_hash = req.wasm_hash.clone();
+
+    // Duplicate detection (Issue #953): a contract is uniquely identified by
+    // (contract_id, network). If one is already registered, this is either a
+    // retry of a prior successful publish (same wasm_hash - return the
+    // existing record so publish stays idempotent) or an attempt to
+    // re-register the same contract_id with different source code (a real
+    // conflict, reported with a reference to the existing record).
+    if let Some(existing) = sqlx::query_as::<_, Contract>(
+        "SELECT * FROM contracts WHERE contract_id = $1 AND network = $2",
+    )
+    .bind(&req.contract_id)
+    .bind(&req.network)
+    .fetch_optional(&mut *tx)
+    .await
+    .map_err(|err| db_internal_error("check existing contract", err))?
+    {
+        tx.rollback()
+            .await
+            .map_err(|err| db_internal_error("rollback publish tx", err))?;
+
+        if existing.wasm_hash == wasm_hash {
+            return Ok(Json(existing));
+        }
+
+        return Err(ApiError::conflict(
+            "ContractAlreadyRegistered",
+            format!(
+                "Contract {} is already registered for network {}",
+                req.contract_id, req.network
+            ),
+        )
+        .with_details(json!({
+            "existing_contract": {
+                "id": existing.id,
+                "contract_id": existing.contract_id,
+                "slug": existing.slug,
+                "network": existing.network.to_string(),
+                "wasm_hash": existing.wasm_hash,
+                "published_at": existing.created_at,
+            }
+        })));
+    }
+
     let network_key = req.network.to_string();
     let mut config_map = serde_json::Map::new();
     config_map.insert(
