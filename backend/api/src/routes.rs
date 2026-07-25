@@ -484,7 +484,12 @@ pub fn contract_routes() -> Router<AppState> {
         )
         .route(
             "/api/contracts/:id/deprecate",
-            post(deprecation_handlers::deprecate_contract),
+            post(deprecation_handlers::deprecate_contract)
+                .delete(deprecation_handlers::undeprecate_contract),
+        )
+        .route(
+            "/api/admin/deprecation/purge-expired",
+            post(deprecation_handlers::purge_expired_deprecated_contracts),
         )
         // AI-Powered Contract Code Assistant
         .route(
