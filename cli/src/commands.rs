@@ -1046,8 +1046,8 @@ pub async fn contract_list(
     format: &str,
 ) -> Result<()> {
     let mut query: Vec<(&str, String)> = vec![
-        ("page_size", limit.to_string()),
-        ("page", ((offset / limit) + 1).to_string()),
+        ("limit", limit.to_string()),
+        ("offset", offset.to_string()),
     ];
 
     // Normalize before sending so comma-separated `--networks`/`--category` and
