@@ -2686,6 +2686,7 @@ pub enum AuditActionType {
     PublisherChanged,
     VersionCreated,
     Rollback,
+    OwnershipTransferred,
 }
 
 impl std::fmt::Display for AuditActionType {
@@ -2697,6 +2698,7 @@ impl std::fmt::Display for AuditActionType {
             Self::PublisherChanged => "publisher_changed",
             Self::VersionCreated => "version_created",
             Self::Rollback => "rollback",
+            Self::OwnershipTransferred => "ownership_transferred",
         };
         write!(f, "{}", s)
     }
@@ -4804,6 +4806,83 @@ pub struct ZkCircuitSummary {
     pub compiled_at: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
 }
+
+// ═══════════════════════════════════════════════════════════
+// Issue #1058 — Ownership Transfer types
+// ═══════════════════════════════════════════════════════════
+
+/// Status of an ownership transfer request.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, sqlx::Type, utoipa::ToSchema)]
+#[sqlx(type_name = "transfer_status", rename_all = "snake_case")]
+pub enum OwnershipTransferStatus {
+    Pending,
+    Confirmed,
+    Completed,
+    Expired,
+    Rejected,
+    Duplicate,
+}
+
+impl std::fmt::Display for OwnershipTransferStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let s = match self {
+            Self::Pending => "pending",
+            Self::Confirmed => "confirmed",
+            Self::Completed => "completed",
+            Self::Expired => "expired",
+            Self::Rejected => "rejected",
+            Self::Duplicate => "duplicate",
+        };
+        write!(f, "{}", s)
+    }
+}
+
+/// A transfer request for contract ownership.
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow, utoipa::ToSchema)]
+pub struct OwnershipTransfer {
+    pub id: Uuid,
+    pub contract_id: Uuid,
+    pub from_publisher_id: Uuid,
+    pub to_publisher_id: Uuid,
+    pub from_confirmation: bool,
+    pub to_confirmation: bool,
+    pub status: OwnershipTransferStatus,
+    pub expires_at: DateTime<Utc>,
+    pub created_at: DateTime<Utc>,
+    pub confirmed_at: Option<DateTime<Utc>>,
+    pub completed_at: Option<DateTime<Utc>>,
+    pub created_by: Uuid,
+}
+
+/// Request to create a new ownership transfer.
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct CreateOwnershipTransferRequest {
+    pub contract_id: Uuid,
+    pub to_publisher_id: Uuid,
+    pub expires_at: DateTime<Utc>,
+    pub user_id: Uuid,
+}
+
+/// Request to confirm (accept or reject) an ownership transfer.
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct ConfirmOwnershipTransferRequest {
+    pub transfer_id: Uuid,
+    pub accept: bool,
+    pub user_id: Uuid,
+}
+
+/// An event log entry for an ownership transfer.
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow, utoipa::ToSchema)]
+pub struct OwnershipTransferLog {
+    pub id: Uuid,
+    pub transfer_id: Uuid,
+    pub actor_id: Uuid,
+    pub actor_type: String,
+    pub action: String,
+    pub details: Option<serde_json::Value>,
+    pub created_at: DateTime<Utc>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

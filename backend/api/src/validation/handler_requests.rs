@@ -2293,6 +2293,22 @@ impl Validatable for RunMutationTestRequest {
     }
 }
 
+impl Validatable for shared::CreateOwnershipTransferRequest {
+    fn sanitize(&mut self) {}
+
+    fn validate(&self) -> Result<(), Vec<FieldError>> {
+        Ok(())
+    }
+}
+
+impl Validatable for shared::ConfirmOwnershipTransferRequest {
+    fn sanitize(&mut self) {}
+
+    fn validate(&self) -> Result<(), Vec<FieldError>> {
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -39,6 +39,8 @@ use shared::{
     QueryNode, QueryOperator, SaveFavoriteSearchRequest, SearchSuggestion,
     SearchSuggestionsResponse, SemVer, TrendingParams, UpdateContractMetadataRequest,
     UpdateContractStatusRequest, VerifyRequest,
+    CreateOwnershipTransferRequest, ConfirmOwnershipTransferRequest, OwnershipTransfer,
+    OwnershipTransferLog, OwnershipTransferStatus,
 };
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -1179,6 +1181,29 @@ fn split_audit_changes(
     };
 
     (old_value, new_value)
+}
+
+pub(crate) async fn write_ownership_transfer_log(
+    db: &sqlx::PgPool,
+    transfer_id: Uuid,
+    actor_id: Uuid,
+    actor_type: &str,
+    action: &str,
+    details: Option<serde_json::Value>,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "INSERT INTO ownership_transfer_logs (transfer_id, actor_id, actor_type, action, details)
+         VALUES ($1, $2, $3, $4, $5)",
+    )
+    .bind(transfer_id)
+    .bind(actor_id)
+    .bind(actor_type)
+    .bind(action)
+    .bind(details)
+    .execute(db)
+    .await?;
+
+    Ok(())
 }
 
 fn parse_interaction_type(
@@ -6079,6 +6104,476 @@ pub async fn change_contract_publisher(
 
     state.cache.invalidate_contracts().await;
     Ok(Json(after))
+}
+
+// ────────────────────────────────────────────────────────────────────────
+// Issue #1058 — Ownership Transfer Endpoints
+// ────────────────────────────────────────────────────────────────────────
+
+pub async fn create_ownership_transfer(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    headers: HeaderMap,
+    ValidatedJson(req): ValidatedJson<CreateOwnershipTransferRequest>,
+) -> ApiResult<Json<OwnershipTransfer>> {
+    let contract_uuid = Uuid::parse_str(&id).map_err(|_| {
+        ApiError::bad_request(
+            "InvalidContractId",
+            format!("Invalid contract ID format: {}", id),
+        )
+    })?;
+
+    let contract: Contract = sqlx::query_as("SELECT * FROM contracts WHERE id = $1")
+        .bind(contract_uuid)
+        .fetch_optional(&state.db)
+        .await
+        .map_err(|err| db_internal_error("fetch contract for ownership transfer", err))?
+        .ok_or_else(|| ApiError::not_found("ContractNotFound", format!("No contract found with ID: {}", id)))?;
+
+    let from_publisher_id = contract.publisher_id;
+
+    let duplicate_exists: bool = sqlx::query_scalar(
+        "SELECT EXISTS(
+            SELECT 1 FROM ownership_transfers
+            WHERE contract_id = $1
+            AND status = 'pending'
+        )",
+    )
+    .bind(contract_uuid)
+    .fetch_one(&state.db)
+    .await
+    .map_err(|err| db_internal_error("check duplicate transfer", err))?;
+
+    if duplicate_exists {
+        let now = Utc::now();
+        let transfer_id = Uuid::new_v4();
+
+        write_contract_audit_log(
+            &state.db,
+            AuditActionType::OwnershipTransferred,
+            contract_uuid,
+            req.user_id,
+            json!({
+                "action": "duplicate_rejected",
+                "reason": "A pending transfer already exists for this contract",
+                "from_publisher_id": from_publisher_id,
+                "to_publisher_id": req.to_publisher_id
+            }),
+            &extract_ip_address(&headers),
+        )
+        .await
+        .map_err(|err| db_internal_error("write duplicate transfer audit log", err))?;
+
+        write_ownership_transfer_log(
+            &state.db,
+            transfer_id,
+            req.user_id,
+            "publisher",
+            "duplicate_rejected",
+            Some(json!({
+                "reason": "A pending transfer already exists for this contract",
+            })),
+        )
+        .await
+        .map_err(|err| db_internal_error("write duplicate transfer log", err))?;
+
+        return Err(ApiError::conflict(
+            "DuplicateTransfer",
+            "A pending ownership transfer already exists for this contract",
+        ));
+    }
+
+    let _target_publisher: Publisher = sqlx::query_as(
+        "SELECT * FROM publishers WHERE id = $1",
+    )
+    .bind(req.to_publisher_id)
+    .fetch_optional(&state.db)
+    .await
+    .map_err(|err| db_internal_error("fetch target publisher", err))?
+    .ok_or_else(|| ApiError::not_found(
+        "PublisherNotFound",
+        format!("No publisher found with ID: {}", req.to_publisher_id),
+    ))?;
+
+    if req.expires_at <= Utc::now() {
+        return Err(ApiError::bad_request(
+            "ExpiredTransfer",
+            "expiry must be in the future",
+        ));
+    }
+
+    let transfer = sqlx::query_as::<_, OwnershipTransfer>(
+        "INSERT INTO ownership_transfers (contract_id, from_publisher_id, to_publisher_id, expires_at, created_by)
+         VALUES ($1, $2, $3, $4, $5)
+         RETURNING *",
+    )
+    .bind(contract_uuid)
+    .bind(from_publisher_id)
+    .bind(req.to_publisher_id)
+    .bind(req.expires_at)
+    .bind(req.user_id)
+    .fetch_one(&state.db)
+    .await
+    .map_err(|err| db_internal_error("create ownership transfer", err))?;
+
+    write_contract_audit_log(
+        &state.db,
+        AuditActionType::OwnershipTransferred,
+        contract_uuid,
+        req.user_id,
+        json!({
+            "action": "transfer_request_created",
+            "from_publisher_id": from_publisher_id,
+            "to_publisher_id": req.to_publisher_id,
+            "expires_at": req.expires_at,
+            "transfer_id": transfer.id
+        }),
+        &extract_ip_address(&headers),
+    )
+    .await
+    .map_err(|err| db_internal_error("write transfer created audit log", err))?;
+
+    write_ownership_transfer_log(
+        &state.db,
+        transfer.id,
+        req.user_id,
+        "publisher",
+        "transfer_request_created",
+        Some(json!({
+            "from_publisher_id": from_publisher_id,
+            "to_publisher_id": req.to_publisher_id,
+            "expires_at": req.expires_at,
+        })),
+    )
+    .await
+    .map_err(|err| db_internal_error("write transfer log", err))?;
+
+    state.cache.invalidate_contracts().await;
+    Ok(Json(transfer))
+}
+
+pub async fn confirm_ownership_transfer(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    headers: HeaderMap,
+    ValidatedJson(req): ValidatedJson<ConfirmOwnershipTransferRequest>,
+) -> ApiResult<Json<OwnershipTransfer>> {
+    let transfer_uuid = Uuid::parse_str(&id).map_err(|_| {
+        ApiError::bad_request(
+            "InvalidTransferId",
+            format!("Invalid transfer ID format: {}", id),
+        )
+    })?;
+
+    let mut transfer: OwnershipTransfer = sqlx::query_as(
+        "SELECT * FROM ownership_transfers WHERE id = $1",
+    )
+    .bind(transfer_uuid)
+    .fetch_optional(&state.db)
+    .await
+    .map_err(|err| db_internal_error("fetch ownership transfer", err))?
+    .ok_or_else(|| ApiError::not_found(
+        "TransferNotFound",
+        format!("No ownership transfer found with ID: {}", id),
+    ))?;
+
+    if transfer.expires_at <= Utc::now() && transfer.status == OwnershipTransferStatus::Pending {
+        transfer.status = OwnershipTransferStatus::Expired;
+        sqlx::query(
+            "UPDATE ownership_transfers SET status = 'expired', completed_at = NOW() WHERE id = $1"
+        )
+        .bind(transfer_uuid)
+        .execute(&state.db)
+        .await
+        .map_err(|err| db_internal_error("expire ownership transfer", err))?;
+
+        write_contract_audit_log(
+            &state.db,
+            AuditActionType::OwnershipTransferred,
+            transfer.contract_id,
+            req.user_id,
+            json!({
+                "action": "transfer_expired",
+                "transfer_id": transfer_uuid,
+                "reason": "Transfer request has expired"
+            }),
+            &extract_ip_address(&headers),
+        )
+        .await
+        .map_err(|err| db_internal_error("write expired transfer audit log", err))?;
+
+        write_ownership_transfer_log(
+            &state.db,
+            transfer_uuid,
+            req.user_id,
+            "publisher",
+            "transfer_expired",
+            Some(json!({"reason": "Transfer request has expired"})),
+        )
+        .await
+        .map_err(|err| db_internal_error("write expired transfer log", err))?;
+
+        return Err(ApiError::conflict(
+            "TransferExpired",
+            "This ownership transfer request has expired",
+        ));
+    }
+
+    if transfer.status != OwnershipTransferStatus::Pending {
+        return Err(ApiError::conflict(
+            "TransferNotPending",
+            format!("Transfer is already in '{}' status and cannot be confirmed", transfer.status),
+        ));
+    }
+
+    let from_publisher_id = transfer.from_publisher_id;
+    let to_publisher_id = transfer.to_publisher_id;
+    let contract_id = transfer.contract_id;
+
+    if req.accept {
+        let is_from = req.user_id == from_publisher_id;
+        let is_to = req.user_id == to_publisher_id;
+
+        if !is_from && !is_to {
+            return Err(ApiError::forbidden_with_error(
+                "UnauthorizedConfirmation",
+                "Only the sender or recipient of this transfer can confirm it",
+            ));
+        }
+
+        if is_from {
+            transfer.from_confirmation = true;
+        }
+        if is_to {
+            transfer.to_confirmation = true;
+        }
+
+        sqlx::query(
+            "UPDATE ownership_transfers
+             SET from_confirmation = $2, to_confirmation = $3, confirmed_at = NOW()
+             WHERE id = $1",
+        )
+        .bind(transfer_uuid)
+        .bind(transfer.from_confirmation)
+        .bind(transfer.to_confirmation)
+        .execute(&state.db)
+        .await
+        .map_err(|err| db_internal_error("update ownership transfer confirmation", err))?;
+
+        if transfer.from_confirmation && transfer.to_confirmation {
+            transfer.status = OwnershipTransferStatus::Completed;
+            transfer.completed_at = Some(Utc::now());
+
+            sqlx::query(
+                "UPDATE contracts SET publisher_id = $2, updated_at = NOW() WHERE id = $1"
+            )
+            .bind(contract_id)
+            .bind(to_publisher_id)
+            .execute(&state.db)
+            .await
+            .map_err(|err| db_internal_error("complete ownership transfer", err))?;
+
+            write_contract_audit_log(
+                &state.db,
+                AuditActionType::OwnershipTransferred,
+                contract_id,
+                req.user_id,
+                json!({
+                    "action": "transfer_completed",
+                    "from_publisher_id": from_publisher_id,
+                    "to_publisher_id": to_publisher_id,
+                    "contract_id": contract_id,
+                    "transfer_id": transfer_uuid,
+                    "confirmed_at": transfer.completed_at
+                }),
+                &extract_ip_address(&headers),
+            )
+            .await
+            .map_err(|err| db_internal_error("write completed transfer audit log", err))?;
+
+            write_ownership_transfer_log(
+                &state.db,
+                transfer_uuid,
+                req.user_id,
+                "publisher",
+                "transfer_completed",
+                Some(json!({
+                    "from_publisher_id": from_publisher_id,
+                    "to_publisher_id": to_publisher_id,
+                    "contract_id": contract_id,
+                })),
+            )
+            .await
+            .map_err(|err| db_internal_error("write completed transfer log", err))?;
+
+            state.cache.invalidate_contracts().await;
+            return Ok(Json(transfer));
+        }
+
+        transfer.status = OwnershipTransferStatus::Confirmed;
+
+        write_contract_audit_log(
+            &state.db,
+            AuditActionType::OwnershipTransferred,
+            contract_id,
+            req.user_id,
+            json!({
+                "action": "transfer_partially_confirmed",
+                "from_publisher_id": from_publisher_id,
+                "to_publisher_id": to_publisher_id,
+                "contract_id": contract_id,
+                "transfer_id": transfer_uuid,
+                "from_confirmed": transfer.from_confirmation,
+                "to_confirmed": transfer.to_confirmation
+            }),
+            &extract_ip_address(&headers),
+        )
+        .await
+        .map_err(|err| db_internal_error("write partial confirmation audit log", err))?;
+
+        write_ownership_transfer_log(
+            &state.db,
+            transfer_uuid,
+            req.user_id,
+            "publisher",
+            "transfer_partially_confirmed",
+            Some(json!({
+                "from_confirmed": transfer.from_confirmation,
+                "to_confirmed": transfer.to_confirmation,
+            })),
+        )
+        .await
+        .map_err(|err| db_internal_error("write partial confirmation log", err))?;
+
+        state.cache.invalidate_contracts().await;
+        return Ok(Json(transfer));
+    }
+
+    transfer.status = OwnershipTransferStatus::Rejected;
+    transfer.completed_at = Some(Utc::now());
+
+    sqlx::query(
+        "UPDATE ownership_transfers SET status = 'rejected', completed_at = NOW() WHERE id = $1"
+    )
+    .bind(transfer_uuid)
+    .execute(&state.db)
+    .await
+    .map_err(|err| db_internal_error("reject ownership transfer", err))?;
+
+    write_contract_audit_log(
+        &state.db,
+        AuditActionType::OwnershipTransferred,
+        contract_id,
+        req.user_id,
+        json!({
+            "action": "transfer_rejected",
+            "from_publisher_id": from_publisher_id,
+            "to_publisher_id": to_publisher_id,
+            "contract_id": contract_id,
+            "transfer_id": transfer_uuid
+        }),
+        &extract_ip_address(&headers),
+    )
+    .await
+    .map_err(|err| db_internal_error("write rejected transfer audit log", err))?;
+
+    write_ownership_transfer_log(
+        &state.db,
+        transfer_uuid,
+        req.user_id,
+        "publisher",
+        "transfer_rejected",
+        Some(json!({
+            "from_publisher_id": from_publisher_id,
+            "to_publisher_id": to_publisher_id,
+            "contract_id": contract_id,
+        })),
+    )
+    .await
+    .map_err(|err| db_internal_error("write rejected transfer log", err))?;
+
+    state.cache.invalidate_contracts().await;
+    Ok(Json(transfer))
+}
+
+pub async fn get_ownership_transfer(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> ApiResult<Json<OwnershipTransfer>> {
+    let transfer_uuid = Uuid::parse_str(&id).map_err(|_| {
+        ApiError::bad_request(
+            "InvalidTransferId",
+            format!("Invalid transfer ID format: {}", id),
+        )
+    })?;
+
+    let transfer: OwnershipTransfer = sqlx::query_as(
+        "SELECT * FROM ownership_transfers WHERE id = $1",
+    )
+    .bind(transfer_uuid)
+    .fetch_optional(&state.db)
+    .await
+    .map_err(|err| db_internal_error("fetch ownership transfer", err))?
+    .ok_or_else(|| ApiError::not_found(
+        "TransferNotFound",
+        format!("No ownership transfer found with ID: {}", id),
+    ))?;
+
+    Ok(Json(transfer))
+}
+
+pub async fn list_ownership_transfers(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> ApiResult<Json<Vec<OwnershipTransfer>>> {
+    let contract_uuid = Uuid::parse_str(&id).map_err(|_| {
+        ApiError::bad_request(
+            "InvalidContractId",
+            format!("Invalid contract ID format: {}", id),
+        )
+    })?;
+
+    let _contract: Contract = sqlx::query_as("SELECT * FROM contracts WHERE id = $1")
+        .bind(contract_uuid)
+        .fetch_optional(&state.db)
+        .await
+        .map_err(|err| db_internal_error("fetch contract for transfers", err))?
+        .ok_or_else(|| ApiError::not_found(
+            "ContractNotFound",
+            format!("No contract found with ID: {}", id),
+        ))?;
+
+    let transfers: Vec<OwnershipTransfer> = sqlx::query_as(
+        "SELECT * FROM ownership_transfers WHERE contract_id = $1 ORDER BY created_at DESC"
+    )
+    .bind(contract_uuid)
+    .fetch_all(&state.db)
+    .await
+    .map_err(|err| db_internal_error("fetch ownership transfers", err))?;
+
+    Ok(Json(transfers))
+}
+
+pub async fn get_ownership_transfer_logs(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> ApiResult<Json<Vec<OwnershipTransferLog>>> {
+    let transfer_uuid = Uuid::parse_str(&id).map_err(|_| {
+        ApiError::bad_request(
+            "InvalidTransferId",
+            format!("Invalid transfer ID format: {}", id),
+        )
+    })?;
+
+    let logs: Vec<OwnershipTransferLog> = sqlx::query_as(
+        "SELECT * FROM ownership_transfer_logs WHERE transfer_id = $1 ORDER BY created_at ASC"
+    )
+    .bind(transfer_uuid)
+    .fetch_all(&state.db)
+    .await
+    .map_err(|err| db_internal_error("fetch ownership transfer logs", err))?;
+
+    Ok(Json(logs))
 }
 
 #[utoipa::path(

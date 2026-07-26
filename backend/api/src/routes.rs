@@ -387,6 +387,26 @@ pub fn contract_routes() -> Router<AppState> {
             patch(handlers::change_contract_publisher),
         )
         .route(
+            "/api/contracts/:id/ownership-transfer",
+            post(handlers::create_ownership_transfer),
+        )
+        .route(
+            "/api/contracts/:id/ownership-transfer",
+            get(handlers::list_ownership_transfers),
+        )
+        .route(
+            "/api/ownership-transfers/:id",
+            get(handlers::get_ownership_transfer),
+        )
+        .route(
+            "/api/ownership-transfers/:id/confirm",
+            post(handlers::confirm_ownership_transfer),
+        )
+        .route(
+            "/api/ownership-transfers/:id/logs",
+            get(handlers::get_ownership_transfer_logs),
+        )
+        .route(
             "/api/contracts/:id/status",
             patch(handlers::update_contract_status),
         )
