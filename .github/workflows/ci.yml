@@ -70,16 +70,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Check migration ordering
-        run: |
-          echo "Checking migration file ordering..."
-          prev=""
-          for f in database/migrations/*.sql; do
-            base=$(basename "$f")
-            if [ -n "$prev" ] && [[ "$base" < "$prev" ]]; then
-              echo "ERROR: Migration $base is out of order (after $prev)"
-              exit 1
-            fi
-            prev="$base"
-          done
-          echo "✓ All $(ls database/migrations/*.sql | wc -l) migrations in order"
+        with:
+          fetch-depth: 0
+      - name: Validate migration files
+        run: bash .github/scripts/validate-migrations.sh
