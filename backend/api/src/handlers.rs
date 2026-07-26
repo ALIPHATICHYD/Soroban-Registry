@@ -2905,13 +2905,12 @@ pub async fn get_contract(
             if let Ok(contract) = serde_json::from_str::<Contract>(&cached) {
                 track_contract_access(&state, contract.id).await;
                 let contract_uuid = contract.id;
-                let deprecation_warning =
-                    crate::deprecation_handlers::build_deprecation_warning(
-                        &state,
-                        contract_uuid,
-                        None,
-                    )
-                    .await;
+                let deprecation_warning = crate::deprecation_handlers::build_deprecation_warning(
+                    &state,
+                    contract_uuid,
+                    None,
+                )
+                .await;
                 return Ok(Json(ContractGetResponse {
                     contract,
                     current_network: None,
@@ -4518,6 +4517,21 @@ async fn publish_contract_inner(
     headers: &HeaderMap,
     req: PublishRequest,
 ) -> ApiResult<Json<Contract>> {
+    let artifact_scan = match req.wasm_artifact_base64.as_deref() {
+        Some(encoded) => {
+            let bytes = BASE64.decode(encoded).map_err(|_| {
+                ApiError::bad_request(
+                    "InvalidWasmArtifact",
+                    "wasm_artifact_base64 must be valid base64",
+                )
+            })?;
+            crate::wasm_scanner::scan(&bytes, &req.wasm_hash)
+        }
+        None => crate::wasm_scanner::WasmScanResult {
+            status: "pending",
+            findings: vec!["artifact_not_supplied".to_string()],
+        },
+    };
     let mut tx = state
         .db
         .begin()
@@ -4606,8 +4620,8 @@ async fn publish_contract_inner(
     let slug = generate_unique_slug(&state.db, &req.name, &req.network, req.slug.clone()).await?;
 
     let contract: Contract = sqlx::query_as(
-        "INSERT INTO contracts (contract_id, wasm_hash, name, slug, description, publisher_id, network, category, tags, logical_id, network_configs)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+        "INSERT INTO contracts (contract_id, wasm_hash, name, slug, description, publisher_id, network, category, tags, logical_id, network_configs, visibility, artifact_scan_status, artifact_scan_findings)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, CASE WHEN $12 = 'passed' THEN 'public'::visibility_type ELSE 'private'::visibility_type END, $12, $13)
          RETURNING *"
     )
     .bind(&req.contract_id)
@@ -4621,6 +4635,8 @@ async fn publish_contract_inner(
     .bind(&req.tags)
     .bind(Option::<Uuid>::None as Option<Uuid>)
     .bind(&network_configs)
+    .bind(artifact_scan.status)
+    .bind(json!(artifact_scan.findings))
     .fetch_one(&state.db)
     .await
     .map_err(|err| {
@@ -7835,6 +7851,8 @@ mod tests {
             organization_id: None,
             relevance_score: None,
             visibility: shared::VisibilityType::Public,
+            artifact_scan_status: "passed".into(),
+            artifact_scan_findings: serde_json::json!([]),
             current_version: None,
             usage_count: 0,
             deprecated_at: None,

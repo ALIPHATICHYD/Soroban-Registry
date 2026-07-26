@@ -83,6 +83,13 @@ pub struct Contract {
     pub organization_id: Option<Uuid>,
     /// Visibility level
     pub visibility: VisibilityType,
+    /// Result of the mandatory artifact validation performed during publish.
+    #[sqlx(default)]
+    #[serde(default)]
+    pub artifact_scan_status: String,
+    #[sqlx(default)]
+    #[serde(default)]
+    pub artifact_scan_findings: serde_json::Value,
     /// The currently active version string for this contract (Issue #486)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub current_version: Option<String>,
@@ -890,6 +897,9 @@ pub struct ContractInteroperabilityResponse {
 pub struct PublishRequest {
     pub contract_id: String,
     pub wasm_hash: String,
+    /// Base64-encoded WASM artifact. Missing artifacts remain quarantined.
+    #[serde(default, alias = "wasm_base64")]
+    pub wasm_artifact_base64: Option<String>,
     pub name: String,
     pub slug: Option<String>,
     pub description: Option<String>,
@@ -4956,15 +4966,21 @@ mod tests {
     /// Helper: deserialize a single comma-separated string value through the custom deserializer
     fn deser_comma_separated(input: &str) -> Option<Vec<String>> {
         use serde::de::value::StrDeserializer;
-        deserialize_optional_string_list(StrDeserializer::<serde::de::value::Error>::new(input)).ok().flatten()
+        deserialize_optional_string_list(StrDeserializer::<serde::de::value::Error>::new(input))
+            .ok()
+            .flatten()
     }
 
     /// Helper: deserialize repeated params through a sequence
     fn deser_repeated(inputs: &[&str]) -> Option<Vec<String>> {
         use serde::de::value::{SeqDeserializer, StringDeserializer};
-        let seq = inputs.iter().map(|s| StringDeserializer::<serde::de::value::Error>::new(s.to_string()));
+        let seq = inputs
+            .iter()
+            .map(|s| StringDeserializer::<serde::de::value::Error>::new(s.to_string()));
         let deserializer = SeqDeserializer::new(seq);
-        deserialize_optional_string_list(deserializer).ok().flatten()
+        deserialize_optional_string_list(deserializer)
+            .ok()
+            .flatten()
     }
 
     #[test]
@@ -5023,7 +5039,10 @@ mod tests {
     #[test]
     fn test_search_params_invalid_network_fails_gracefully() {
         let result = parse_search_params("networks=unknown");
-        assert!(result.is_err(), "Invalid network values should fail clearly");
+        assert!(
+            result.is_err(),
+            "Invalid network values should fail clearly"
+        );
     }
 
     #[test]
@@ -5037,8 +5056,10 @@ mod tests {
 
     #[test]
     fn test_search_params_combined_network_and_category_filters() {
-        let params = parse_search_params("networks=testnet&categories=DeFi,NFT&verified_only=true&query=swap")
-            .unwrap();
+        let params = parse_search_params(
+            "networks=testnet&categories=DeFi,NFT&verified_only=true&query=swap",
+        )
+        .unwrap();
         assert_eq!(params.query.as_deref(), Some("swap"));
         assert!(params.verified_only.unwrap_or(false));
         assert!(params.networks.unwrap().contains(&Network::Testnet));
@@ -5077,6 +5098,8 @@ mod tests {
             relevance_score: None,
             organization_id: None,
             visibility: VisibilityType::Public,
+            artifact_scan_status: "passed".to_string(),
+            artifact_scan_findings: serde_json::json!([]),
             current_version: Some("1.0.0".to_string()),
             usage_count: 42,
             deprecated_at: None,

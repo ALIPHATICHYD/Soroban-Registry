@@ -1033,6 +1033,8 @@ fn metadata_as_contract(row: &ContractMetadataRow) -> shared::Contract {
         relevance_score: None,
         organization_id: None,
         visibility: shared::VisibilityType::Public,
+        artifact_scan_status: "passed".into(),
+        artifact_scan_findings: serde_json::json!([]),
         current_version: row.current_version.clone(),
         usage_count: row.usage_count,
         deprecated_at: None,

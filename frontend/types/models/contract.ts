@@ -34,6 +34,8 @@ export interface Contract {
   is_maintenance?: boolean;
   logical_id?: string;
   network_configs?: Record<Network, NetworkConfig>;
+  artifact_scan_status?: "pending" | "passed" | "quarantined";
+  artifact_scan_findings?: string[];
 }
 
 /** GET /contracts/:id response when ?network= is used (Issue #43) */
