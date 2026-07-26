@@ -34,6 +34,9 @@ export function PublisherContractsList({
       );
   }, [contracts, statusFilter, searchTerm]);
 
+  const scanStatus = (contract: ContractSummary) =>
+    contract.artifactScanStatus ?? contract.artifact_scan_status ?? "pending";
+
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       const isSlashShortcut = event.key === "/" || event.code === "Slash";
@@ -111,6 +114,9 @@ export function PublisherContractsList({
               <div className="flex justify-between items-start mb-3">
                 <VerificationBadge status={contract.verificationStatus} />
                 <ArrowUpRight className="w-4 h-4 text-muted-foreground group-hover:text-primary transition-colors" />
+              </div>
+              <div className={`text-xs mb-2 ${scanStatus(contract) === "passed" ? "text-emerald-600" : "text-amber-600"}`}>
+                Artifact scan: {scanStatus(contract)}
               </div>
 
               <h3 className="font-semibold text-foreground mb-2 group-hover:text-primary transition-colors truncate">

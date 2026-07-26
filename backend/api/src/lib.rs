@@ -91,6 +91,7 @@ pub mod usage_counter;
 pub mod validation;
 pub mod verification_handlers;
 pub mod vulnerability_database;
+pub mod wasm_scanner;
 pub mod websocket;
 pub mod zk_proof_handlers;
 

@@ -35,6 +35,9 @@ export interface ContractSummary {
   verificationStatus: "verified" | "failed" | "pending";
   deployedAt: string;
   tags: string[];
+  artifactScanStatus: "pending" | "passed" | "quarantined";
+  artifactScanFindings?: string[];
+  artifact_scan_status?: "pending" | "passed" | "quarantined";
 }
 
 export interface ActivityEvent {

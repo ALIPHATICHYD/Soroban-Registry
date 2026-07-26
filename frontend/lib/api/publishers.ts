@@ -62,6 +62,7 @@ const generateMockContracts = (count: number): ContractSummary[] => {
         Date.now() - Math.random() * 10000000000,
       ).toISOString(),
       tags: ["defi", "nft", "governance"].filter(() => Math.random() > 0.5),
+      artifactScanStatus: statusRand > 0.8 ? "quarantined" : "passed",
     };
   });
 };

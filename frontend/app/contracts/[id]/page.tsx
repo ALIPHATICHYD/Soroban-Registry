@@ -321,6 +321,11 @@ function ContractDetailsContent() {
                 level={contract.verification_level}
                 size="md"
               />
+              {contract.artifact_scan_status && (
+                <span className={`text-xs font-medium ${contract.artifact_scan_status === "passed" ? "text-emerald-600" : "text-amber-600"}`}>
+                  Artifact scan: {contract.artifact_scan_status}
+                </span>
+              )}
             </div>
           </div>
 
