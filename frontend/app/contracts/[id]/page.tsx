@@ -28,6 +28,7 @@ import CodeCopyButton from "@/components/CodeCopyButton";
 import { useParams, useSearchParams } from "next/navigation";
 import { useAnalytics } from "@/hooks/useAnalytics";
 import FormalVerificationPanel from "@/components/FormalVerificationPanel";
+import DependencyVulnerabilityPanel from "@/components/DependencyVulnerabilityPanel";
 import Navbar from "@/components/Navbar";
 import MaintenanceBanner from "@/components/MaintenanceBanner";
 import DeprecationBanner from "@/components/DeprecationBanner";
@@ -320,6 +321,11 @@ function ContractDetailsContent() {
                 level={contract.verification_level}
                 size="md"
               />
+              {contract.artifact_scan_status && (
+                <span className={`text-xs font-medium ${contract.artifact_scan_status === "passed" ? "text-emerald-600" : "text-amber-600"}`}>
+                  Artifact scan: {contract.artifact_scan_status}
+                </span>
+              )}
             </div>
           </div>
 
@@ -852,6 +858,7 @@ function ContractDetailsContent() {
               </dl>
             </div>
             <FormalVerificationPanel contractId={contract.id} />
+            <DependencyVulnerabilityPanel contractId={contract.id} />
           </section>
         )}
 

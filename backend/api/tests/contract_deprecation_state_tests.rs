@@ -132,6 +132,8 @@ fn contract_response_serializes_deprecation_fields() {
         relevance_score: None,
         organization_id: None,
         visibility: VisibilityType::Public,
+        artifact_scan_status: "passed".into(),
+        artifact_scan_findings: serde_json::json!([]),
         current_version: Some("1.0.0".into()),
         usage_count: 0,
         deprecated_at: Some(Utc::now()),

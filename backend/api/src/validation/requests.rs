@@ -842,6 +842,7 @@ mod tests {
             publisher_address: valid_stellar_address(),
             dependencies: vec![],
             is_cicd: false,
+            wasm_artifact_base64: None,
         };
 
         assert!(req.validate().is_ok());
@@ -862,6 +863,7 @@ mod tests {
             publisher_address: valid_stellar_address(),
             dependencies: vec![],
             is_cicd: false,
+            wasm_artifact_base64: None,
         };
 
         let result = req.validate();
@@ -885,6 +887,7 @@ mod tests {
             publisher_address: valid_stellar_address(),
             dependencies: vec![],
             is_cicd: false,
+            wasm_artifact_base64: None,
         };
 
         let result = req.validate();
@@ -909,6 +912,7 @@ mod tests {
                 .to_string(),
             dependencies: vec![],
             is_cicd: false,
+            wasm_artifact_base64: None,
         };
 
         req.sanitize();

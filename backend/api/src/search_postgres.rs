@@ -5,7 +5,7 @@ use anyhow::Result;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use shared::models::Network;
+use shared::models::{deserialize_optional_networks, deserialize_optional_string_list, Network};
 use shared::pagination::Cursor;
 use sqlx::PgPool;
 
@@ -392,24 +392,13 @@ pub async fn fulltext_search_handler(
         }
     }
 
+    let categories = merge_filter_values(params.categories.clone(), params.category.clone());
+    let networks = merge_filter_values(params.networks.clone(), params.network.clone());
+
     let search_req = SearchQuery {
         query: query.to_string(),
-        categories: params.category.as_ref().map(|c| {
-            c.split(',')
-                .map(|s| s.trim().to_string())
-                .filter(|s| !s.is_empty())
-                .collect::<Vec<String>>()
-        }),
-        networks: params.network.as_ref().map(|n| {
-            n.split(',')
-                .filter_map(|s| match s {
-                    "mainnet" => Some(Network::Mainnet),
-                    "testnet" => Some(Network::Testnet),
-                    "futurenet" => Some(Network::Futurenet),
-                    _ => None,
-                })
-                .collect::<Vec<Network>>()
-        }),
+        categories,
+        networks,
         verified_only: params.verified_only,
         tags: params
             .tags
@@ -433,11 +422,25 @@ pub async fn fulltext_search_handler(
     Ok(Json(result))
 }
 
+fn merge_filter_values<T>(plural: Option<Vec<T>>, singular: Option<Vec<T>>) -> Option<Vec<T>> {
+    let mut values = plural.unwrap_or_default();
+    values.extend(singular.unwrap_or_default());
+    (!values.is_empty()).then_some(values)
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SearchQueryParams {
     pub q: Option<String>,
-    pub category: Option<String>,
-    pub network: Option<String>,
+    /// Singular aliases are retained for compatibility. Both singular and
+    /// plural forms accept comma-separated and repeated query values.
+    #[serde(default, deserialize_with = "deserialize_optional_string_list")]
+    pub category: Option<Vec<String>>,
+    #[serde(default, deserialize_with = "deserialize_optional_string_list")]
+    pub categories: Option<Vec<String>>,
+    #[serde(default, deserialize_with = "deserialize_optional_networks")]
+    pub network: Option<Vec<Network>>,
+    #[serde(default, deserialize_with = "deserialize_optional_networks")]
+    pub networks: Option<Vec<Network>>,
     pub verified_only: Option<bool>,
     pub tags: Option<String>,
     pub limit: Option<i64>,
@@ -445,4 +448,51 @@ pub struct SearchQueryParams {
     /// Opaque keyset cursor. Present (even empty) switches this endpoint to
     /// stable cursor pagination; pass back the `next_cursor` from the response.
     pub cursor: Option<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn combined_filter_aliases_are_preserved() {
+        let params: SearchQueryParams = serde_json::from_value(serde_json::json!({
+            "q": "swap",
+            "network": " testnet,mainnet ",
+            "networks": "futurenet",
+            "category": " DeFi ",
+            "categories": "NFT, lending",
+        }))
+        .expect("filter query should deserialize");
+
+        assert_eq!(
+            params.network,
+            Some(vec![Network::Testnet, Network::Mainnet])
+        );
+        assert_eq!(params.networks, Some(vec![Network::Futurenet]));
+        assert_eq!(params.category, Some(vec!["DeFi".to_string()]));
+        assert_eq!(
+            params.categories,
+            Some(vec!["NFT".to_string(), "lending".to_string()])
+        );
+
+        let categories = merge_filter_values(params.categories, params.category).unwrap();
+        let networks = merge_filter_values(params.networks, params.network).unwrap();
+        assert_eq!(categories, vec!["NFT", "lending", "DeFi"]);
+        assert_eq!(
+            networks,
+            vec![Network::Futurenet, Network::Testnet, Network::Mainnet]
+        );
+    }
+
+    #[test]
+    fn invalid_network_filter_is_rejected_during_deserialization() {
+        let result = serde_json::from_value::<SearchQueryParams>(serde_json::json!({
+            "q": "swap",
+            "networks": "testnet,not-a-network",
+        }));
+
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("Invalid network"));
+    }
 }

@@ -353,6 +353,16 @@ pub static PUBLISHERS_TOTAL: Lazy<IntGauge> =
 pub static PUBLISHER_REGISTRATIONS: Lazy<IntCounter> =
     counter!("publisher_registrations_total", "Publisher registrations");
 
+// ── Rate-Limit Bypass Audit (issue #1054) ───────────────────────────────────
+/// Counts every request that bypassed rate-limiting via a trusted-client token.
+/// The `token_type` label is either `"trusted_ip"` or `"trusted_api_key"` so
+/// operators can distinguish between the two bypass paths.
+pub static RATE_LIMIT_BYPASS_TOTAL: Lazy<IntCounterVec> = counter_vec!(
+    "rate_limit_bypass_total",
+    "Total requests that bypassed rate limiting via a trusted-client token",
+    &["token_type"]
+);
+
 pub fn register_all(r: &Registry) -> prometheus::Result<()> {
     r.register(Box::new(HTTP_REQUESTS_TOTAL.clone()))?;
     r.register(Box::new(HTTP_REQUEST_DURATION.clone()))?;
@@ -437,6 +447,7 @@ pub fn register_all(r: &Registry) -> prometheus::Result<()> {
     r.register(Box::new(PATCHES_FAILED.clone()))?;
     r.register(Box::new(PUBLISHERS_TOTAL.clone()))?;
     r.register(Box::new(PUBLISHER_REGISTRATIONS.clone()))?;
+    r.register(Box::new(RATE_LIMIT_BYPASS_TOTAL.clone()))?;
     r.register(Box::new(JOB_QUEUE_DEPTH.clone()))?;
     r.register(Box::new(JOB_PROCESSING_DURATION.clone()))?;
     r.register(Box::new(JOB_FAILURES_TOTAL.clone()))?;
