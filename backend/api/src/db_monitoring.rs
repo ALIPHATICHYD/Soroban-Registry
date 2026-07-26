@@ -1,8 +1,8 @@
 use crate::cache::CacheLayer;
 use crate::metrics;
 use sqlx::postgres::PgPoolOptions;
-use sqlx::Row;
 use sqlx::PgPool;
+use sqlx::Row;
 use std::sync::Arc;
 use std::time::Duration;
 use tracing::{info, warn};

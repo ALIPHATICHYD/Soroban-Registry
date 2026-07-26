@@ -2,8 +2,32 @@ use moka::future::Cache as MokaCache;
 use redis::aio::ConnectionManager;
 use redis::AsyncCommands;
 use sqlx::PgPool;
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
+use tokio::sync::Mutex as AsyncMutex;
+
+/// Sentinel value stored while an idempotency key's request is still being
+/// processed, distinguishing "in flight" from a cached completed response.
+const IDEMPOTENCY_IN_PROGRESS: &str = "__in_progress__";
+/// How long an idempotency lock holds before it's considered abandoned
+/// (e.g. the process crashed mid-request) and a retry is allowed to proceed.
+const IDEMPOTENCY_LOCK_TTL_SECS: u64 = 60;
+/// How long a completed response stays replayable for the same key.
+const IDEMPOTENCY_RESPONSE_TTL_SECS: u64 = 86_400;
+
+/// Outcome of attempting to claim an idempotency key.
+pub enum IdempotencyClaim {
+    /// First time this key is seen (or its prior lock/response expired) —
+    /// caller should proceed and report the outcome back via
+    /// `complete_idempotency_key` / `release_idempotency_key`.
+    Fresh,
+    /// Another request with the same key is currently being processed.
+    InProgress,
+    /// A prior request with this key already completed; here's its cached
+    /// response body, to be replayed as-is.
+    Completed(String),
+}
 
 /// Cache configuration options
 #[derive(Clone, Debug)]
@@ -123,6 +147,10 @@ pub struct CacheLayer {
     pub contract_access_cache: MokaCache<String, bool>,
     config: CacheConfig,
     pub redis_cm: Option<ConnectionManager>,
+    /// Fallback store for idempotency keys when Redis is disabled (local/dev/test).
+    /// Only guards against concurrent requests within this single process — unlike
+    /// the Redis path, it does not coordinate across multiple backend instances.
+    idempotency_local: AsyncMutex<HashMap<String, String>>,
 }
 
 impl CacheLayer {
@@ -198,6 +226,7 @@ impl CacheLayer {
             contract_access_cache,
             redis_cm,
             config,
+            idempotency_local: AsyncMutex::new(HashMap::new()),
         }
     }
 
@@ -536,6 +565,95 @@ impl CacheLayer {
                 tracing::warn!("Redis invalidate_contract_meta error: {}", e);
             }
         }
+    }
+
+    /// Atomically claims an idempotency key: the first caller for a given key
+    /// gets `Fresh` and should proceed with the request; concurrent callers
+    /// with the same key see `InProgress` while it's in flight, and callers
+    /// after it finished get the cached `Completed` response to replay.
+    ///
+    /// The Redis path uses `SET NX EX` so the claim-and-lock is a single
+    /// atomic operation — no window where two concurrent requests could both
+    /// observe "key not present" and both proceed.
+    pub async fn claim_idempotency_key(&self, key: &str) -> IdempotencyClaim {
+        let ns_key = format!("idempotency:{}", key);
+
+        if let Some(cm) = &self.redis_cm {
+            let mut conn = cm.clone();
+            let claimed: Option<String> = redis::cmd("SET")
+                .arg(&ns_key)
+                .arg(IDEMPOTENCY_IN_PROGRESS)
+                .arg("NX")
+                .arg("EX")
+                .arg(IDEMPOTENCY_LOCK_TTL_SECS)
+                .query_async(&mut conn)
+                .await
+                .unwrap_or_else(|e| {
+                    tracing::warn!("Redis claim_idempotency_key error: {}", e);
+                    None
+                });
+
+            if claimed.is_some() {
+                return IdempotencyClaim::Fresh;
+            }
+
+            return match conn.get::<_, Option<String>>(&ns_key).await {
+                Ok(Some(val)) if val == IDEMPOTENCY_IN_PROGRESS => IdempotencyClaim::InProgress,
+                Ok(Some(val)) => IdempotencyClaim::Completed(val),
+                // Lock expired between the failed NX and this GET (rare) — treat
+                // as a fresh attempt rather than blocking the caller forever.
+                _ => IdempotencyClaim::Fresh,
+            };
+        }
+
+        let mut guard = self.idempotency_local.lock().await;
+        match guard.get(key) {
+            None => {
+                guard.insert(key.to_string(), IDEMPOTENCY_IN_PROGRESS.to_string());
+                IdempotencyClaim::Fresh
+            }
+            Some(val) if val == IDEMPOTENCY_IN_PROGRESS => IdempotencyClaim::InProgress,
+            Some(val) => IdempotencyClaim::Completed(val.clone()),
+        }
+    }
+
+    /// Records the successful outcome for an idempotency key so subsequent
+    /// requests with the same key replay it instead of re-running the work.
+    pub async fn complete_idempotency_key(&self, key: &str, response_body: String) {
+        let ns_key = format!("idempotency:{}", key);
+
+        if let Some(cm) = &self.redis_cm {
+            let mut conn = cm.clone();
+            if let Err(e) = conn
+                .set_ex::<_, _, ()>(&ns_key, &response_body, IDEMPOTENCY_RESPONSE_TTL_SECS)
+                .await
+            {
+                tracing::warn!("Redis complete_idempotency_key error: {}", e);
+            }
+            return;
+        }
+
+        let mut guard = self.idempotency_local.lock().await;
+        guard.insert(key.to_string(), response_body);
+    }
+
+    /// Releases an idempotency key's lock without caching a response —
+    /// used when the underlying request failed, so a corrected or transient
+    /// retry with the same key isn't stuck behind an "in progress" lock for
+    /// the rest of its window.
+    pub async fn release_idempotency_key(&self, key: &str) {
+        let ns_key = format!("idempotency:{}", key);
+
+        if let Some(cm) = &self.redis_cm {
+            let mut conn = cm.clone();
+            if let Err(e) = conn.del::<_, ()>(&ns_key).await {
+                tracing::warn!("Redis release_idempotency_key error: {}", e);
+            }
+            return;
+        }
+
+        let mut guard = self.idempotency_local.lock().await;
+        guard.remove(key);
     }
 
     /// Get a cached vulnerability assessment. These use the 24h ABI cache

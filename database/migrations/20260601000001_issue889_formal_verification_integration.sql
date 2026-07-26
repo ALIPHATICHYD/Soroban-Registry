@@ -6,21 +6,25 @@
 -- timeout-aware runs with stored results, and a result cache keyed by bytecode.
 
 -- ── Configurable properties to verify ─────────────────────────────────────────
-CREATE TABLE IF NOT EXISTS formal_verification_properties (
-    id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    -- Stable key, e.g. 'no_integer_overflow', 'auth_before_state_change'.
-    property_key TEXT        NOT NULL UNIQUE,
-    name         TEXT        NOT NULL,
-    description  TEXT        NOT NULL DEFAULT '',
-    -- NULL = applies to all contracts; otherwise scoped to a contract category.
-    category     TEXT,
-    -- Backend-specific specification / parameters.
-    spec         JSONB       NOT NULL DEFAULT '{}',
-    enabled      BOOLEAN     NOT NULL DEFAULT TRUE,
-    created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
+-- formal_verification_properties already exists from migration 032, with an
+-- unrelated per-session schema (session_id, invariant, counterexample, ...) that
+-- is still used by formal_verification_handlers.rs, AND is an FK target
+-- (032 line 26 references it), so it cannot be renamed aside. The original
+-- CREATE TABLE IF NOT EXISTS here silently bound to 032's table, which lacks the
+-- config-catalog columns this feature (#889, formal_verification_integration.rs)
+-- needs — the index on `category` then failed with:
+--   column "category" does not exist
+-- Augment the existing table with the #889 columns instead so both the
+-- per-session results (032) and the property catalog (#889) share it. property_key
+-- is added with a partial UNIQUE index so legacy 032 rows (no property_key) coexist.
+ALTER TABLE formal_verification_properties ADD COLUMN IF NOT EXISTS property_key TEXT;
+ALTER TABLE formal_verification_properties ADD COLUMN IF NOT EXISTS category     TEXT;
+ALTER TABLE formal_verification_properties ADD COLUMN IF NOT EXISTS spec         JSONB       NOT NULL DEFAULT '{}';
+ALTER TABLE formal_verification_properties ADD COLUMN IF NOT EXISTS enabled      BOOLEAN     NOT NULL DEFAULT TRUE;
+ALTER TABLE formal_verification_properties ADD COLUMN IF NOT EXISTS updated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW();
 
+CREATE UNIQUE INDEX IF NOT EXISTS idx_fv_properties_property_key
+    ON formal_verification_properties (property_key) WHERE property_key IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_fv_properties_category ON formal_verification_properties (category);
 
 -- ── Optional / mandatory policy by category ───────────────────────────────────

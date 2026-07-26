@@ -61,8 +61,8 @@ FROM contracts c
 LEFT JOIN LATERAL (
     SELECT
         SUM(count) AS total_interactions,
-        SUM(count) FILTER (WHERE interaction_type = 'deploy') AS deployment_count,
-        SUM(count) FILTER (WHERE interaction_type = 'publish_failed') AS error_count,
+        SUM(count) FILTER (WHERE agg.interaction_type = 'deploy') AS deployment_count,
+        SUM(count) FILTER (WHERE agg.interaction_type = 'publish_failed') AS error_count,
         COUNT(DISTINCT ci.user_address) FILTER (WHERE ci.user_address IS NOT NULL) AS unique_callers
     FROM contract_interaction_daily_aggregates agg
     LEFT JOIN contract_interactions ci ON ci.contract_id = agg.contract_id
@@ -122,9 +122,9 @@ DECLARE
 BEGIN
     -- Get stats from daily aggregates for the period
     SELECT
-        COALESCE(SUM(count) FILTER (WHERE interaction_type = 'deploy'), 0),
-        COALESCE(SUM(count) FILTER (WHERE interaction_type IN ('invoke', 'transfer', 'query')), 0),
-        COALESCE(SUM(count) FILTER (WHERE interaction_type = 'publish_failed'), 0),
+        COALESCE(SUM(count) FILTER (WHERE agg.interaction_type = 'deploy'), 0),
+        COALESCE(SUM(count) FILTER (WHERE agg.interaction_type IN ('invoke', 'transfer', 'query')), 0),
+        COALESCE(SUM(count) FILTER (WHERE agg.interaction_type = 'publish_failed'), 0),
         COUNT(DISTINCT ci.user_address) FILTER (WHERE ci.user_address IS NOT NULL AND ci.interaction_type IN ('invoke', 'transfer', 'query')),
         COUNT(DISTINCT ci.user_address) FILTER (WHERE ci.user_address IS NOT NULL AND ci.interaction_type = 'deploy'),
         COALESCE(SUM(count), 0)

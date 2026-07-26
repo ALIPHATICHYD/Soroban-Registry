@@ -89,6 +89,26 @@ pub struct Contract {
     /// Number of times this contract has been accessed via API
     #[serde(default)]
     pub usage_count: i64,
+    /// When this contract was marked deprecated (Issue #1090). NULL = active.
+    #[sqlx(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub deprecated_at: Option<DateTime<Utc>>,
+    /// Human-readable deprecation reason (Issue #1090).
+    #[sqlx(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub deprecation_reason: Option<String>,
+    /// Recommended successor contract UUID (lineage pointer, Issue #1090).
+    #[sqlx(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub replacement_contract_id: Option<Uuid>,
+    /// Denormalized flag for filters (trending/similar/search). True iff deprecated_at is set.
+    #[sqlx(default)]
+    #[serde(default)]
+    pub is_deprecated: bool,
+    /// Lifecycle status: active | deprecated | superseded (Issue #1090).
+    #[sqlx(default)]
+    #[serde(default)]
+    pub deprecation_status: DeprecationStatus,
 }
 
 #[derive(
@@ -113,6 +133,10 @@ pub struct ContractGetResponse {
     /// When ?network= is set, that network's config slice
     #[serde(skip_serializing_if = "Option::is_none")]
     pub network_config: Option<NetworkConfig>,
+    /// Populated when the contract is deprecated (issue #1061).
+    /// `null` / absent when the contract is active.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub deprecation_warning: Option<DeprecationWarning>,
 }
 
 /// Per-network config: address, verified status, min/max version (Issue #43)
@@ -293,6 +317,100 @@ where
     }
 
     deserializer.deserialize_any(NetworksVisitor)
+}
+
+/// Deserialize a free-form string filter that may arrive either as a
+/// comma-separated string (`?categories=DeFi,NFT`) or as repeated query
+/// parameters (`?categories=DeFi&categories=NFT`), so both callers agree.
+///
+/// Blank entries are dropped and an all-blank filter deserializes to `None`,
+/// matching `deserialize_optional_networks`.
+pub fn deserialize_optional_string_list<'de, D>(
+    deserializer: D,
+) -> Result<Option<Vec<String>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    struct StringListVisitor;
+
+    impl<'de> Visitor<'de> for StringListVisitor {
+        type Value = Option<Vec<String>>;
+
+        fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+            formatter.write_str("a comma-separated string or sequence of values")
+        }
+
+        fn visit_none<E>(self) -> Result<Self::Value, E>
+        where
+            E: de::Error,
+        {
+            Ok(None)
+        }
+
+        fn visit_unit<E>(self) -> Result<Self::Value, E>
+        where
+            E: de::Error,
+        {
+            Ok(None)
+        }
+
+        fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+        where
+            A: SeqAccess<'de>,
+        {
+            let mut values = Vec::new();
+            // Repeated params may themselves be comma-separated, so split again.
+            while let Some(value) = seq.next_element::<String>()? {
+                values.extend(
+                    value
+                        .split(',')
+                        .map(str::trim)
+                        .filter(|value| !value.is_empty())
+                        .map(str::to_owned),
+                );
+            }
+
+            if values.is_empty() {
+                Ok(None)
+            } else {
+                Ok(Some(values))
+            }
+        }
+
+        fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+        where
+            E: de::Error,
+        {
+            let values: Vec<String> = value
+                .split(',')
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_owned)
+                .collect();
+
+            if values.is_empty() {
+                Ok(None)
+            } else {
+                Ok(Some(values))
+            }
+        }
+
+        fn visit_string<E>(self, value: String) -> Result<Self::Value, E>
+        where
+            E: de::Error,
+        {
+            self.visit_str(&value)
+        }
+
+        fn visit_borrowed_str<E>(self, value: &'de str) -> Result<Self::Value, E>
+        where
+            E: de::Error,
+        {
+            self.visit_str(value)
+        }
+    }
+
+    deserializer.deserialize_any(StringListVisitor)
 }
 
 /// Upgrade strategy for contract upgrades
@@ -926,12 +1044,73 @@ pub struct RevertVersionRequest {
 // Deprecation management (issue #65)
 // ────────────────────────────────────────────────────────────────────────────
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, utoipa::ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, utoipa::ToSchema, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum DeprecationStatus {
+    #[default]
     Active,
     Deprecated,
+    /// Deprecated with a replacement_contract_id set (lineage successor).
+    Superseded,
+    /// Past scheduled retirement_at (schedule-based deprecation, Issue #65).
     Retired,
+}
+
+impl DeprecationStatus {
+    /// Derive status from denormalized contract columns (Issue #1090).
+    pub fn from_columns(
+        deprecated_at: Option<DateTime<Utc>>,
+        replacement_contract_id: Option<Uuid>,
+    ) -> Self {
+        match (deprecated_at, replacement_contract_id) {
+            (None, _) => Self::Active,
+            (Some(_), Some(_)) => Self::Superseded,
+            (Some(_), None) => Self::Deprecated,
+        }
+    }
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Active => "active",
+            Self::Deprecated => "deprecated",
+            Self::Superseded => "superseded",
+            Self::Retired => "retired",
+        }
+    }
+
+    pub fn parse(value: &str) -> Self {
+        match value {
+            "deprecated" => Self::Deprecated,
+            "superseded" => Self::Superseded,
+            "retired" => Self::Retired,
+            _ => Self::Active,
+        }
+    }
+}
+
+impl From<String> for DeprecationStatus {
+    fn from(value: String) -> Self {
+        Self::parse(&value)
+    }
+}
+
+impl<'r> sqlx::Decode<'r, sqlx::Postgres> for DeprecationStatus {
+    fn decode(
+        value: sqlx::postgres::PgValueRef<'r>,
+    ) -> Result<Self, Box<dyn std::error::Error + 'static + Send + Sync>> {
+        let s = <String as sqlx::Decode<sqlx::Postgres>>::decode(value)?;
+        Ok(Self::parse(&s))
+    }
+}
+
+impl sqlx::Type<sqlx::Postgres> for DeprecationStatus {
+    fn type_info() -> sqlx::postgres::PgTypeInfo {
+        <String as sqlx::Type<sqlx::Postgres>>::type_info()
+    }
+
+    fn compatible(ty: &sqlx::postgres::PgTypeInfo) -> bool {
+        <String as sqlx::Type<sqlx::Postgres>>::compatible(ty)
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
@@ -943,8 +1122,19 @@ pub struct DeprecationInfo {
     pub replacement_contract_id: Option<String>,
     pub migration_guide_url: Option<String>,
     pub notes: Option<String>,
+    /// Human-readable deprecation reason message (issue #1061); also mirrored to
+    /// `contracts.deprecation_reason` for search/list responses (issue #1090).
+    pub deprecated_reason: Option<String>,
+    /// Configurable grace period in days before hard deletion (issue #1061).
+    pub grace_period_days: Option<i32>,
     pub days_remaining: Option<i64>,
     pub dependents_notified: i64,
+    /// Ordered successor chain starting at the immediate replacement (lineage warnings).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub replacement_lineage: Vec<String>,
+    /// Human-readable warnings for dependents resolving this contract.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub warnings: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
@@ -953,6 +1143,52 @@ pub struct DeprecateContractRequest {
     pub replacement_contract_id: Option<String>,
     pub migration_guide_url: Option<String>,
     pub notes: Option<String>,
+    /// Human-readable reason for the deprecation, shown in API deprecation warnings.
+    pub deprecated_reason: Option<String>,
+    /// Number of days after deprecation before the contract is hard-deleted.
+    /// If `None`, the contract is soft-deleted but never automatically removed.
+    pub grace_period_days: Option<i32>,
+}
+
+/// Query parameters for clearing deprecation. Reactivating a deprecated contract
+/// requires an explicit override so callers cannot silently resurrect a version
+/// that dependents were told to migrate away from (Issue #1090).
+#[derive(Debug, Clone, Default, Serialize, Deserialize, utoipa::IntoParams)]
+pub struct UndeprecateContractRequest {
+    #[serde(default)]
+    pub r#override: bool,
+    /// Alias accepted by clients that prefer `force` over `override`.
+    #[serde(default)]
+    pub force: bool,
+}
+
+impl UndeprecateContractRequest {
+    pub fn has_override(&self) -> bool {
+        self.r#override || self.force
+    }
+}
+
+/// Lightweight deprecation warning embedded in contract API responses so that
+/// callers immediately know a contract is deprecated without a separate request.
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct DeprecationWarning {
+    /// Human-readable deprecation message / reason.
+    pub message: String,
+    /// When the contract was deprecated.
+    pub deprecated_at: DateTime<Utc>,
+    /// When the contract will be retired (== removed from active results).
+    pub retirement_at: DateTime<Utc>,
+    /// Days remaining until retirement (0 if already past).
+    pub days_until_retirement: i64,
+    /// Optional replacement contract ID for downstream consumers to migrate to.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub replacement_contract_id: Option<String>,
+    /// Optional migration guide URL.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub migration_guide_url: Option<String>,
+    /// Number of grace-period days before hard deletion (`None` = never deleted).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub grace_period_days: Option<i32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow, utoipa::ToSchema)]
@@ -1118,15 +1354,20 @@ pub enum SortOrder {
 pub struct ContractSearchParams {
     pub query: Option<String>,
     pub network: Option<Network>,
-    /// Multiple networks filter (e.g. ?networks=mainnet&networks=testnet)
+    /// Multiple networks filter, comma-separated: `?networks=mainnet,testnet`.
+    /// (Repeating the key is rejected by the query extractor as a duplicate
+    /// field; a sequence is still accepted when deserializing from JSON.)
     #[serde(default, deserialize_with = "deserialize_optional_networks")]
     pub networks: Option<Vec<Network>>,
     pub verified_only: Option<bool>,
     /// Filter by verification_status (unverified, pending, verified, failed)
     pub verification_status: Option<VerificationStatus>,
     pub category: Option<String>,
-    /// Multiple categories filter (e.g. ?categories=DeFi&categories=NFT)
+    /// Multiple categories filter, comma-separated: `?categories=DeFi,NFT`.
+    #[serde(default, deserialize_with = "deserialize_optional_string_list")]
     pub categories: Option<Vec<String>>,
+    /// Multiple tags filter, comma-separated: `?tags=defi,amm`.
+    #[serde(default, deserialize_with = "deserialize_optional_string_list")]
     pub tags: Option<Vec<String>>,
     pub maturity: Option<MaturityLevel>,
     pub page: Option<i64>,
@@ -4710,6 +4951,102 @@ mod tests {
     use super::*;
     use serde_json;
 
+    // ── deserialize_optional_string_list ───────────────────────────────
+
+    /// Helper: deserialize a single comma-separated string value through the custom deserializer
+    fn deser_comma_separated(input: &str) -> Option<Vec<String>> {
+        use serde::de::value::StrDeserializer;
+        deserialize_optional_string_list(StrDeserializer::<serde::de::value::Error>::new(input)).ok().flatten()
+    }
+
+    /// Helper: deserialize repeated params through a sequence
+    fn deser_repeated(inputs: &[&str]) -> Option<Vec<String>> {
+        use serde::de::value::{SeqDeserializer, StringDeserializer};
+        let seq = inputs.iter().map(|s| StringDeserializer::<serde::de::value::Error>::new(s.to_string()));
+        let deserializer = SeqDeserializer::new(seq);
+        deserialize_optional_string_list(deserializer).ok().flatten()
+    }
+
+    #[test]
+    fn test_optional_categories_single_value() {
+        let cats = deser_comma_separated("DeFi").unwrap();
+        assert_eq!(cats, vec!["DeFi"]);
+    }
+
+    #[test]
+    fn test_optional_categories_comma_separated() {
+        let cats = deser_comma_separated("DeFi,NFT").unwrap();
+        assert_eq!(cats, vec!["DeFi", "NFT"]);
+    }
+
+    #[test]
+    fn test_optional_categories_repeated_params() {
+        let cats = deser_repeated(&["DeFi", "NFT"]).unwrap();
+        assert_eq!(cats, vec!["DeFi", "NFT"]);
+    }
+
+    #[test]
+    fn test_optional_categories_with_spaces() {
+        let cats = deser_comma_separated("DeFi, NFT").unwrap();
+        assert_eq!(cats, vec!["DeFi", "NFT"]);
+    }
+
+    #[test]
+    fn test_optional_categories_missing() {
+        let cats = deser_comma_separated("");
+        // Empty string should return None or empty vec
+        assert!(cats.is_none() || cats.unwrap().is_empty());
+    }
+
+    #[test]
+    fn test_optional_categories_empty_seq() {
+        let cats = deser_repeated(&[]);
+        assert!(cats.is_none() || cats.unwrap().is_empty());
+    }
+
+    // ── ContractSearchParams filter normalization ──────────────────────
+
+    /// Helper: deserialize ContractSearchParams from a comma-separated query string
+    fn parse_search_params(qs: &str) -> Result<ContractSearchParams, serde_urlencoded::de::Error> {
+        serde_urlencoded::from_str(qs)
+    }
+
+    #[test]
+    fn test_search_params_networks_comma_separated() {
+        let params = parse_search_params("networks=testnet,mainnet").unwrap();
+        let nets = params.networks.unwrap();
+        assert_eq!(nets.len(), 2);
+        assert!(nets.contains(&Network::Testnet));
+        assert!(nets.contains(&Network::Mainnet));
+    }
+
+    #[test]
+    fn test_search_params_invalid_network_fails_gracefully() {
+        let result = parse_search_params("networks=unknown");
+        assert!(result.is_err(), "Invalid network values should fail clearly");
+    }
+
+    #[test]
+    fn test_search_params_categories_normalized() {
+        let params = parse_search_params("categories=lending,dex&network=testnet").unwrap();
+        let cats = params.categories.unwrap();
+        assert_eq!(cats.len(), 2);
+        assert!(cats.contains(&"lending".to_string()));
+        assert!(cats.contains(&"dex".to_string()));
+    }
+
+    #[test]
+    fn test_search_params_combined_network_and_category_filters() {
+        let params = parse_search_params("networks=testnet&categories=DeFi,NFT&verified_only=true&query=swap")
+            .unwrap();
+        assert_eq!(params.query.as_deref(), Some("swap"));
+        assert!(params.verified_only.unwrap_or(false));
+        assert!(params.networks.unwrap().contains(&Network::Testnet));
+        assert!(params.categories.unwrap().contains(&"DeFi".to_string()));
+    }
+
+    // ── Existing tests follow ──────────────────────────────────────────
+
     #[test]
     fn test_contract_usage_count_serialization() {
         // Test that Contract can be serialized with usage_count
@@ -4742,6 +5079,11 @@ mod tests {
             visibility: VisibilityType::Public,
             current_version: Some("1.0.0".to_string()),
             usage_count: 42,
+            deprecated_at: None,
+            deprecation_reason: None,
+            replacement_contract_id: None,
+            is_deprecated: false,
+            deprecation_status: DeprecationStatus::Active,
         };
 
         let json = serde_json::to_string(&contract).expect("Failed to serialize contract");

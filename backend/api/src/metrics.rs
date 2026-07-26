@@ -164,8 +164,10 @@ pub static DB_POOL_UTILIZATION: Lazy<GaugeVec> = gauge_f64_vec!(
     "DB pool utilization ratio",
     &["pool"]
 );
-pub static DB_REPLICATION_LAG_MS: Lazy<IntGauge> =
-    gauge!("db_replication_lag_ms", "Replica replay lag in milliseconds");
+pub static DB_REPLICATION_LAG_MS: Lazy<IntGauge> = gauge!(
+    "db_replication_lag_ms",
+    "Replica replay lag in milliseconds"
+);
 pub static DB_REPLICATION_WAL_LAG_BYTES: Lazy<IntGauge> = gauge!(
     "db_replication_wal_lag_bytes",
     "Estimated WAL lag between the primary and replica in bytes"
@@ -174,8 +176,10 @@ pub static DB_REPLICATION_HEALTH: Lazy<IntGauge> = gauge!(
     "db_replication_health",
     "Replication health state (1=healthy, 0=unhealthy)"
 );
-pub static DB_REPLICATION_CHECKS_TOTAL: Lazy<IntCounter> =
-    counter!("db_replication_checks_total", "Replication health checks performed");
+pub static DB_REPLICATION_CHECKS_TOTAL: Lazy<IntCounter> = counter!(
+    "db_replication_checks_total",
+    "Replication health checks performed"
+);
 pub static DB_REPLICATION_CHECK_FAILURES_TOTAL: Lazy<IntCounter> = counter!(
     "db_replication_check_failures_total",
     "Replication health checks that failed"

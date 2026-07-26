@@ -39,11 +39,10 @@ pub async fn run(
     }
 
     if let Some(category_filter) = category {
+        let category_list: Vec<&str> = category_filter.split(',').map(|s| s.trim()).collect();
         all_contracts.retain(|c| {
-            c.category
-                .as_deref()
-                .unwrap_or("")
-                .eq_ignore_ascii_case(category_filter)
+            let cat = c.category.as_deref().unwrap_or("");
+            category_list.iter().any(|&c| cat.eq_ignore_ascii_case(c))
         });
     }
 

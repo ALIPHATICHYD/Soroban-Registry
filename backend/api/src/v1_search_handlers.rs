@@ -22,18 +22,36 @@ use crate::state::AppState;
 
 // ── Query parameters ──────────────────────────────────────────────────────────
 
+/// Accept a comma-separated list filter, delegating to the same helper
+/// `/api/contracts` uses so both endpoints interpret `networks=`/`categories=`
+/// identically (same splitting, trimming and blank handling).
+fn deserialize_csv_list<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Ok(shared::deserialize_optional_string_list(deserializer)?.unwrap_or_default())
+}
+
 #[derive(Debug, Deserialize)]
 pub struct AdvancedSearchParams {
     /// Full-text search query (name, description, category)
     pub q: Option<String>,
 
-    /// Filter by one or more networks (repeatable: ?networks=mainnet&networks=testnet)
-    #[serde(default)]
+    /// Filter by one or more networks, comma-separated
+    /// (`?networks=mainnet,testnet`), matching `/api/contracts`.
+    #[serde(default, deserialize_with = "deserialize_csv_list")]
     pub networks: Vec<String>,
 
-    /// Filter by one or more categories (repeatable)
-    #[serde(default)]
+    /// Singular alias for `networks`, accepted for parity with `/api/contracts`.
+    pub network: Option<String>,
+
+    /// Filter by one or more categories, comma-separated
+    /// (`?categories=DeFi,NFT`), matching `/api/contracts`.
+    #[serde(default, deserialize_with = "deserialize_csv_list")]
     pub categories: Vec<String>,
+
+    /// Singular alias for `categories`, accepted for parity with `/api/contracts`.
+    pub category: Option<String>,
 
     /// Only return verified contracts
     pub verified_only: Option<bool>,
@@ -52,6 +70,12 @@ pub struct AdvancedSearchParams {
 
     /// Result offset for pagination (default 0)
     pub offset: Option<i64>,
+
+    /// Opaque keyset cursor. When present (even empty, meaning "first page"),
+    /// results are paginated by a stable (created_at, id) key served from
+    /// PostgreSQL — immune to skips/duplicates under concurrent writes. Pass
+    /// back `next_cursor` from the response. Overrides relevance ordering.
+    pub cursor: Option<String>,
 
     /// Include relevance score explanation in each result
     pub explain: Option<bool>,
@@ -89,6 +113,11 @@ pub struct SearchHit {
     pub category: Option<String>,
     pub network: String,
     pub is_verified: bool,
+    pub deprecation_status: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub replacement_contract_id: Option<String>,
+    #[serde(default)]
+    pub is_deprecated: bool,
     pub relevance_score: f64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub explain: Option<RelevanceExplain>,
@@ -125,51 +154,113 @@ pub async fn advanced_search(
     let sort_by = params.sort_by.clone().unwrap_or(SortField::Relevance);
     let explain = params.explain.unwrap_or(false);
 
-    // Parse networks
-    let networks: Option<Vec<Network>> = if params.networks.is_empty() {
-        None
-    } else {
-        let parsed: Vec<Network> = params
-            .networks
-            .iter()
-            .filter_map(|n| parse_network(n))
-            .collect();
-        if parsed.is_empty() {
-            None
-        } else {
-            Some(parsed)
-        }
-    };
+    // Parse networks. The singular `network` alias is folded in so this endpoint
+    // accepts the same filter shapes as `/api/contracts`.
+    let requested_networks: Vec<String> = params
+        .networks
+        .iter()
+        .cloned()
+        .chain(params.network.clone())
+        .flat_map(|value| {
+            value
+                .split(',')
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_owned)
+                .collect::<Vec<_>>()
+        })
+        .collect();
 
-    let categories: Option<Vec<String>> = if params.categories.is_empty() {
-        None
-    } else {
-        Some(params.categories.clone())
-    };
+    // Reject unknown values rather than silently dropping them: previously an
+    // unparseable filter (e.g. the CLI's comma-joined "mainnet,testnet") left the
+    // filter empty and returned every contract unfiltered.
+    let invalid_networks: Vec<String> = requested_networks
+        .iter()
+        .filter(|value| parse_network(value).is_none())
+        .cloned()
+        .collect();
 
-    // ── Try Elasticsearch first ───────────────────────────────────────────────
-    let es_result = search_via_elasticsearch(
-        &state,
-        &query_str,
-        &params,
-        networks.clone(),
-        categories.clone(),
-        limit,
-        offset,
-        &sort_by,
-        explain,
-    )
-    .await;
-
-    if let Ok(response) = es_result {
-        return Ok(Json(response));
+    if !invalid_networks.is_empty() {
+        return Err(ApiError::bad_request(
+            "InvalidNetworkFilter",
+            format!(
+                "invalid network filter value(s): {}; expected mainnet, testnet, or futurenet",
+                invalid_networks.join(", ")
+            ),
+        ));
     }
 
-    // ── Fallback: PostgreSQL full-text search ─────────────────────────────────
-    tracing::warn!(
-        query = %query_str,
-        "Elasticsearch unavailable, falling back to PostgreSQL for /api/v1/contracts/search"
-    );
+    let networks: Option<Vec<Network>> = if requested_networks.is_empty() {
+        None
+    } else {
+        Some(
+            requested_networks
+                .iter()
+                .filter_map(|value| parse_network(value))
+                .collect(),
+        )
+    };
+
+    let requested_categories: Vec<String> = params
+        .categories
+        .iter()
+        .cloned()
+        .chain(params.category.clone())
+        .flat_map(|value| {
+            value
+                .split(',')
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_owned)
+                .collect::<Vec<_>>()
+        })
+        .collect();
+
+    let categories: Option<Vec<String>> = if requested_categories.is_empty() {
+        None
+    } else {
+        Some(requested_categories)
+    };
+
+    // Cursor pagination is served exclusively by the PostgreSQL keyset path
+    // (the Elasticsearch path is offset/`from`-based). A cursor request therefore
+    // bypasses ES entirely. Validate a non-empty cursor up front so a malformed
+    // one returns 400 instead of silently falling back to page one.
+    let cursor_requested = params.cursor.is_some();
+    if let Some(c) = params.cursor.as_deref() {
+        if !c.is_empty() && shared::pagination::Cursor::decode(c).is_err() {
+            return Err(ApiError::bad_request(
+                "InvalidPaginationCursor",
+                "The provided pagination cursor is invalid",
+            ));
+        }
+    }
+
+    // ── Try Elasticsearch first (offset mode only) ────────────────────────────
+    if !cursor_requested {
+        let es_result = search_via_elasticsearch(
+            &state,
+            &query_str,
+            &params,
+            networks.clone(),
+            categories.clone(),
+            limit,
+            offset,
+            &sort_by,
+            explain,
+        )
+        .await;
+
+        if let Ok(response) = es_result {
+            return Ok(Json(response));
+        }
+
+        // ── Fallback: PostgreSQL full-text search ─────────────────────────────
+        tracing::warn!(
+            query = %query_str,
+            "Elasticsearch unavailable, falling back to PostgreSQL for /api/v1/contracts/search"
+        );
+    }
 
     let pg_response = search_via_postgres(
         &state, &query_str, &params, networks, categories, limit, offset, &sort_by, explain,
@@ -302,6 +393,14 @@ async fn search_via_elasticsearch(
                 category: src["category"].as_str().map(|s| s.to_string()),
                 network: src["network"].as_str().unwrap_or("").to_string(),
                 is_verified: src["is_verified"].as_bool().unwrap_or(false),
+                deprecation_status: src["deprecation_status"]
+                    .as_str()
+                    .unwrap_or("active")
+                    .to_string(),
+                replacement_contract_id: src["replacement_contract_id"]
+                    .as_str()
+                    .map(|s| s.to_string()),
+                is_deprecated: src["is_deprecated"].as_bool().unwrap_or(false),
                 relevance_score: score,
                 explain: explain_detail,
             }
@@ -371,6 +470,7 @@ async fn search_via_postgres(
         tags: None,
         limit: Some(limit),
         offset: Some(offset),
+        cursor: params.cursor.clone(),
     };
 
     let pg_result = state
@@ -410,6 +510,9 @@ async fn search_via_postgres(
                 category: c.category,
                 network: c.network.to_string(),
                 is_verified: c.is_verified,
+                deprecation_status: c.deprecation_status,
+                replacement_contract_id: c.replacement_contract_id.map(|id| id.to_string()),
+                is_deprecated: c.is_deprecated,
                 relevance_score: score,
                 explain: explain_detail,
             }
@@ -429,7 +532,7 @@ async fn search_via_postgres(
     // Build facets via a separate aggregation query
     let facets = build_pg_facets(state, query_str, params).await;
 
-    Ok(json!({
+    let mut body = json!({
         "query": query_str,
         "total": pg_result.total,
         "limit": limit,
@@ -438,7 +541,14 @@ async fn search_via_postgres(
         "backend": "postgres_fallback",
         "results": results,
         "facets": facets
-    }))
+    });
+
+    // Surface the next-page cursor when this was a cursor-paginated request.
+    if let Some(next) = pg_result.next_cursor {
+        body["next_cursor"] = json!(next);
+    }
+
+    Ok(body)
 }
 
 /// Compute facet counts via PostgreSQL aggregation queries.

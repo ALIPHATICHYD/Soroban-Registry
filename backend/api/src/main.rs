@@ -373,11 +373,7 @@ async fn main() -> Result<()> {
         }
         _ => None,
     };
-    db_monitoring::spawn_db_monitoring_task(
-        pool.clone(),
-        state.cache.clone(),
-        replication_monitor,
-    );
+    db_monitoring::spawn_db_monitoring_task(pool.clone(), state.cache.clone(), replication_monitor);
 
     // Spawn query monitor: snapshots pg_stat_statements and logs slow queries (Issue #876)
     api::query_monitor::spawn_query_monitor_task(pool.clone(), slow_query_threshold_ms);

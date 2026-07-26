@@ -137,7 +137,10 @@ mod tests {
     fn decrypt_passes_through_legacy_plaintext() {
         let svc = enabled_service();
         // A pre-encryption row stored raw text; reading it must not fail.
-        assert_eq!(svc.decrypt_str("legacy plaintext").unwrap(), "legacy plaintext");
+        assert_eq!(
+            svc.decrypt_str("legacy plaintext").unwrap(),
+            "legacy plaintext"
+        );
     }
 
     #[test]

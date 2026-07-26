@@ -198,7 +198,14 @@ fn is_insecure_request(headers: &HeaderMap) -> bool {
     headers
         .get("x-forwarded-proto")
         .and_then(|v| v.to_str().ok())
-        .map(|proto| proto.split(',').next().unwrap_or("").trim().eq_ignore_ascii_case("http"))
+        .map(|proto| {
+            proto
+                .split(',')
+                .next()
+                .unwrap_or("")
+                .trim()
+                .eq_ignore_ascii_case("http")
+        })
         .unwrap_or(false)
 }
 

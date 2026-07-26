@@ -2,9 +2,11 @@
 // Uses the tsvector/tsquery infrastructure from database migrations
 
 use anyhow::Result;
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use shared::models::Network;
+use shared::pagination::Cursor;
 use sqlx::PgPool;
 
 use crate::error::ApiError;
@@ -26,6 +28,12 @@ pub struct SearchQuery {
     pub tags: Option<Vec<String>>,
     pub limit: Option<i64>,
     pub offset: Option<i64>,
+    /// Opaque keyset cursor. When set, results are ordered by a stable
+    /// `(created_at, id)` key (overriding relevance ordering) so that
+    /// concurrent inserts/updates cannot cause skipped or duplicated rows
+    /// across pages. Mutually exclusive with `offset` in practice.
+    #[serde(default)]
+    pub cursor: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -34,6 +42,10 @@ pub struct SearchResult {
     pub total: i64,
     pub took_ms: u64,
     pub facets: Option<SearchFacets>,
+    /// Opaque cursor for the next page, present only when more rows remain and
+    /// the request used cursor pagination. Pass it back as `cursor` to continue.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub next_cursor: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -45,6 +57,11 @@ pub struct ContractSearchResult {
     pub category: Option<String>,
     pub network: Network,
     pub is_verified: bool,
+    pub deprecation_status: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub replacement_contract_id: Option<uuid::Uuid>,
+    #[serde(default)]
+    pub is_deprecated: bool,
     pub relevance_score: f64,
     pub matched_terms: Option<Vec<String>>,
     pub highlighted: Option<Value>,
@@ -93,12 +110,24 @@ impl PostgresSearchService {
                 c.slug,
                 c.verification_status,
                 c.current_version,
+                c.is_deprecated,
+                c.deprecation_status,
+                c.replacement_contract_id,
+                -- ts_rank returns `real` (FLOAT4); the row struct decodes an f64,
+                -- so cast explicitly or decoding fails once rows are returned.
                 ts_rank(
                     setweight(c.name_search, 'A') || setweight(c.description_search, 'B'),
                     contracts_build_tsquery($1)
-                ) as relevance_score
+                )::float8 as relevance_score
             FROM contracts c
             WHERE contracts_build_tsquery($1) IS NOT NULL
+              -- Actually restrict to documents that MATCH the query. Without this
+              -- the WHERE only checked the query was parseable, so every contract
+              -- was returned (ordered by relevance, which masked it under offset
+              -- pagination) and `total` counted the whole table. The keyset order
+              -- introduced for cursor pagination made the stray rows visible.
+              AND (setweight(c.name_search, 'A') || setweight(c.description_search, 'B'))
+                  @@ contracts_build_tsquery($1)
         "#,
         );
 
@@ -153,35 +182,76 @@ impl PostgresSearchService {
             }
         }
 
-        // Order by relevance and limit
         let limit = query.limit.unwrap_or(20).clamp(1, 100);
         let offset = query.offset.unwrap_or(0).max(0);
 
-        sql.push_str(" ORDER BY relevance_score DESC");
-        sql.push_str(&format!(
-            " LIMIT ${} OFFSET ${}",
-            param_index,
-            param_index + 1
-        ));
-        args.push(limit.to_string());
-        args.push(offset.to_string());
+        // Count total for the current filters. Computed BEFORE any keyset predicate
+        // is appended so `total` stays stable across cursor pages (the cursor
+        // narrows the page, not the reported match count). Splitting on the first
+        // WHERE keeps any nested one (e.g. the tags EXISTS sub-query) intact.
+        let filter_conditions = sql
+            .split_once("WHERE")
+            .map(|(_, conditions)| conditions.trim().to_string())
+            .unwrap_or_else(|| "TRUE".to_string());
+        let count_sql = format!("SELECT COUNT(*) FROM contracts c WHERE {filter_conditions}");
 
-        // Count total for pagination
-        let count_sql = format!(
-            "SELECT COUNT(*) FROM contracts c WHERE {}",
-            sql.split("ORDER BY").next().unwrap_or("").trim()
-        );
+        // Cursor mode is requested whenever the `cursor` param is present — even an
+        // empty value, which means "first page". A non-empty value is a keyset
+        // anchor (already validated by the handler). In cursor mode we order by a
+        // stable (created_at DESC, id DESC) key instead of relevance, so rows
+        // inserted/updated between page requests can't be skipped or duplicated.
+        let cursor_mode = query.cursor.is_some();
+        let keyset = query
+            .cursor
+            .as_deref()
+            .filter(|c| !c.is_empty())
+            .and_then(|c| Cursor::decode(c).ok());
+
+        if cursor_mode {
+            if keyset.is_some() {
+                let ts_idx = param_index;
+                let id_idx = param_index + 1;
+                sql.push_str(&format!(
+                    " AND (c.created_at < ${ts_idx} OR (c.created_at = ${ts_idx} AND c.id < ${id_idx}))"
+                ));
+            }
+            sql.push_str(" ORDER BY c.created_at DESC, c.id DESC");
+            // Fetch one extra row to detect whether a further page exists.
+            sql.push_str(&format!(" LIMIT {}", limit + 1));
+        } else {
+            sql.push_str(" ORDER BY relevance_score DESC");
+            // `args` is a Vec<String>, so every element binds as text. Postgres
+            // rejects that for pagination ("argument of OFFSET must be type bigint,
+            // not type text"). Both values are clamped integers, so inline them.
+            sql.push_str(&format!(" LIMIT {limit} OFFSET {offset}"));
+        }
 
         // Execute search query
         let mut query_builder = sqlx::query_as::<_, ContractSearchRow>(&sql);
         for arg in &args {
             query_builder = query_builder.bind(arg);
         }
+        if let Some(ref c) = keyset {
+            // Typed binds for the keyset placeholders appended above.
+            query_builder = query_builder.bind(c.timestamp).bind(c.id);
+        }
 
-        let rows = query_builder.fetch_all(&self.db).await?;
+        let mut rows = query_builder.fetch_all(&self.db).await?;
+
+        // In cursor mode we fetched limit+1; the extra row signals another page.
+        // Trim it and derive the next cursor from the last kept row.
+        let mut next_cursor = None;
+        if cursor_mode && rows.len() as i64 > limit {
+            rows.truncate(limit as usize);
+            if let Some(last) = rows.last() {
+                next_cursor = Some(Cursor::new(last.created_at, last.id).encode());
+            }
+        }
 
         let mut count_query = sqlx::query_scalar::<_, i64>(&count_sql);
-        for arg in args.iter().take(args.len() - 2) {
+        // The count query takes the same filter args as the search (keyset binds
+        // are not part of it).
+        for arg in &args {
             count_query = count_query.bind(arg);
         }
         let total = count_query.fetch_one(&self.db).await?;
@@ -207,6 +277,9 @@ impl PostgresSearchService {
                 category: row.category,
                 network: row.network,
                 is_verified: row.is_verified,
+                deprecation_status: row.deprecation_status,
+                replacement_contract_id: row.replacement_contract_id,
+                is_deprecated: row.is_deprecated,
                 relevance_score: row.relevance_score,
                 matched_terms: None,
                 highlighted: None,
@@ -218,6 +291,7 @@ impl PostgresSearchService {
             total,
             took_ms: took,
             facets: None, // Could add facets via separate query
+            next_cursor,
         })
     }
 
@@ -272,6 +346,11 @@ struct ContractSearchRow {
     category: Option<String>,
     network: Network,
     is_verified: bool,
+    is_deprecated: bool,
+    deprecation_status: String,
+    replacement_contract_id: Option<uuid::Uuid>,
+    // Selected already by the query; needed to build the next-page keyset cursor.
+    created_at: DateTime<Utc>,
     relevance_score: f64,
 }
 
@@ -286,6 +365,17 @@ pub async fn fulltext_search_handler(
             "EMPTY_QUERY",
             "Search query cannot be empty",
         ));
+    }
+
+    // Validate a non-empty cursor up front so a malformed one fails clearly with
+    // 400 rather than being silently ignored (an empty cursor = "first page").
+    if let Some(c) = params.cursor.as_deref() {
+        if !c.is_empty() && Cursor::decode(c).is_err() {
+            return Err(ApiError::bad_request_with(
+                "INVALID_CURSOR",
+                "The provided pagination cursor is invalid",
+            ));
+        }
     }
 
     // Build a stable fingerprint for this query to use as cache key
@@ -304,7 +394,12 @@ pub async fn fulltext_search_handler(
 
     let search_req = SearchQuery {
         query: query.to_string(),
-        categories: params.category.as_ref().map(|c| vec![c.clone()]),
+        categories: params.category.as_ref().map(|c| {
+            c.split(',')
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect::<Vec<String>>()
+        }),
         networks: params.network.as_ref().map(|n| {
             n.split(',')
                 .filter_map(|s| match s {
@@ -322,6 +417,7 @@ pub async fn fulltext_search_handler(
             .map(|t| t.split(',').map(|s| s.to_string()).collect()),
         limit: params.limit,
         offset: params.offset,
+        cursor: params.cursor.clone(),
     };
 
     let result = state
@@ -346,4 +442,7 @@ pub struct SearchQueryParams {
     pub tags: Option<String>,
     pub limit: Option<i64>,
     pub offset: Option<i64>,
+    /// Opaque keyset cursor. Present (even empty) switches this endpoint to
+    /// stable cursor pagination; pass back the `next_cursor` from the response.
+    pub cursor: Option<String>,
 }

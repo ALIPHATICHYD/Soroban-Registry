@@ -28,8 +28,7 @@ impl Default for LogConfig {
         Self {
             service_name: std::env::var("OTEL_SERVICE_NAME")
                 .unwrap_or_else(|_| "soroban-registry-service".to_string()),
-            log_level: std::env::var("RUST_LOG")
-                .unwrap_or_else(|_| "info".to_string()),
+            log_level: std::env::var("RUST_LOG").unwrap_or_else(|_| "info".to_string()),
             otlp_endpoint: std::env::var("OTLP_ENDPOINT")
                 .or_else(|_| std::env::var("OTEL_EXPORTER_OTLP_ENDPOINT"))
                 .ok(),
@@ -66,7 +65,8 @@ pub fn init_logging(config: LogConfig) {
         .parse_lossy(&config.log_level);
 
     let writer: BoxMakeWriter = if let Some(log_dir) = &config.log_dir {
-        let file_appender = tracing_appender::rolling::daily(log_dir, format!("{}.log", &config.service_name));
+        let file_appender =
+            tracing_appender::rolling::daily(log_dir, format!("{}.log", &config.service_name));
         let (non_blocking, guard) = tracing_appender::non_blocking(file_appender);
         let _ = LOG_GUARD.set(guard);
         BoxMakeWriter::new(non_blocking)
@@ -98,9 +98,10 @@ pub fn init_logging(config: LogConfig) {
 
             let trace_config = opentelemetry_sdk::trace::Config::default()
                 .with_sampler(sampler)
-                .with_resource(Resource::new(vec![
-                    KeyValue::new("service.name", config.service_name.clone()),
-                ]));
+                .with_resource(Resource::new(vec![KeyValue::new(
+                    "service.name",
+                    config.service_name.clone(),
+                )]));
 
             match opentelemetry_otlp::new_pipeline()
                 .tracing()
@@ -208,27 +209,15 @@ pub fn log_error(message: &str, category: &str, status: u16, request_id: Option<
 }
 
 pub fn log_warn(message: &str, category: &str, request_id: Option<&str>) {
-    tracing::warn!(
-        category = category,
-        request_id = request_id,
-        "{message}",
-    );
+    tracing::warn!(category = category, request_id = request_id, "{message}",);
 }
 
 pub fn log_info(message: &str, category: &str, request_id: Option<&str>) {
-    tracing::info!(
-        category = category,
-        request_id = request_id,
-        "{message}",
-    );
+    tracing::info!(category = category, request_id = request_id, "{message}",);
 }
 
 pub fn log_debug(message: &str, category: &str, request_id: Option<&str>) {
-    tracing::debug!(
-        category = category,
-        request_id = request_id,
-        "{message}",
-    );
+    tracing::debug!(category = category, request_id = request_id, "{message}",);
 }
 
 #[macro_export]

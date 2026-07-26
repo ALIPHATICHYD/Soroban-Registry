@@ -143,7 +143,9 @@ impl KeyManager {
     ) -> Result<Self, KeyManagerError> {
         let mut keys = Vec::new();
         for entry in spec.split(',').map(str::trim).filter(|e| !e.is_empty()) {
-            let (id, b64) = entry.split_once(':').ok_or(KeyManagerError::MalformedEntry)?;
+            let (id, b64) = entry
+                .split_once(':')
+                .ok_or(KeyManagerError::MalformedEntry)?;
             let id = id.trim();
             if id.is_empty() {
                 return Err(KeyManagerError::EmptyId);

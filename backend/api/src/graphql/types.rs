@@ -36,6 +36,9 @@ pub struct ContractType {
     pub health_score: i32,
     pub visibility: VisibilityType,
     pub organization_id: Option<Uuid>,
+    pub is_deprecated: bool,
+    pub deprecation_status: String,
+    pub replacement_contract_id: Option<Uuid>,
 }
 
 #[Object]
@@ -78,6 +81,18 @@ impl ContractType {
     }
     async fn visibility(&self) -> VisibilityTypeGraphQL {
         self.visibility.clone().into()
+    }
+
+    async fn is_deprecated(&self) -> bool {
+        self.is_deprecated
+    }
+
+    async fn deprecation_status(&self) -> &str {
+        &self.deprecation_status
+    }
+
+    async fn replacement_contract_id(&self) -> Option<Uuid> {
+        self.replacement_contract_id
     }
 
     /// Resolve the publisher for this contract (uses DataLoader to avoid N+1)
@@ -191,6 +206,9 @@ impl From<Contract> for ContractType {
             health_score: c.health_score,
             visibility: c.visibility,
             organization_id: c.organization_id,
+            is_deprecated: c.is_deprecated,
+            deprecation_status: c.deprecation_status.as_str().to_string(),
+            replacement_contract_id: c.replacement_contract_id,
         }
     }
 }

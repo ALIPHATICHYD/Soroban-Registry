@@ -484,7 +484,12 @@ pub fn contract_routes() -> Router<AppState> {
         )
         .route(
             "/api/contracts/:id/deprecate",
-            post(deprecation_handlers::deprecate_contract),
+            post(deprecation_handlers::deprecate_contract)
+                .delete(deprecation_handlers::undeprecate_contract),
+        )
+        .route(
+            "/api/admin/deprecation/purge-expired",
+            post(deprecation_handlers::purge_expired_deprecated_contracts),
         )
         // AI-Powered Contract Code Assistant
         .route(
@@ -1102,7 +1107,6 @@ pub fn admin_routes() -> Router<AppState> {
             "/api/admin/audit-logs/cleanup",
             post(handlers::handle_retention_cleanup),
         )
-        .merge(migration_routes())
         // Category management (issue #414) – admin-only write endpoints
         .route(
             "/api/admin/categories",

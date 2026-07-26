@@ -53,17 +53,19 @@ impl IndexerService {
             .parse::<sqlx::postgres::PgConnectOptions>()?
             .log_slow_statements(
                 log::LevelFilter::Warn,
-                std::time::Duration::from_millis(
-                    config.database.slow_query_threshold_ms as u64,
-                ),
+                std::time::Duration::from_millis(config.database.slow_query_threshold_ms as u64),
             );
 
         let db_pool = sqlx::postgres::PgPoolOptions::new()
             .min_connections(config.database.min_connections)
             .max_connections(config.database.max_connections)
             .acquire_timeout(std::time::Duration::from_secs(30))
-            .idle_timeout(std::time::Duration::from_secs(config.database.idle_timeout_secs))
-            .max_lifetime(std::time::Duration::from_secs(config.database.max_lifetime_secs))
+            .idle_timeout(std::time::Duration::from_secs(
+                config.database.idle_timeout_secs,
+            ))
+            .max_lifetime(std::time::Duration::from_secs(
+                config.database.max_lifetime_secs,
+            ))
             .connect_with(connect_options)
             .await?;
 

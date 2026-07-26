@@ -152,6 +152,15 @@ pub async fn get_contract_metadata_v1(
     let related_contracts = fetch_related_contracts(&state, contract_uuid, &contract).await?;
     let deployments = fetch_deployments(&state, contract_uuid).await?;
 
+    // Issue #1061: attach a deprecation warning so callers are notified without
+    // requiring a separate request to /deprecation-info.
+    let deprecation_warning = crate::deprecation_handlers::build_deprecation_warning(
+        &state,
+        contract_uuid,
+        None,
+    )
+    .await;
+
     let response = json!({
         "id": contract.id,
         "contract_id": contract.contract_id,
@@ -190,6 +199,8 @@ pub async fn get_contract_metadata_v1(
             "usage_count": contract.usage_count,
             "deployments": deployments
         },
+        // Null when the contract is not deprecated; populated otherwise (issue #1061)
+        "deprecation_warning": deprecation_warning,
         "metadata_only": true,
         "cached_for_seconds": 3600,
         "generated_at": Utc::now()
@@ -1024,6 +1035,11 @@ fn metadata_as_contract(row: &ContractMetadataRow) -> shared::Contract {
         visibility: shared::VisibilityType::Public,
         current_version: row.current_version.clone(),
         usage_count: row.usage_count,
+        deprecated_at: None,
+        deprecation_reason: None,
+        replacement_contract_id: None,
+        is_deprecated: false,
+        deprecation_status: shared::DeprecationStatus::Active,
     }
 }
 
