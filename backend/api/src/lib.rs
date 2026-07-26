@@ -104,6 +104,8 @@ pub mod db_monitoring;
 pub mod db_pool;
 pub mod db_resilience;
 pub mod dependency;
+pub mod dependency_vulnerability;
+pub mod dependency_vulnerability_handlers;
 pub mod deprecated_contracts_handlers;
 pub mod elasticsearch_handlers;
 pub mod favorites_handlers;
