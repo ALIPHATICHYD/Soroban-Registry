@@ -1040,4 +1040,14 @@ mod tests {
         assert_ne!(c1.checksum, c2.checksum);
         assert!(c1.byte_size > 0);
     }
+
+    use proptest::prelude::*;
+    proptest! {
+        #[test]
+        fn proptest_sha256_hex_is_stable(ref data in any::<Vec<u8>>()) {
+            let h1 = sha256_hex(data);
+            let h2 = sha256_hex(data);
+            prop_assert_eq!(h1, h2, "Hashes of identical source must be perfectly stable");
+        }
+    }
 }
