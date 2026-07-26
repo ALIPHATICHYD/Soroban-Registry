@@ -1016,6 +1016,68 @@ fn validate_contract_list_pagination(
     Ok((limit, offset, page))
 }
 
+fn normalized_contract_categories(params: &ContractSearchParams) -> Vec<String> {
+    params
+        .categories
+        .iter()
+        .flatten()
+        .chain(params.category.iter())
+        .flat_map(|value| value.split(','))
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_owned)
+        .collect()
+}
+
+fn normalized_contract_networks(params: &ContractSearchParams) -> Vec<shared::Network> {
+    params
+        .networks
+        .iter()
+        .flatten()
+        .chain(params.network.iter())
+        .copied()
+        .collect()
+}
+
+#[cfg(test)]
+mod contract_filter_tests {
+    use super::*;
+
+    #[test]
+    fn list_filters_merge_plural_and_singular_values() {
+        let params = ContractSearchParams {
+            networks: Some(vec![shared::Network::Testnet]),
+            network: Some(shared::Network::Mainnet),
+            categories: Some(vec!["NFT".to_string(), " lending ".to_string()]),
+            category: Some("DeFi, ,".to_string()),
+            ..Default::default()
+        };
+
+        assert_eq!(
+            normalized_contract_networks(&params),
+            vec![shared::Network::Testnet, shared::Network::Mainnet]
+        );
+        assert_eq!(
+            normalized_contract_categories(&params),
+            vec!["NFT", "lending", "DeFi"]
+        );
+    }
+
+    #[test]
+    fn list_offset_is_not_rounded_to_a_page_boundary() {
+        let params = ContractSearchParams {
+            limit: Some(10),
+            offset: Some(5),
+            ..Default::default()
+        };
+
+        assert_eq!(
+            validate_contract_list_pagination(&params).unwrap(),
+            (10, 5, 1)
+        );
+    }
+}
+
 pub(crate) fn extract_ip_address(headers: &HeaderMap) -> String {
     if let Some(forwarded_for) = headers
         .get("x-forwarded-for")
@@ -1925,11 +1987,7 @@ pub async fn list_contracts(
         qb.push_bind(status);
     }
 
-    let mut categories = params.categories.clone().unwrap_or_default();
-    if let Some(category) = &params.category {
-        categories.push(category.clone());
-    }
-    categories.retain(|category| !category.trim().is_empty());
+    let categories = normalized_contract_categories(&params);
     if !categories.is_empty() {
         qb.push(" AND c.category IN (");
         let mut separated = qb.separated(", ");
@@ -1939,13 +1997,8 @@ pub async fn list_contracts(
         separated.push_unseparated(")");
     }
 
-    if let Some(networks) = params
-        .networks
-        .as_ref()
-        .filter(|n| !n.is_empty())
-        .cloned()
-        .or_else(|| params.network.clone().map(|n| vec![n]))
-    {
+    let networks = normalized_contract_networks(&params);
+    if !networks.is_empty() {
         qb.push(" AND c.network IN (");
         let mut separated = qb.separated(", ");
         for network in networks {
@@ -2105,11 +2158,7 @@ pub async fn list_contracts(
         count_qb.push(" AND c.verification_status = ");
         count_qb.push_bind(status);
     }
-    let mut count_categories = params.categories.clone().unwrap_or_default();
-    if let Some(cat) = &params.category {
-        count_categories.push(cat.clone());
-    }
-    count_categories.retain(|c| !c.trim().is_empty());
+    let count_categories = normalized_contract_categories(&params);
     if !count_categories.is_empty() {
         count_qb.push(" AND c.category IN (");
         let mut sep = count_qb.separated(", ");
@@ -2119,13 +2168,8 @@ pub async fn list_contracts(
         sep.push_unseparated(")");
     }
 
-    if let Some(count_networks) = params
-        .networks
-        .as_ref()
-        .filter(|n| !n.is_empty())
-        .cloned()
-        .or_else(|| params.network.clone().map(|n| vec![n]))
-    {
+    let count_networks = normalized_contract_networks(&params);
+    if !count_networks.is_empty() {
         count_qb.push(" AND c.network IN (");
         let mut sep = count_qb.separated(", ");
         for net in count_networks {
@@ -2168,14 +2212,17 @@ pub async fn list_contracts(
     // Populate active filter metadata
     {
         let mut networks: Option<Vec<String>> = None;
-        if let Some(n) = &params.networks {
-            if !n.is_empty() {
-                networks = Some(n.iter().map(|net| net.to_string()).collect());
-            }
-        } else if let Some(n) = &params.network {
-            networks = Some(vec![n.to_string()]);
+        let normalized_networks = normalized_contract_networks(&params);
+        if !normalized_networks.is_empty() {
+            networks = Some(
+                normalized_networks
+                    .iter()
+                    .map(|net| net.to_string())
+                    .collect(),
+            );
         }
-        let categories = params.categories.clone().filter(|c| !c.is_empty());
+        let categories = (!normalized_contract_categories(&params).is_empty())
+            .then(|| normalized_contract_categories(&params));
         let tags = params.tags.clone().filter(|t| !t.is_empty());
         let verified_only = params.verified_only;
         let verification_status = params
