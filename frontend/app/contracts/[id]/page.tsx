@@ -28,6 +28,7 @@ import CodeCopyButton from "@/components/CodeCopyButton";
 import { useParams, useSearchParams } from "next/navigation";
 import { useAnalytics } from "@/hooks/useAnalytics";
 import FormalVerificationPanel from "@/components/FormalVerificationPanel";
+import DependencyVulnerabilityPanel from "@/components/DependencyVulnerabilityPanel";
 import Navbar from "@/components/Navbar";
 import MaintenanceBanner from "@/components/MaintenanceBanner";
 import DeprecationBanner from "@/components/DeprecationBanner";
@@ -852,6 +853,7 @@ function ContractDetailsContent() {
               </dl>
             </div>
             <FormalVerificationPanel contractId={contract.id} />
+            <DependencyVulnerabilityPanel contractId={contract.id} />
           </section>
         )}
 

@@ -7,7 +7,8 @@ use crate::{
     bulk_operations_handlers, canary_handlers, category_handlers, client_observability_handlers,
     clone_federation_handlers, collaborative_reviews, compatibility_testing_handlers,
     contract_events, contract_stats_handlers, contributor_handlers, custom_metrics_handlers,
-    db_pool, dependency_handlers, deprecated_contracts_handlers, deprecation_handlers,
+    db_pool, dependency_handlers, dependency_vulnerability_handlers,
+    deprecated_contracts_handlers, deprecation_handlers,
     elasticsearch_handlers, error_logging, feature_flags, formal_verification_handlers,
     formal_verification_integration, gas_estimation_handlers, governance_handlers,
     graph_analysis_handlers, handlers, integrity, interoperability_handlers,
@@ -575,6 +576,16 @@ pub fn contract_routes() -> Router<AppState> {
             "/api/contracts/:id/dependencies",
             get(crate::dependency_handlers::get_contract_dependencies)
                 .post(dependency_handlers::declare_contract_dependencies),
+        )
+        .route(
+            "/api/contracts/:id/package-dependencies",
+            get(dependency_vulnerability_handlers::get_package_dependencies)
+                .post(dependency_vulnerability_handlers::declare_package_dependencies),
+        )
+        .route(
+            "/api/contracts/:id/dependency-scan",
+            get(dependency_vulnerability_handlers::get_dependency_scan_report)
+                .post(dependency_vulnerability_handlers::trigger_dependency_scan),
         )
         .route(
             "/api/contracts/:id/graph",

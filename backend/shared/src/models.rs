@@ -1228,6 +1228,75 @@ pub struct ContractDependency {
     pub created_at: DateTime<Utc>,
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Dependency vulnerability scanning
+//
+// Distinct from `ContractDependency` above (which tracks on-chain
+// contract-to-contract call relationships): these types describe declared
+// package/crate dependencies (Cargo-style name + version) and their exposure
+// to known vulnerabilities, similar to `npm audit` / crates.io advisories.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// A single package/crate dependency declared for a contract.
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow, utoipa::ToSchema)]
+pub struct PackageDependency {
+    pub id: Uuid,
+    pub contract_id: Uuid,
+    pub package_name: String,
+    pub version: String,
+    pub created_at: DateTime<Utc>,
+}
+
+/// One package/version pair in a dependency declaration request.
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct PackageDependencyInput {
+    pub package_name: String,
+    pub version: String,
+}
+
+/// Request body for declaring (replacing) a contract's package dependencies.
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct DeclarePackageDependenciesRequest {
+    pub dependencies: Vec<PackageDependencyInput>,
+}
+
+/// A known vulnerability affecting a package, sourced from the registry's
+/// curated advisory database (`cve_vulnerabilities`).
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow, utoipa::ToSchema)]
+pub struct CveVulnerability {
+    pub cve_id: String,
+    pub description: Option<String>,
+    pub severity: String,
+    pub package_name: String,
+    pub patched_versions: Vec<String>,
+    pub published_at: Option<DateTime<Utc>>,
+}
+
+/// One vulnerability finding surfaced for a specific declared dependency.
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct DependencyVulnerabilityFinding {
+    pub package_name: String,
+    pub version: String,
+    pub cve_id: String,
+    pub severity: String,
+    pub description: Option<String>,
+    pub recommended_version: Option<String>,
+}
+
+/// Result of scanning a contract's declared dependencies against known
+/// vulnerability sources. Returned by both the re-scan trigger and the
+/// read-only status endpoint used to render warnings on contract pages.
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct DependencyScanReport {
+    pub contract_id: Uuid,
+    /// One of "not_scanned", "clean", "vulnerable".
+    pub status: String,
+    pub dependencies_scanned: i64,
+    pub vulnerable_dependency_count: i64,
+    pub last_scanned_at: Option<DateTime<Utc>>,
+    pub findings: Vec<DependencyVulnerabilityFinding>,
+}
+
 /// Tracks migration scripts between contract versions
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow, utoipa::ToSchema)]
 pub struct MigrationScript {
