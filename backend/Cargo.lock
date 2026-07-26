@@ -4366,6 +4366,7 @@ dependencies = [
  "tracing-subscriber",
  "utoipa",
  "uuid",
+ "wasmparser 0.224.1",
 ]
 
 [[package]]

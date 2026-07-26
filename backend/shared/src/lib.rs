@@ -7,6 +7,7 @@ pub mod semver;
 pub mod slug;
 pub mod source_storage;
 pub mod upgrade;
+pub mod wasm;
 
 pub use abi::*;
 pub use error::*;

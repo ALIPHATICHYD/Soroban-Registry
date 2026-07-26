@@ -1893,12 +1893,21 @@ pub enum ContractCommands {
         json: bool,
     },
 
-    /// Verify a deployed contract's authenticity against the on-chain registry
+    /// Verify a contract — a local WASM artifact before publishing, or a
+    /// deployed contract's authenticity against the on-chain registry.
     ///
-    /// Usage: soroban-registry contract verify <address> --network <network> [--json] [--strict] [--batch] [--no-cache]
+    /// Local:    soroban-registry contract verify --wasm <path> [--verbose] [--json]
+    /// On-chain: soroban-registry contract verify <address> --network <network> [--json] [--strict] [--batch] [--no-cache]
     Verify {
-        /// On-chain contract address to verify (or comma-separated list for batch verification)
-        address: String,
+        /// On-chain contract address to verify (or comma-separated list for batch
+        /// verification). Omit when using --wasm for local verification.
+        address: Option<String>,
+
+        /// Path to a local compiled WASM contract to verify before publishing.
+        /// Runs the same structural checks the backend uses, offline. In local
+        /// mode, pass the global -v/--verbose flag for detailed diagnostics.
+        #[arg(long)]
+        wasm: Option<String>,
 
         /// Stellar network (mainnet | testnet | futurenet)
         #[arg(long, default_value = "mainnet")]
@@ -4016,31 +4025,60 @@ pub async fn dispatch_command(
             }
             ContractCommands::Verify {
                 address,
+                wasm,
                 network,
                 json,
                 strict,
                 batch,
                 no_cache,
             } => {
-                log::debug!(
-                    "Command: contract verify | address={} network={} json={} strict={} batch={} no_cache={}",
-                    address,
-                    network,
-                    json,
-                    strict,
-                    batch,
-                    no_cache
-                );
-                contract_verify::run(
-                    &cli.api_url,
-                    &address,
-                    &network,
-                    json,
-                    strict,
-                    batch,
-                    no_cache,
-                )
-                .await?;
+                // Local verbosity is driven by the global -v/--verbose flag.
+                let verbose = cli.verbose > 0;
+                // Exactly one of --wasm (local) or <address> (on-chain) is required.
+                match (wasm, address) {
+                    (Some(_), Some(_)) => {
+                        anyhow::bail!(
+                            "Pass either a contract <address> (on-chain verification) or \
+                             --wasm <path> (local verification), not both."
+                        );
+                    }
+                    (Some(wasm_path), None) => {
+                        log::debug!(
+                            "Command: contract verify (local) | wasm={} verbose={} json={}",
+                            wasm_path,
+                            verbose,
+                            json
+                        );
+                        contract_verify::run_local(&wasm_path, verbose, json).await?;
+                    }
+                    (None, Some(address)) => {
+                        log::debug!(
+                            "Command: contract verify | address={} network={} json={} strict={} batch={} no_cache={}",
+                            address,
+                            network,
+                            json,
+                            strict,
+                            batch,
+                            no_cache
+                        );
+                        contract_verify::run(
+                            &cli.api_url,
+                            &address,
+                            &network,
+                            json,
+                            strict,
+                            batch,
+                            no_cache,
+                        )
+                        .await?;
+                    }
+                    (None, None) => {
+                        anyhow::bail!(
+                            "Provide a contract <address> to verify on-chain, or --wasm <path> \
+                             to verify a local artifact before publishing."
+                        );
+                    }
+                }
             }
             ContractCommands::Details {
                 address,

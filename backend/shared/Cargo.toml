@@ -17,6 +17,7 @@ base64 = { workspace = true }
 rust_decimal = "1.35"
 sha2 = "0.10"
 hex = "0.4"
+wasmparser = { workspace = true }
 s3 = { package = "rust-s3", version = "0.37", features = ["blocking"] }
 tokio = { workspace = true }
 tracing = { workspace = true }
