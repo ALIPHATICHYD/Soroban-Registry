@@ -27,6 +27,7 @@ mod config;
 mod contract_audit;
 mod contract_dependency;
 mod contract_deploy;
+mod contract_deprecate;
 mod contract_highlight;
 mod contract_interaction;
 mod contract_register;
@@ -2169,6 +2170,46 @@ pub enum ContractCommands {
         /// Output format: text, json
         #[arg(long, default_value = "text")]
         format: String,
+
+        /// Output results as machine-readable JSON
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// Deprecate a contract with publisher-signed authorization (#1091)
+    ///
+    /// Requires the publisher's Ed25519 private key to sign the deprecation
+    /// payload. The backend verifies the signature against the stored publisher
+    /// public key before applying the state change.
+    ///
+    /// Usage: soroban-registry contract deprecate <ADDRESS> --reason <REASON> --private-key <KEY>
+    Deprecate {
+        /// Contract address or registry UUID to deprecate
+        address: String,
+
+        /// Human-readable reason for deprecation
+        #[arg(long)]
+        reason: String,
+
+        /// Replacement contract ID for downstream migration
+        #[arg(long)]
+        replacement: Option<String>,
+
+        /// Publisher's Ed25519 private key (base64-encoded)
+        #[arg(long)]
+        private_key: String,
+
+        /// URL to a migration guide for consumers
+        #[arg(long)]
+        migration_guide: Option<String>,
+
+        /// Grace period in days before hard removal (default: 90)
+        #[arg(long, default_value_t = 90)]
+        grace_period_days: i32,
+
+        /// Skip interactive confirmation
+        #[arg(long, short = 'y')]
+        yes: bool,
 
         /// Output results as machine-readable JSON
         #[arg(long)]
@@ -4318,6 +4359,35 @@ pub async fn dispatch_command(
                 );
                 let fmt = if json { "json" } else { &format };
                 contract_audit::run(&cli.api_url, &lockfile, fix, init, &contracts, fmt).await?;
+            }
+            ContractCommands::Deprecate {
+                address,
+                reason,
+                replacement,
+                private_key,
+                migration_guide,
+                grace_period_days,
+                yes,
+                json,
+            } => {
+                log::debug!(
+                    "Command: contract deprecate | address={} reason={} replacement={:?}",
+                    address,
+                    reason,
+                    replacement
+                );
+                contract_deprecate::run(
+                    &cli.api_url,
+                    &address,
+                    &reason,
+                    replacement.as_deref(),
+                    &private_key,
+                    migration_guide.as_deref(),
+                    grace_period_days,
+                    yes,
+                    json,
+                )
+                .await?;
             }
         },
         Commands::ApiKey { action } => match action {
