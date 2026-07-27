@@ -73,7 +73,7 @@ jobs:
 
             if [ -n "$MATCHES" ]; then
               FOUND_EMOJI=1
-              REPORT+=$'\n'"❌ $file:"$'\n'
+              REPORT+=$'\n'" X $file:"$'\n'
               while IFS= read -r line; do
                 REPORT+="   $line"$'\n'
               done <<< "$MATCHES"
@@ -98,5 +98,5 @@ jobs:
             exit 1
           else
             echo ""
-            echo "✅ No emojis found in changed files. All clear!"
+            echo "No emojis found in changed files. All clear!"
           fi
