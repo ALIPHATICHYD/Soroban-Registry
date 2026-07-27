@@ -42,13 +42,16 @@ jobs:
         run: |
           echo "Checking code formatting with cargo fmt across all Cargo manifests..."
           FAILED=0
-          # Check root workspaces / subprojects
-          for manifest in backend/Cargo.toml cli/Cargo.toml cli/imported/Cargo.toml soroban-registry/Cargo.toml; do
+          for manifest in backend/Cargo.toml cli/Cargo.toml soroban-registry/Cargo.toml; do
             if [ -f "$manifest" ]; then
               echo "==> Formatting check for $manifest"
               cargo fmt --manifest-path "$manifest" --check || FAILED=1
             fi
           done
+          if [ -f "cli/imported/src/lib.rs" ]; then
+            echo "==> Formatting check for cli/imported/src/lib.rs"
+            rustfmt cli/imported/src/lib.rs --check || FAILED=1
+          fi
           if [ $FAILED -ne 0 ]; then
             echo "Format check failed! Run 'cargo fmt' locally before submitting PR."
             exit 1

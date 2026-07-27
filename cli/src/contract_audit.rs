@@ -124,7 +124,7 @@ pub async fn run(
         write_lockfile(lockfile_path, &updated)?;
         println!(
             "\n{} Lockfile updated at {}",
-            "✓".green(),
+            "[OK]".green(),
             lockfile_path.display()
         );
     }
@@ -155,7 +155,7 @@ async fn run_init(api_url: &str, lockfile_path: &str, contract_ids: &[String]) -
 
     println!(
         "{} Generating lockfile for {} contract(s)…",
-        "⟳".cyan(),
+        "[...]".cyan(),
         contract_ids.len()
     );
 
@@ -169,11 +169,11 @@ async fn run_init(api_url: &str, lockfile_path: &str, contract_ids: &[String]) -
         }
         match fetch_contract_meta(&client, api_url, id).await {
             Ok(entry) => {
-                println!("  {} {}", "✓".green(), id);
+                println!("  {} {}", "[OK]".green(), id);
                 contracts.insert(id.to_string(), entry);
             }
             Err(err) => {
-                eprintln!("  {} {} — {}", "✗".red(), id, err);
+                eprintln!("  {} {} — {}", "[FAIL]".red(), id, err);
             }
         }
     }
@@ -192,7 +192,7 @@ async fn run_init(api_url: &str, lockfile_path: &str, contract_ids: &[String]) -
     write_lockfile(path, &lockfile)?;
     println!(
         "\n{} Lockfile created at {} with {} contract(s)",
-        "✓".green(),
+        "[OK]".green(),
         path.display(),
         lockfile.contracts.len()
     );
@@ -436,7 +436,7 @@ fn render_text_report(report: &DriftReport) {
     if !report.has_drift {
         println!(
             "\n  {} No drift detected. Local lockfile is in sync with the registry.",
-            "✓".green()
+            "[OK]".green()
         );
         return;
     }
