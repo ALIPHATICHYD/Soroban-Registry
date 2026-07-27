@@ -1,9 +1,9 @@
 //! contract_deprecate.rs — `soroban-registry contract deprecate` (#1091)
 //!
-//! Deprecate a contract with Ed25519 signature-authenticated authorization.
-//! The publisher's keypair signs a deprecation payload (`{contract_id, action,
-//! timestamp, nonce}`) so the backend can verify the request was authorized by
-//! the on-chain publisher identity — not just an API token.
+//! Deprecate a contract by signing a payload with an Ed25519 key.
+ //! Note: server-side verification must be implemented by the registry API; the current
+ //! `/api/contracts/:id/deprecate` endpoint may ignore signature fields unless updated.
+ //! The CLI still includes the signature payload so a signature-verifying backend can enforce authorization.
 //!
 //! Usage:
 //!   soroban-registry contract deprecate <ADDRESS> --reason <REASON> --private-key <KEY>
@@ -195,7 +195,7 @@ pub async fn run(
         });
         println!("{}", serde_json::to_string_pretty(&result)?);
     } else {
-        println!("\n{}", "✓ Contract deprecated successfully!".green().bold());
+        println!("\n{}", "Contract deprecated successfully!".green().bold());
         println!("  {}: {}", "Contract".bold(), address.cyan());
         println!("  {}: {}", "Reason".bold(), reason);
         if let Some(repl) = replacement {
