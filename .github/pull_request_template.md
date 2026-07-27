@@ -14,12 +14,12 @@ Closes #
 
 <!-- Check the one that applies. Put an `x` inside the brackets. -->
 
-- [ ] ✨ Feature — new functionality
-- [ ] 🐛 Bug fix — fixes an issue without changing existing behavior
-- [ ] 📝 Documentation — updates or adds documentation only
-- [ ] ♻️ Refactor — code restructuring with no behavior change
-- [ ] 🧪 Test — adds or updates tests only
-- [ ] 🔧 Chore — build, CI, or tooling changes
+- [ ] Feature — new functionality
+- [ ] Bug fix — fixes an issue without changing existing behavior
+- [ ] Documentation — updates or adds documentation only
+- [ ] Refactor — code restructuring with no behavior change
+- [ ] Test — adds or updates tests only
+- [ ] Chore — build, CI, or tooling changes
 
 ## Changes Made
 
