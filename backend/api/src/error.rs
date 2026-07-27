@@ -1,5 +1,5 @@
 use axum::{
-    http::StatusCode,
+    http::{header::RETRY_AFTER, HeaderValue, StatusCode},
     response::{IntoResponse, Response},
     Json,
 };
@@ -101,6 +101,9 @@ pub struct ApiError {
     details: Option<Value>,
     backtrace: Option<String>,
     category: ErrorCategory,
+    /// Seconds until the caller may retry. When set, `into_response` attaches
+    /// a `Retry-After` header — used by rate limiting and cooldown checks.
+    retry_after_seconds: Option<u64>,
 }
 
 impl std::fmt::Display for ApiError {
@@ -200,11 +203,19 @@ impl ApiError {
             },
             backtrace: capture_backtrace(),
             category: ErrorCategory::from_status(status),
+            retry_after_seconds: None,
         }
     }
 
     pub fn with_details(mut self, details: impl Into<Value>) -> Self {
         self.details = Some(details.into());
+        self
+    }
+
+    /// Attach a `Retry-After: <seconds>` header to the response. Used by rate
+    /// limiting and cooldown checks so callers know exactly when to retry.
+    pub fn with_retry_after(mut self, seconds: u64) -> Self {
+        self.retry_after_seconds = Some(seconds);
         self
     }
 
@@ -233,6 +244,7 @@ impl ApiError {
             details: None,
             backtrace: capture_backtrace(),
             category: ErrorCategory::Internal,
+            retry_after_seconds: None,
         }
     }
 
@@ -269,6 +281,7 @@ impl ApiError {
             details: None,
             backtrace: capture_backtrace(),
             category: ErrorCategory::Database,
+            retry_after_seconds: None,
         }
     }
 
@@ -281,6 +294,7 @@ impl ApiError {
             details: None,
             backtrace: capture_backtrace(),
             category: ErrorCategory::Internal,
+            retry_after_seconds: None,
         }
     }
 
@@ -313,6 +327,7 @@ impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
         let correlation_id = crate::request_tracing::current_request_id()
             .unwrap_or_else(crate::request_tracing::generate_request_id);
+        let retry_after_seconds = self.retry_after_seconds;
         let details = self.details.unwrap_or_else(|| json!({}));
         let category_str = self.category.as_str();
 
@@ -340,6 +355,13 @@ impl IntoResponse for ApiError {
 
         let mut response = (self.status, Json(payload)).into_response();
         crate::request_tracing::attach_request_id_headers(response.headers_mut(), &correlation_id);
+        if let Some(seconds) = retry_after_seconds {
+            if let Ok(value) = HeaderValue::from_str(&seconds.to_string()) {
+                response.headers_mut().insert(RETRY_AFTER, value);
+            } else {
+                tracing::warn!("Failed to encode Retry-After header");
+            }
+        }
         response
     }
 }
@@ -358,6 +380,7 @@ impl From<sqlx::Error> for ApiError {
             details: Some(json!({ "reason": e.to_string() })),
             backtrace: capture_backtrace(),
             category: ErrorCategory::Database,
+            retry_after_seconds: None,
         }
     }
 }
@@ -384,6 +407,7 @@ impl From<anyhow::Error> for ApiError {
             details: Some(json!({ "reason": format!("{:#}", e) })),
             backtrace,
             category: ErrorCategory::Internal,
+            retry_after_seconds: None,
         }
     }
 }
@@ -424,6 +448,20 @@ mod tests {
         assert_eq!(value["details"]["field"], "name");
         assert!(value["request_id"].is_string());
         assert!(value["timestamp"].is_string());
+    }
+
+    #[tokio::test]
+    async fn with_retry_after_attaches_header_only_when_set() {
+        let without = ApiError::rate_limited("Too many requests").into_response();
+        assert!(!without.headers().contains_key(RETRY_AFTER));
+
+        let with = ApiError::rate_limited("Cooldown active")
+            .with_retry_after(42)
+            .into_response();
+        assert_eq!(
+            with.headers().get(RETRY_AFTER).and_then(|v| v.to_str().ok()),
+            Some("42")
+        );
     }
 
     #[tokio::test]
