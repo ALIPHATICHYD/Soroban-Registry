@@ -1,7 +1,7 @@
 #![no_std]
 // Note: This is a placeholder example. To build actual Soroban contracts,
 // you'll need to install the soroban-sdk dependency and Stellar toolchain.
-// use soroban_sdk::{contract, contractimpl, symbol_short, vec, Env, Symbol, Vec};
+use soroban_sdk::{contract, contractimpl, symbol_short, vec, Env, Symbol, Vec};
 
 #[contract]
 pub struct HelloContract;

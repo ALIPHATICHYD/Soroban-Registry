@@ -57,15 +57,15 @@ jobs:
             exit 1
           fi
 
-      # Step 2: Compilation Check (target wasm32-unknown-unknown for contracts & crates)
-      - name: Compile Smart Contracts (wasm32 target)
+      # Step 2: Compilation Check
+      - name: Compile Smart Contracts & Crates
         run: |
           echo "Building Rust crates & smart contracts..."
           FAILED=0
           for manifest in cli/imported/Cargo.toml soroban-registry/Cargo.toml cli/Cargo.toml; do
             if [ -f "$manifest" ]; then
               echo "==> Compiling $manifest"
-              cargo check --manifest-path "$manifest" --target wasm32-unknown-unknown || cargo check --manifest-path "$manifest" || FAILED=1
+              cargo check --manifest-path "$manifest" || FAILED=1
             fi
           done
           if [ $FAILED -ne 0 ]; then
