@@ -1,0 +1,68 @@
+name: Smart Contract CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  contract-quality:
+    name: Format, Compile & Test Smart Contracts
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+          components: rustfmt, clippy
+
+      - name: Cache Cargo dependencies & build outputs
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-contracts-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-contracts-
+
+      # Step 1: Format Check
+      - name: Check Code Formatting (cargo fmt)
+        run: |
+          echo "Checking code formatting with cargo fmt..."
+          cargo fmt --all --check
+
+      # Step 2: Compilation Check
+      - name: Compile Smart Contracts (wasm32 target)
+        run: |
+          echo "Building smart contracts for target wasm32-unknown-unknown..."
+          # Build all workspace crates / contract crates
+          if [ -f "Cargo.toml" ]; then
+            cargo build --target wasm32-unknown-unknown --release
+          fi
+          # Also build any embedded/sample contracts if present
+          if [ -f "cli/imported/Cargo.toml" ]; then
+            cargo build --manifest-path cli/imported/Cargo.toml --target wasm32-unknown-unknown --release
+          fi
+
+      # Step 3: Test Check
+      - name: Run Smart Contract Tests (cargo test)
+        run: |
+          echo "Running unit and integration tests..."
+          if [ -f "Cargo.toml" ]; then
+            cargo test --all
+          fi
+          if [ -f "cli/imported/Cargo.toml" ]; then
+            cargo test --manifest-path cli/imported/Cargo.toml
+          fi
