@@ -15,7 +15,7 @@ jobs:
 
       - name: Check for emojis in PR diff
         run: |
-          echo "🔍 Scanning changed files for emoji characters..."
+          echo "Scanning changed files for emoji characters..."
 
           # Get list of added/modified files in this PR (ignore deleted files)
           CHANGED_FILES=$(git diff --name-only --diff-filter=ACM origin/${{ github.base_ref }}...HEAD)
