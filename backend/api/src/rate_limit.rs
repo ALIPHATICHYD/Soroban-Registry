@@ -190,9 +190,7 @@ impl RateLimitState {
             config: std::sync::Arc::new(config),
             buckets: std::sync::Arc::new(Mutex::new(HashMap::new())),
             bypass_window_count: std::sync::Arc::new(AtomicU64::new(0)),
-            bypass_window_start_ms: std::sync::Arc::new(AtomicU64::new(
-                now_unix_millis(),
-            )),
+            bypass_window_start_ms: std::sync::Arc::new(AtomicU64::new(now_unix_millis())),
             bypass_spike_threshold,
         }
     }

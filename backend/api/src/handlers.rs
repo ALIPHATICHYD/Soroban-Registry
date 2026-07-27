@@ -25,22 +25,21 @@ use sha2::{Digest, Sha256};
 use shared::models::SourceFormat;
 use shared::{
     pagination::Cursor, AdvancedSearchRequest, AnalyticsEventType, AuditActionType,
-    ChangePublisherRequest, Contract, ContractAuditLog, ContractDeploymentHistory,
-    ContractExportAcceptedResponse, ContractExportFormat, ContractExportJobStatus,
-    ContractExportMetadata, ContractExportRequest, ContractExportStatusResponse,
-    ContractGetResponse, ContractInteractionResponse, ContractMetadataExportEnvelope,
-    ContractMetadataExportRecord, ContractSearchParams, ContractSource, ContractVersion,
-    CreateContractVersionRequest, CreateInteractionBatchRequest, CreateInteractionRequest,
-    DeploymentHistoryQueryParams, FavoriteSearch, FieldOperator, GraphResponse,
-    InteractionTimeSeriesPoint, InteractionTimeSeriesResponse, InteractionsListResponse,
-    InteractionsQueryParams, Network, NetworkConfig, NetworkEndpoints, NetworkHealth,
-    NetworkHealthResponse, NetworkInfo, NetworkListResponse, NetworkStatus,
-    PaginatedAuditsResponse, PaginatedResponse, PublishRequest, Publisher, QueryCondition,
-    QueryNode, QueryOperator, SaveFavoriteSearchRequest, SearchSuggestion,
+    ChangePublisherRequest, ConfirmOwnershipTransferRequest, Contract, ContractAuditLog,
+    ContractDeploymentHistory, ContractExportAcceptedResponse, ContractExportFormat,
+    ContractExportJobStatus, ContractExportMetadata, ContractExportRequest,
+    ContractExportStatusResponse, ContractGetResponse, ContractInteractionResponse,
+    ContractMetadataExportEnvelope, ContractMetadataExportRecord, ContractSearchParams,
+    ContractSource, ContractVersion, CreateContractVersionRequest, CreateInteractionBatchRequest,
+    CreateInteractionRequest, CreateOwnershipTransferRequest, DeploymentHistoryQueryParams,
+    FavoriteSearch, FieldOperator, GraphResponse, InteractionTimeSeriesPoint,
+    InteractionTimeSeriesResponse, InteractionsListResponse, InteractionsQueryParams, Network,
+    NetworkConfig, NetworkEndpoints, NetworkHealth, NetworkHealthResponse, NetworkInfo,
+    NetworkListResponse, NetworkStatus, OwnershipTransfer, OwnershipTransferLog,
+    OwnershipTransferStatus, PaginatedAuditsResponse, PaginatedResponse, PublishRequest, Publisher,
+    QueryCondition, QueryNode, QueryOperator, SaveFavoriteSearchRequest, SearchSuggestion,
     SearchSuggestionsResponse, SemVer, TrendingParams, UpdateContractMetadataRequest,
     UpdateContractStatusRequest, VerifyRequest,
-    CreateOwnershipTransferRequest, ConfirmOwnershipTransferRequest, OwnershipTransfer,
-    OwnershipTransferLog, OwnershipTransferStatus,
 };
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -6377,7 +6376,12 @@ pub async fn create_ownership_transfer(
         .fetch_optional(&state.db)
         .await
         .map_err(|err| db_internal_error("fetch contract for ownership transfer", err))?
-        .ok_or_else(|| ApiError::not_found("ContractNotFound", format!("No contract found with ID: {}", id)))?;
+        .ok_or_else(|| {
+            ApiError::not_found(
+                "ContractNotFound",
+                format!("No contract found with ID: {}", id),
+            )
+        })?;
 
     let from_publisher_id = contract.publisher_id;
 
@@ -6432,17 +6436,17 @@ pub async fn create_ownership_transfer(
         ));
     }
 
-    let _target_publisher: Publisher = sqlx::query_as(
-        "SELECT * FROM publishers WHERE id = $1",
-    )
-    .bind(req.to_publisher_id)
-    .fetch_optional(&state.db)
-    .await
-    .map_err(|err| db_internal_error("fetch target publisher", err))?
-    .ok_or_else(|| ApiError::not_found(
-        "PublisherNotFound",
-        format!("No publisher found with ID: {}", req.to_publisher_id),
-    ))?;
+    let _target_publisher: Publisher = sqlx::query_as("SELECT * FROM publishers WHERE id = $1")
+        .bind(req.to_publisher_id)
+        .fetch_optional(&state.db)
+        .await
+        .map_err(|err| db_internal_error("fetch target publisher", err))?
+        .ok_or_else(|| {
+            ApiError::not_found(
+                "PublisherNotFound",
+                format!("No publisher found with ID: {}", req.to_publisher_id),
+            )
+        })?;
 
     if req.expires_at <= Utc::now() {
         return Err(ApiError::bad_request(
@@ -6514,22 +6518,23 @@ pub async fn confirm_ownership_transfer(
         )
     })?;
 
-    let mut transfer: OwnershipTransfer = sqlx::query_as(
-        "SELECT * FROM ownership_transfers WHERE id = $1",
-    )
-    .bind(transfer_uuid)
-    .fetch_optional(&state.db)
-    .await
-    .map_err(|err| db_internal_error("fetch ownership transfer", err))?
-    .ok_or_else(|| ApiError::not_found(
-        "TransferNotFound",
-        format!("No ownership transfer found with ID: {}", id),
-    ))?;
+    let mut transfer: OwnershipTransfer =
+        sqlx::query_as("SELECT * FROM ownership_transfers WHERE id = $1")
+            .bind(transfer_uuid)
+            .fetch_optional(&state.db)
+            .await
+            .map_err(|err| db_internal_error("fetch ownership transfer", err))?
+            .ok_or_else(|| {
+                ApiError::not_found(
+                    "TransferNotFound",
+                    format!("No ownership transfer found with ID: {}", id),
+                )
+            })?;
 
     if transfer.expires_at <= Utc::now() && transfer.status == OwnershipTransferStatus::Pending {
         transfer.status = OwnershipTransferStatus::Expired;
         sqlx::query(
-            "UPDATE ownership_transfers SET status = 'expired', completed_at = NOW() WHERE id = $1"
+            "UPDATE ownership_transfers SET status = 'expired', completed_at = NOW() WHERE id = $1",
         )
         .bind(transfer_uuid)
         .execute(&state.db)
@@ -6571,7 +6576,10 @@ pub async fn confirm_ownership_transfer(
     if transfer.status != OwnershipTransferStatus::Pending {
         return Err(ApiError::conflict(
             "TransferNotPending",
-            format!("Transfer is already in '{}' status and cannot be confirmed", transfer.status),
+            format!(
+                "Transfer is already in '{}' status and cannot be confirmed",
+                transfer.status
+            ),
         ));
     }
 
@@ -6613,14 +6621,12 @@ pub async fn confirm_ownership_transfer(
             transfer.status = OwnershipTransferStatus::Completed;
             transfer.completed_at = Some(Utc::now());
 
-            sqlx::query(
-                "UPDATE contracts SET publisher_id = $2, updated_at = NOW() WHERE id = $1"
-            )
-            .bind(contract_id)
-            .bind(to_publisher_id)
-            .execute(&state.db)
-            .await
-            .map_err(|err| db_internal_error("complete ownership transfer", err))?;
+            sqlx::query("UPDATE contracts SET publisher_id = $2, updated_at = NOW() WHERE id = $1")
+                .bind(contract_id)
+                .bind(to_publisher_id)
+                .execute(&state.db)
+                .await
+                .map_err(|err| db_internal_error("complete ownership transfer", err))?;
 
             write_contract_audit_log(
                 &state.db,
@@ -6702,7 +6708,7 @@ pub async fn confirm_ownership_transfer(
     transfer.completed_at = Some(Utc::now());
 
     sqlx::query(
-        "UPDATE ownership_transfers SET status = 'rejected', completed_at = NOW() WHERE id = $1"
+        "UPDATE ownership_transfers SET status = 'rejected', completed_at = NOW() WHERE id = $1",
     )
     .bind(transfer_uuid)
     .execute(&state.db)
@@ -6756,17 +6762,18 @@ pub async fn get_ownership_transfer(
         )
     })?;
 
-    let transfer: OwnershipTransfer = sqlx::query_as(
-        "SELECT * FROM ownership_transfers WHERE id = $1",
-    )
-    .bind(transfer_uuid)
-    .fetch_optional(&state.db)
-    .await
-    .map_err(|err| db_internal_error("fetch ownership transfer", err))?
-    .ok_or_else(|| ApiError::not_found(
-        "TransferNotFound",
-        format!("No ownership transfer found with ID: {}", id),
-    ))?;
+    let transfer: OwnershipTransfer =
+        sqlx::query_as("SELECT * FROM ownership_transfers WHERE id = $1")
+            .bind(transfer_uuid)
+            .fetch_optional(&state.db)
+            .await
+            .map_err(|err| db_internal_error("fetch ownership transfer", err))?
+            .ok_or_else(|| {
+                ApiError::not_found(
+                    "TransferNotFound",
+                    format!("No ownership transfer found with ID: {}", id),
+                )
+            })?;
 
     Ok(Json(transfer))
 }
@@ -6787,13 +6794,15 @@ pub async fn list_ownership_transfers(
         .fetch_optional(&state.db)
         .await
         .map_err(|err| db_internal_error("fetch contract for transfers", err))?
-        .ok_or_else(|| ApiError::not_found(
-            "ContractNotFound",
-            format!("No contract found with ID: {}", id),
-        ))?;
+        .ok_or_else(|| {
+            ApiError::not_found(
+                "ContractNotFound",
+                format!("No contract found with ID: {}", id),
+            )
+        })?;
 
     let transfers: Vec<OwnershipTransfer> = sqlx::query_as(
-        "SELECT * FROM ownership_transfers WHERE contract_id = $1 ORDER BY created_at DESC"
+        "SELECT * FROM ownership_transfers WHERE contract_id = $1 ORDER BY created_at DESC",
     )
     .bind(contract_uuid)
     .fetch_all(&state.db)
@@ -6815,7 +6824,7 @@ pub async fn get_ownership_transfer_logs(
     })?;
 
     let logs: Vec<OwnershipTransferLog> = sqlx::query_as(
-        "SELECT * FROM ownership_transfer_logs WHERE transfer_id = $1 ORDER BY created_at ASC"
+        "SELECT * FROM ownership_transfer_logs WHERE transfer_id = $1 ORDER BY created_at ASC",
     )
     .bind(transfer_uuid)
     .fetch_all(&state.db)

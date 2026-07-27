@@ -6,8 +6,7 @@
 
 use chrono::{DateTime, Utc};
 use shared::{
-    ConfirmOwnershipTransferRequest, CreateOwnershipTransferRequest,
-    OwnershipTransferStatus,
+    ConfirmOwnershipTransferRequest, CreateOwnershipTransferRequest, OwnershipTransferStatus,
 };
 use uuid::Uuid;
 
@@ -24,13 +23,16 @@ fn make_create_req(
     CreateOwnershipTransferRequest {
         contract_id,
         to_publisher_id,
-        expires_at: Utc::now()
-            + chrono::Duration::minutes(expires_in_minutes),
+        expires_at: Utc::now() + chrono::Duration::minutes(expires_in_minutes),
         user_id,
     }
 }
 
-fn make_confirm_req(transfer_id: Uuid, user_id: Uuid, accept: bool) -> ConfirmOwnershipTransferRequest {
+fn make_confirm_req(
+    transfer_id: Uuid,
+    user_id: Uuid,
+    accept: bool,
+) -> ConfirmOwnershipTransferRequest {
     ConfirmOwnershipTransferRequest {
         transfer_id,
         accept,
@@ -130,7 +132,10 @@ fn test_rejected_transfer_cannot_be_confirmed() {
 
     let reject_req = make_confirm_req(transfer_id, user_id, false);
 
-    assert!(!reject_req.accept, "Rejection is represented by accept=false");
+    assert!(
+        !reject_req.accept,
+        "Rejection is represented by accept=false"
+    );
     assert_eq!(reject_req.transfer_id, transfer_id);
 }
 
@@ -218,30 +223,12 @@ fn test_partial_confirmation_marks_transfer_as_confirmed() {
 
 #[test]
 fn test_ownership_transfer_status_display() {
-    assert_eq!(
-        OwnershipTransferStatus::Pending.to_string(),
-        "pending"
-    );
-    assert_eq!(
-        OwnershipTransferStatus::Confirmed.to_string(),
-        "confirmed"
-    );
-    assert_eq!(
-        OwnershipTransferStatus::Completed.to_string(),
-        "completed"
-    );
-    assert_eq!(
-        OwnershipTransferStatus::Expired.to_string(),
-        "expired"
-    );
-    assert_eq!(
-        OwnershipTransferStatus::Rejected.to_string(),
-        "rejected"
-    );
-    assert_eq!(
-        OwnershipTransferStatus::Duplicate.to_string(),
-        "duplicate"
-    );
+    assert_eq!(OwnershipTransferStatus::Pending.to_string(), "pending");
+    assert_eq!(OwnershipTransferStatus::Confirmed.to_string(), "confirmed");
+    assert_eq!(OwnershipTransferStatus::Completed.to_string(), "completed");
+    assert_eq!(OwnershipTransferStatus::Expired.to_string(), "expired");
+    assert_eq!(OwnershipTransferStatus::Rejected.to_string(), "rejected");
+    assert_eq!(OwnershipTransferStatus::Duplicate.to_string(), "duplicate");
 }
 
 // ─────────────────────────────────────────────────────────────────────

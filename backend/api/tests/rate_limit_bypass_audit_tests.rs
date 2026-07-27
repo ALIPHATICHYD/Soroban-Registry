@@ -24,10 +24,7 @@ use tower::ServiceExt;
 fn app_with_state(state: RateLimitState) -> Router {
     Router::new()
         .route("/api/test", get(|| async { "ok" }))
-        .layer(middleware::from_fn_with_state(
-            state,
-            rate_limit_middleware,
-        ))
+        .layer(middleware::from_fn_with_state(state, rate_limit_middleware))
 }
 
 /// Fire one GET request against the app and return the response.
@@ -66,12 +63,7 @@ async fn trusted_ip_bypasses_rate_limit_and_gets_200() {
     // Send more requests than the anonymous limit allows — all should succeed
     // because the source IP is trusted.
     for i in 0..5 {
-        let resp = send(
-            &app,
-            "/api/test",
-            vec![("x-forwarded-for", "10.0.0.1")],
-        )
-        .await;
+        let resp = send(&app, "/api/test", vec![("x-forwarded-for", "10.0.0.1")]).await;
         assert_eq!(
             resp.status(),
             StatusCode::OK,
@@ -94,12 +86,7 @@ async fn trusted_api_key_bypasses_rate_limit_and_gets_200() {
     let app = app_with_state(state);
 
     for i in 0..5 {
-        let resp = send(
-            &app,
-            "/api/test",
-            vec![("x-api-key", "secret-key-abc")],
-        )
-        .await;
+        let resp = send(&app, "/api/test", vec![("x-api-key", "secret-key-abc")]).await;
         assert_eq!(
             resp.status(),
             StatusCode::OK,
@@ -207,7 +194,12 @@ async fn bypass_increments_prometheus_counter() {
     let key_app = app_with_state(key_state);
 
     for _ in 0..2 {
-        send(&key_app, "/api/test", vec![("x-api-key", "counter-test-key")]).await;
+        send(
+            &key_app,
+            "/api/test",
+            vec![("x-api-key", "counter-test-key")],
+        )
+        .await;
     }
 
     let after_ip = RATE_LIMIT_BYPASS_TOTAL

@@ -1045,10 +1045,8 @@ pub async fn contract_list(
     category: Option<String>,
     format: &str,
 ) -> Result<()> {
-    let mut query: Vec<(&str, String)> = vec![
-        ("limit", limit.to_string()),
-        ("offset", offset.to_string()),
-    ];
+    let mut query: Vec<(&str, String)> =
+        vec![("limit", limit.to_string()), ("offset", offset.to_string())];
 
     // Normalize before sending so comma-separated `--networks`/`--category` and
     // the singular `--network` flag produce the same request shape as `search`,
@@ -1485,7 +1483,6 @@ pub async fn migrate(
 
     Ok(())
 }
-
 
 pub async fn export(
     api_url: &str,
@@ -2051,7 +2048,11 @@ mod tests {
             &["defi".to_string(), "token".to_string()],
             VALID_PUBLISHER,
         );
-        assert!(result.is_ok(), "Expected valid inputs to pass: {:?}", result);
+        assert!(
+            result.is_ok(),
+            "Expected valid inputs to pass: {:?}",
+            result
+        );
     }
 
     #[test]
@@ -2066,7 +2067,11 @@ mod tests {
         );
         assert!(result.is_err());
         let msg = result.unwrap_err().to_string();
-        assert!(msg.contains("contract_id"), "Error should mention contract_id: {}", msg);
+        assert!(
+            msg.contains("contract_id"),
+            "Error should mention contract_id: {}",
+            msg
+        );
     }
 
     #[test]
@@ -2081,7 +2086,11 @@ mod tests {
         );
         assert!(result.is_err());
         let msg = result.unwrap_err().to_string();
-        assert!(msg.contains("name is required"), "Error should mention name: {}", msg);
+        assert!(
+            msg.contains("name is required"),
+            "Error should mention name: {}",
+            msg
+        );
     }
 
     #[test]
@@ -2096,7 +2105,11 @@ mod tests {
         );
         assert!(result.is_err());
         let msg = result.unwrap_err().to_string();
-        assert!(msg.contains("publisher"), "Error should mention publisher: {}", msg);
+        assert!(
+            msg.contains("publisher"),
+            "Error should mention publisher: {}",
+            msg
+        );
     }
 
     #[test]
@@ -2111,7 +2124,11 @@ mod tests {
         );
         assert!(result.is_err());
         let msg = result.unwrap_err().to_string();
-        assert!(msg.contains("category"), "Error should mention category: {}", msg);
+        assert!(
+            msg.contains("category"),
+            "Error should mention category: {}",
+            msg
+        );
     }
 
     #[test]
@@ -2133,12 +2150,12 @@ mod tests {
     #[test]
     fn validate_publish_inputs_collects_multiple_errors() {
         let result = validate_publish_inputs(
-            "bad",            // invalid contract_id
-            "",               // empty name
+            "bad", // invalid contract_id
+            "",    // empty name
             Network::Testnet,
             None,
             &[],
-            "bad-publisher",  // invalid publisher
+            "bad-publisher", // invalid publisher
         );
         assert!(result.is_err());
         let msg = result.unwrap_err().to_string();
@@ -2152,7 +2169,7 @@ mod tests {
     async fn publish_dry_run_does_not_send_request() {
         // dry_run should succeed without a running backend
         let result = super::publish(
-            "http://localhost:0",   // unreachable URL
+            "http://localhost:0", // unreachable URL
             VALID_CONTRACT_ID,
             "My Contract",
             Some("A test contract"),
@@ -2163,7 +2180,11 @@ mod tests {
             true,
         )
         .await;
-        assert!(result.is_ok(), "Dry-run should succeed without backend: {:?}", result);
+        assert!(
+            result.is_ok(),
+            "Dry-run should succeed without backend: {:?}",
+            result
+        );
     }
 
     #[tokio::test]
@@ -2180,7 +2201,10 @@ mod tests {
             true,
         )
         .await;
-        assert!(result.is_err(), "Dry-run should still catch validation errors");
+        assert!(
+            result.is_err(),
+            "Dry-run should still catch validation errors"
+        );
     }
 }
 pub fn incident_trigger(contract_id: &str, severity_str: &str) -> Result<()> {
