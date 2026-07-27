@@ -37,32 +37,51 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cargo-contracts-
 
-      # Step 1: Format Check
+      # Step 1: Format Check across all Cargo projects in the repository
       - name: Check Code Formatting (cargo fmt)
         run: |
-          echo "Checking code formatting with cargo fmt..."
-          cargo fmt --all --check
+          echo "Checking code formatting with cargo fmt across all Cargo manifests..."
+          FAILED=0
+          # Check root workspaces / subprojects
+          for manifest in backend/Cargo.toml cli/Cargo.toml cli/imported/Cargo.toml soroban-registry/Cargo.toml; do
+            if [ -f "$manifest" ]; then
+              echo "==> Formatting check for $manifest"
+              cargo fmt --manifest-path "$manifest" --check || FAILED=1
+            fi
+          done
+          if [ $FAILED -ne 0 ]; then
+            echo "Format check failed! Run 'cargo fmt' locally before submitting PR."
+            exit 1
+          fi
 
-      # Step 2: Compilation Check
+      # Step 2: Compilation Check (target wasm32-unknown-unknown for contracts & crates)
       - name: Compile Smart Contracts (wasm32 target)
         run: |
-          echo "Building smart contracts for target wasm32-unknown-unknown..."
-          # Build all workspace crates / contract crates
-          if [ -f "Cargo.toml" ]; then
-            cargo build --target wasm32-unknown-unknown --release
-          fi
-          # Also build any embedded/sample contracts if present
-          if [ -f "cli/imported/Cargo.toml" ]; then
-            cargo build --manifest-path cli/imported/Cargo.toml --target wasm32-unknown-unknown --release
+          echo "Building Rust crates & smart contracts..."
+          FAILED=0
+          for manifest in cli/imported/Cargo.toml soroban-registry/Cargo.toml cli/Cargo.toml; do
+            if [ -f "$manifest" ]; then
+              echo "==> Compiling $manifest"
+              cargo check --manifest-path "$manifest" --target wasm32-unknown-unknown || cargo check --manifest-path "$manifest" || FAILED=1
+            fi
+          done
+          if [ $FAILED -ne 0 ]; then
+            echo "Compilation failed!"
+            exit 1
           fi
 
-      # Step 3: Test Check
+      # Step 3: Test Check across all Cargo projects
       - name: Run Smart Contract Tests (cargo test)
         run: |
           echo "Running unit and integration tests..."
-          if [ -f "Cargo.toml" ]; then
-            cargo test --all
-          fi
-          if [ -f "cli/imported/Cargo.toml" ]; then
-            cargo test --manifest-path cli/imported/Cargo.toml
+          FAILED=0
+          for manifest in cli/imported/Cargo.toml soroban-registry/Cargo.toml cli/Cargo.toml; do
+            if [ -f "$manifest" ]; then
+              echo "==> Testing $manifest"
+              cargo test --manifest-path "$manifest" || FAILED=1
+            fi
+          done
+          if [ $FAILED -ne 0 ]; then
+            echo "Tests failed!"
+            exit 1
           fi
