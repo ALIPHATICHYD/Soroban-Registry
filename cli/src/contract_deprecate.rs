@@ -93,8 +93,14 @@ pub async fn run(
     let nonce = uuid::Uuid::new_v4().to_string();
     let timestamp = Utc::now().to_rfc3339();
 
+    let canonical_contract_id = contract_info
+        .get("contract_id")
+        .and_then(Value::as_str)
+        .unwrap_or(address)
+        .to_string();
+
     let payload = DeprecationPayload {
-        contract_id: address.to_string(),
+        contract_id: canonical_contract_id,
         action: "deprecate".to_string(),
         timestamp,
         nonce,
