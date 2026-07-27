@@ -44,8 +44,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install cargo-audit
-        run: cargo install cargo-audit --locked || true
+      - name: Install cargo-audit (prebuilt binary)
+        uses: taiki-e/install-action@cargo-audit
 
       - name: Rust audit (backend)
         working-directory: backend

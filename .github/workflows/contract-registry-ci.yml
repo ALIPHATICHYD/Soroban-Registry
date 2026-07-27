@@ -30,9 +30,8 @@ jobs:
         with:
           targets: wasm32-unknown-unknown
 
-      - name: Install Soroban CLI
-        run: |
-          cargo install soroban-cli --features opt
+      - name: Install Soroban CLI (prebuilt binary)
+        uses: taiki-e/install-action@soroban-cli
 
       - name: Install Soroban Registry CLI
         run: |
