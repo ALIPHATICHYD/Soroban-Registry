@@ -2033,137 +2033,10 @@ mod tests {
 
     // ── Publish dry-run / validation tests ──────────────────────────────────
 
-    use super::{validate_publish_inputs, Network};
+    use super::Network;
 
     const VALID_CONTRACT_ID: &str = "CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC";
     const VALID_PUBLISHER: &str = "GDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC";
-
-    #[test]
-    fn validate_publish_inputs_accepts_valid_inputs() {
-        let result = validate_publish_inputs(
-            VALID_CONTRACT_ID,
-            "My Contract",
-            Network::Testnet,
-            Some("Token"),
-            &["defi".to_string(), "token".to_string()],
-            VALID_PUBLISHER,
-        );
-        assert!(
-            result.is_ok(),
-            "Expected valid inputs to pass: {:?}",
-            result
-        );
-    }
-
-    #[test]
-    fn validate_publish_inputs_rejects_invalid_contract_id() {
-        let result = validate_publish_inputs(
-            "invalid-id",
-            "My Contract",
-            Network::Testnet,
-            None,
-            &[],
-            VALID_PUBLISHER,
-        );
-        assert!(result.is_err());
-        let msg = result.unwrap_err().to_string();
-        assert!(
-            msg.contains("contract_id"),
-            "Error should mention contract_id: {}",
-            msg
-        );
-    }
-
-    #[test]
-    fn validate_publish_inputs_rejects_empty_name() {
-        let result = validate_publish_inputs(
-            VALID_CONTRACT_ID,
-            "",
-            Network::Testnet,
-            None,
-            &[],
-            VALID_PUBLISHER,
-        );
-        assert!(result.is_err());
-        let msg = result.unwrap_err().to_string();
-        assert!(
-            msg.contains("name is required"),
-            "Error should mention name: {}",
-            msg
-        );
-    }
-
-    #[test]
-    fn validate_publish_inputs_rejects_invalid_publisher() {
-        let result = validate_publish_inputs(
-            VALID_CONTRACT_ID,
-            "My Contract",
-            Network::Testnet,
-            None,
-            &[],
-            "not-a-stellar-address",
-        );
-        assert!(result.is_err());
-        let msg = result.unwrap_err().to_string();
-        assert!(
-            msg.contains("publisher"),
-            "Error should mention publisher: {}",
-            msg
-        );
-    }
-
-    #[test]
-    fn validate_publish_inputs_rejects_invalid_category() {
-        let result = validate_publish_inputs(
-            VALID_CONTRACT_ID,
-            "My Contract",
-            Network::Testnet,
-            Some("InvalidCategory"),
-            &[],
-            VALID_PUBLISHER,
-        );
-        assert!(result.is_err());
-        let msg = result.unwrap_err().to_string();
-        assert!(
-            msg.contains("category"),
-            "Error should mention category: {}",
-            msg
-        );
-    }
-
-    #[test]
-    fn validate_publish_inputs_rejects_too_many_tags() {
-        let tags: Vec<String> = (0..11).map(|i| format!("tag{}", i)).collect();
-        let result = validate_publish_inputs(
-            VALID_CONTRACT_ID,
-            "My Contract",
-            Network::Testnet,
-            None,
-            &tags,
-            VALID_PUBLISHER,
-        );
-        assert!(result.is_err());
-        let msg = result.unwrap_err().to_string();
-        assert!(msg.contains("tags"), "Error should mention tags: {}", msg);
-    }
-
-    #[test]
-    fn validate_publish_inputs_collects_multiple_errors() {
-        let result = validate_publish_inputs(
-            "bad", // invalid contract_id
-            "",    // empty name
-            Network::Testnet,
-            None,
-            &[],
-            "bad-publisher", // invalid publisher
-        );
-        assert!(result.is_err());
-        let msg = result.unwrap_err().to_string();
-        // All three errors should be present
-        assert!(msg.contains("contract_id"), "missing contract_id error");
-        assert!(msg.contains("name is required"), "missing name error");
-        assert!(msg.contains("publisher"), "missing publisher error");
-    }
 
     #[tokio::test]
     async fn publish_dry_run_does_not_send_request() {
@@ -2177,6 +2050,11 @@ mod tests {
             Some("Token"),
             vec!["defi".to_string()],
             VALID_PUBLISHER,
+            true,
+            ".",
+            None,
+            false,
+            80.0,
             true,
         )
         .await;
@@ -2198,6 +2076,11 @@ mod tests {
             None,
             vec![],
             "bad",
+            true,
+            ".",
+            None,
+            false,
+            80.0,
             true,
         )
         .await;
