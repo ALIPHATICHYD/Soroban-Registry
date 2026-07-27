@@ -82,7 +82,13 @@ pub async fn run(
 
     // 3. Show state diff and confirm
     if !yes {
-        render_state_diff(address, reason, replacement, &contract_info, &signing_address);
+        render_state_diff(
+            address,
+            reason,
+            replacement,
+            &contract_info,
+            &signing_address,
+        );
         if !prompt_confirmation()? {
             println!("{}", "Deprecation cancelled.".yellow());
             return Ok(());
@@ -204,11 +210,7 @@ pub async fn run(
         if let Some(guide) = migration_guide {
             println!("  {}: {}", "Migration Guide".bold(), guide);
         }
-        println!(
-            "  {}: {} days",
-            "Grace Period".bold(),
-            grace_period_days
-        );
+        println!("  {}: {} days", "Grace Period".bold(), grace_period_days);
         println!(
             "  {}: {}",
             "Signed By".bold(),
@@ -353,9 +355,18 @@ fn render_state_diff(
 
     println!("\n{}", "Contract Deprecation Preview".bold().cyan());
     println!("{}", "═".repeat(50).cyan());
-    println!("  {}: {} ({})", "Contract".bold(), address.cyan(), name.dimmed());
+    println!(
+        "  {}: {} ({})",
+        "Contract".bold(),
+        address.cyan(),
+        name.dimmed()
+    );
     println!("  {}: {}", "Network".bold(), network);
-    println!("  {}: {}", "Signed By".bold(), signing_address.bright_magenta());
+    println!(
+        "  {}: {}",
+        "Signed By".bold(),
+        signing_address.bright_magenta()
+    );
 
     println!("\n  {}", "State Change:".bold().yellow());
     println!(
@@ -364,17 +375,9 @@ fn render_state_diff(
         current_status.green(),
         "deprecated".red()
     );
-    println!(
-        "    {} (none) → {}",
-        "Reason:".bold(),
-        reason
-    );
+    println!("    {} (none) → {}", "Reason:".bold(), reason);
     if let Some(repl) = replacement {
-        println!(
-            "    {} (none) → {}",
-            "Replacement:".bold(),
-            repl.cyan()
-        );
+        println!("    {} (none) → {}", "Replacement:".bold(), repl.cyan());
     }
     println!("{}\n", "═".repeat(50).cyan());
 }
@@ -382,10 +385,7 @@ fn render_state_diff(
 /// Prompt the user for yes/no confirmation.
 fn prompt_confirmation() -> Result<bool> {
     use std::io::{self, Write};
-    print!(
-        "  {} ",
-        "Proceed with deprecation? [y/N]".bold()
-    );
+    print!("  {} ", "Proceed with deprecation? [y/N]".bold());
     io::stdout().flush()?;
     let mut input = String::new();
     io::stdin().read_line(&mut input)?;
@@ -514,7 +514,10 @@ mod tests {
 
         let sig1 = sign_deprecation(&p1, &signing_key);
         let sig2 = sign_deprecation(&p2, &signing_key);
-        assert_ne!(sig1, sig2, "Different nonces must produce different signatures");
+        assert_ne!(
+            sig1, sig2,
+            "Different nonces must produce different signatures"
+        );
     }
 
     // ── Timestamp validation tests ───────────────────────────────────────
@@ -557,7 +560,11 @@ mod tests {
         let result = decode_private_key("not-valid-base64!!!");
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
-        assert!(err.contains("base64"), "Error should mention base64: {}", err);
+        assert!(
+            err.contains("base64"),
+            "Error should mention base64: {}",
+            err
+        );
     }
 
     #[test]
@@ -566,7 +573,11 @@ mod tests {
         let result = decode_private_key(&too_short);
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
-        assert!(err.contains("32 bytes"), "Error should mention key length: {}", err);
+        assert!(
+            err.contains("32 bytes"),
+            "Error should mention key length: {}",
+            err
+        );
     }
 
     // ── Stellar address derivation ───────────────────────────────────────

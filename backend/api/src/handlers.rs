@@ -4725,11 +4725,14 @@ async fn publish_contract_inner(
                     ));
                 }
                 if e.constraint() == Some("contracts_wasm_hash_key") {
-                    let existing: Contract = sqlx::query_as("SELECT * FROM contracts WHERE wasm_hash = $1")
-                        .bind(&wasm_hash)
-                        .fetch_one(&state.db)
-                        .await
-                        .map_err(|e2| db_internal_error("fetch existing canonical contract", e2))?;
+                    let existing: Contract =
+                        sqlx::query_as("SELECT * FROM contracts WHERE wasm_hash = $1")
+                            .bind(&wasm_hash)
+                            .fetch_one(&state.db)
+                            .await
+                            .map_err(|e2| {
+                                db_internal_error("fetch existing canonical contract", e2)
+                            })?;
 
                     return Err(ApiError::conflict(
                         "DuplicateContractContent",
