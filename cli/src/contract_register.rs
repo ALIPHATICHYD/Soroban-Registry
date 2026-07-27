@@ -711,7 +711,7 @@ async fn submit_all(
             }
             Err(err) => {
                 if !json {
-                    println!("{} — {}", "failed".red(), err.to_string().red());
+                    println!("{} - {}", "failed".red(), err.to_string().red());
                 }
                 failed += 1;
                 results.push(RegistrationOutcome {
@@ -816,7 +816,7 @@ fn print_summary(summary: &RegistrationSummary) {
             other => other.normal(),
         };
         println!(
-            "  {} {} — {} ({})",
+            "  {} {} - {} ({})",
             result.contract_id.bold(),
             result.name.bright_black(),
             status,

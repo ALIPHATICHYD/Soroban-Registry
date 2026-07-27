@@ -354,7 +354,7 @@ fn render_state_diff(
         .unwrap_or("(unknown)");
 
     println!("\n{}", "Contract Deprecation Preview".bold().cyan());
-    println!("{}", "═".repeat(50).cyan());
+    println!("{}", "=".repeat(50).cyan());
     println!(
         "  {}: {} ({})",
         "Contract".bold(),
@@ -370,16 +370,16 @@ fn render_state_diff(
 
     println!("\n  {}", "State Change:".bold().yellow());
     println!(
-        "    {} {} → {}",
+        "    {} {} -> {}",
         "Status:".bold(),
         current_status.green(),
         "deprecated".red()
     );
-    println!("    {} (none) → {}", "Reason:".bold(), reason);
+    println!("    {} (none) -> {}", "Reason:".bold(), reason);
     if let Some(repl) = replacement {
-        println!("    {} (none) → {}", "Replacement:".bold(), repl.cyan());
+        println!("    {} (none) -> {}", "Replacement:".bold(), repl.cyan());
     }
-    println!("{}\n", "═".repeat(50).cyan());
+    println!("{}\n", "=".repeat(50).cyan());
 }
 
 /// Prompt the user for yes/no confirmation.

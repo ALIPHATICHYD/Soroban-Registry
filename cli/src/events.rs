@@ -149,7 +149,7 @@ pub async fn query_events(
         std::fs::write(path, csv)?;
         println!(
             "{} Exported {} events to {}",
-            "✓".green(),
+            "[OK]".green(),
             events.len(),
             path
         );
@@ -159,7 +159,7 @@ pub async fn query_events(
     println!("\n{}", format!("Found {} event(s)", events.len()).bold());
 
     for event in &events {
-        println!("\n{} {}", "●".cyan(), event.topic.bold().yellow());
+        println!("\n{} {}", "*".cyan(), event.topic.bold().yellow());
         println!(
             "  {}: {}",
             "Ledger".bold(),
@@ -226,7 +226,7 @@ pub async fn inspect_event_stats(
 
     if let Some(path) = output {
         std::fs::write(path, &output_str)?;
-        println!("{} Event stats exported to {}", "✓".green(), path);
+        println!("{} Event stats exported to {}", "[OK]".green(), path);
     } else {
         println!("{}", output_str);
     }
@@ -303,7 +303,7 @@ fn format_event_stats_table(stats: &EventStats) -> String {
 
                 output.push_str(&format!(
                     "  {} {:<50} {:<10} {:.1}%\n",
-                    "●".magenta(),
+                    "*".magenta(),
                     topic.bright_magenta(),
                     format!("({})", count).bright_black(),
                     percentage

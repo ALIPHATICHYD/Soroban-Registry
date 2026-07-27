@@ -2882,15 +2882,15 @@ pub async fn dispatch_command(
                 }
                 PluginConfigCommands::Set { name, json } => {
                     plugins::set_plugin_config_json(&name, &json)?;
-                    println!("{} Updated config for {}", "✓".green(), name.bold());
+                    println!("{} Updated config for {}", "[OK]".green(), name.bold());
                 }
                 PluginConfigCommands::Disable { name } => {
                     plugins::set_plugin_enabled(&name, false)?;
-                    println!("{} Disabled {}", "✓".green(), name.bold());
+                    println!("{} Disabled {}", "[OK]".green(), name.bold());
                 }
                 PluginConfigCommands::Enable { name } => {
                     plugins::set_plugin_enabled(&name, true)?;
-                    println!("{} Enabled {}", "✓".green(), name.bold());
+                    println!("{} Enabled {}", "[OK]".green(), name.bold());
                 }
             },
         },
