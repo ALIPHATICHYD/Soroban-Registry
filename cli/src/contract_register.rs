@@ -398,6 +398,7 @@ async fn resolve_drafts(
             request: PublishRequest {
                 contract_id,
                 wasm_hash,
+                wasm_artifact_base64: None,
                 name,
                 slug,
                 description,
