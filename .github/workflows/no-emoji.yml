@@ -1,0 +1,102 @@
+name: No Emoji Check
+
+on:
+  pull_request:
+    branches: [main, develop]
+
+jobs:
+  no-emoji:
+    name: Detect emojis in changed files
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check for emojis in PR diff
+        run: |
+          echo "🔍 Scanning changed files for emoji characters..."
+
+          # Get list of added/modified files in this PR (ignore deleted files)
+          CHANGED_FILES=$(git diff --name-only --diff-filter=ACM origin/${{ github.base_ref }}...HEAD)
+
+          if [ -z "$CHANGED_FILES" ]; then
+            echo "No changed files to scan."
+            exit 0
+          fi
+
+          # File patterns to exclude from emoji checks
+          # Add patterns here for files where emojis are acceptable
+          EXCLUDE_PATTERNS=(
+            "\.github/pull_request_template\.md"
+            "\.github/ISSUE_TEMPLATE/"
+            "\.png$"
+            "\.jpg$"
+            "\.jpeg$"
+            "\.gif$"
+            "\.svg$"
+            "\.ico$"
+            "\.woff2?$"
+            "\.ttf$"
+            "\.eot$"
+            "\.wasm$"
+            "\.lock$"
+            "package-lock\.json$"
+            "Cargo\.lock$"
+          )
+
+          # Build grep exclude pattern
+          EXCLUDE_REGEX=$(IFS="|"; echo "${EXCLUDE_PATTERNS[*]}")
+
+          FOUND_EMOJI=0
+          REPORT=""
+
+          while IFS= read -r file; do
+            # Skip excluded files
+            if echo "$file" | grep -qE "$EXCLUDE_REGEX"; then
+              continue
+            fi
+
+            # Skip files that don't exist (edge case)
+            if [ ! -f "$file" ]; then
+              continue
+            fi
+
+            # Skip binary files
+            if file "$file" | grep -q "binary\|executable\|image\|font"; then
+              continue
+            fi
+
+            # Search for Unicode emoji ranges in the file
+            # Covers: Emoticons, Dingbats, Symbols, Flags, Supplemental Symbols, etc.
+            MATCHES=$(grep -Pn '[\x{1F600}-\x{1F64F}\x{1F300}-\x{1F5FF}\x{1F680}-\x{1F6FF}\x{1F1E0}-\x{1F1FF}\x{2600}-\x{26FF}\x{2700}-\x{27BF}\x{FE00}-\x{FE0F}\x{1F900}-\x{1F9FF}\x{1FA00}-\x{1FA6F}\x{1FA70}-\x{1FAFF}\x{200D}\x{231A}-\x{231B}\x{23E9}-\x{23F3}\x{23F8}-\x{23FA}\x{25AA}-\x{25AB}\x{25B6}\x{25C0}\x{25FB}-\x{25FE}\x{2614}-\x{2615}\x{2648}-\x{2653}\x{267F}\x{2693}\x{26A1}\x{26AA}-\x{26AB}\x{26BD}-\x{26BE}\x{26C4}-\x{26C5}\x{26CE}\x{26D4}\x{26EA}\x{26F2}-\x{26F3}\x{26F5}\x{26FA}\x{26FD}\x{2702}\x{2705}\x{2708}-\x{270D}\x{270F}\x{2712}\x{2714}\x{2716}\x{271D}\x{2721}\x{2728}\x{2733}-\x{2734}\x{2744}\x{2747}\x{274C}\x{274E}\x{2753}-\x{2755}\x{2757}\x{2763}-\x{2764}\x{2795}-\x{2797}\x{27A1}\x{27B0}\x{27BF}\x{2934}-\x{2935}\x{2B05}-\x{2B07}\x{2B1B}-\x{2B1C}\x{2B50}\x{2B55}\x{3030}\x{303D}\x{3297}\x{3299}\x{E0020}-\x{E007F}]' "$file" 2>/dev/null || true)
+
+            if [ -n "$MATCHES" ]; then
+              FOUND_EMOJI=1
+              REPORT+=$'\n'"❌ $file:"$'\n'
+              while IFS= read -r line; do
+                REPORT+="   $line"$'\n'
+              done <<< "$MATCHES"
+            fi
+          done <<< "$CHANGED_FILES"
+
+          if [ "$FOUND_EMOJI" -eq 1 ]; then
+            echo ""
+            echo "============================================"
+            echo "  EMOJI DETECTED IN PR — CHECK FAILED"
+            echo "============================================"
+            echo "$REPORT"
+            echo "--------------------------------------------"
+            echo "Please remove all emoji characters from the"
+            echo "files listed above before merging."
+            echo ""
+            echo "Excluded from this check:"
+            echo "  - .github/pull_request_template.md"
+            echo "  - Binary/image/font files"
+            echo "  - Lock files"
+            echo "============================================"
+            exit 1
+          else
+            echo ""
+            echo "✅ No emojis found in changed files. All clear!"
+          fi
