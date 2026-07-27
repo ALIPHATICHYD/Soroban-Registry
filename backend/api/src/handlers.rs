@@ -4691,10 +4691,11 @@ async fn publish_contract_inner(
 
     let slug = generate_unique_slug(&state.db, &req.name, &req.network, req.slug.clone()).await?;
 
-    let contract: Contract = sqlx::query_as(
+    let insert_result = sqlx::query_as::<_, Contract>(
         "INSERT INTO contracts (contract_id, wasm_hash, name, slug, description, publisher_id, network, category, tags, logical_id, network_configs, visibility, artifact_scan_status, artifact_scan_findings)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, CASE WHEN $12 = 'passed' THEN 'public'::visibility_type ELSE 'private'::visibility_type END, $12, $13)
-         RETURNING *"
+         RETURNING *")
+    
     )
     .bind(&req.contract_id)
     .bind(&wasm_hash)
@@ -4710,22 +4711,47 @@ async fn publish_contract_inner(
     .bind(artifact_scan.status)
     .bind(json!(artifact_scan.findings))
     .fetch_one(&state.db)
-    .await
-    .map_err(|err| {
-        if let sqlx::Error::Database(ref e) = err {
-            if e.constraint() == Some("contracts_contract_id_network_key") {
-                return ApiError::conflict(
-                    "ContractAlreadyRegistered",
-                    format!(
-                        "Contract {} is already registered for network {}",
-                        req.contract_id,
-                        req.network
-                    ),
-                );
+    .await;
+
+    let contract = match insert_result {
+        Ok(c) => c,
+        Err(err) => {
+            if let sqlx::Error::Database(ref e) = err {
+                if e.constraint() == Some("contracts_contract_id_network_key") {
+                    return Err(ApiError::conflict(
+                        "ContractAlreadyRegistered",
+                        format!(
+                            "Contract {} is already registered for network {}",
+                            req.contract_id, req.network
+                        ),
+                    ));
+                }
+                if e.constraint() == Some("contracts_wasm_hash_key") {
+                    let existing: Contract = sqlx::query_as("SELECT * FROM contracts WHERE wasm_hash = $1")
+                        .bind(&wasm_hash)
+                        .fetch_one(&state.db)
+                        .await
+                        .map_err(|e2| db_internal_error("fetch existing canonical contract", e2))?;
+
+                    return Err(ApiError::conflict(
+                        "DuplicateContractContent",
+                        "A contract with identical WASM content already exists.",
+                    )
+                    .with_details(serde_json::json!({
+                        "existing_contract": {
+                            "id": existing.id,
+                            "contract_id": existing.contract_id,
+                            "slug": existing.slug,
+                            "network": existing.network.to_string(),
+                            "wasm_hash": existing.wasm_hash,
+                            "published_at": existing.created_at,
+                        }
+                    })));
+                }
             }
+            return Err(db_internal_error("create contract", err));
         }
-        db_internal_error("create contract", err)
-    })?;
+    };
 
     // Create verification task for the validator network (Issue # validator network)
     let _ = sqlx::query(
