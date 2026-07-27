@@ -1,225 +1,145 @@
-# Create Pull Request - Instructions
+# How to Create a Pull Request
 
-## ✅ Branch Successfully Pushed!
-
-The feature branch `feature/Add-CLI-output-formats` has been successfully pushed to the remote repository.
-
-**Push Status**: ✅ Complete
-- Branch: feature/Add-CLI-output-formats
-- Remote: origin/feature/Add-CLI-output-formats
-- Commits: 4 commits with all changes
-- Files: 13 files modified/created
-
-## Create Pull Request
-
-### Option 1: Using GitHub Web Interface (Recommended)
-
-1. **Go to the repository**:
-   - https://github.com/fairbid01/Soroban-Registry
-
-2. **Create Pull Request**:
-   - You should see a prompt to create a PR for the newly pushed branch
-   - Click "Compare & pull request" button
-   - OR go to "Pull requests" tab and click "New pull request"
-
-3. **Fill in PR Details**:
-
-   **Title**:
-   ```
-   feat: Add CLI output formats for machine-readable automation
-   ```
-
-   **Description**:
-   ```
-   This PR implements comprehensive support for machine-readable output formats 
-   (JSON, CSV, YAML) across the Soroban Registry CLI, enabling automation and 
-   scripting use cases while maintaining human-readable table output as the default.
-
-   ## Changes
-
-   - Add centralized output_format module supporting table, json, csv, yaml
-   - Implement OutputFormat enum with FromStr parsing and validation
-   - Add format inference from file extensions (.json, .csv, .yaml, .yml, .txt)
-   - Support YAML output format across analytics, stats, and list commands
-   - Add render_json, render_yaml, render_csv functions with proper escaping
-   - Update contracts.rs to use centralized output formatting
-   - Update analytics.rs to support YAML format
-   - Update main.rs command definitions to document yaml support
-   - Add comprehensive CLI_OUTPUT_FORMATS.md documentation
-   - Add integration tests for output format validation and stability
-   - Ensure CSV special character escaping (commas, quotes, newlines)
-   - Maintain schema stability for JSON, CSV, and YAML formats
-   - Support format validation with helpful error messages
-
-   ## Acceptance Criteria Met
-
-   - ✅ Ensure output flags behave consistently across commands
-   - ✅ Preserve schema stability for JSON outputs
-   - ✅ Include tests for stdout formatting and invalid format names
-   - ✅ Document the supported formats
-
-   ## Testing
-
-   All output formats have been tested for:
-   - Correctness of data representation
-   - Consistency across multiple runs
-   - Schema stability
-   - Special character handling
-   - Performance with large datasets
-
-   Run tests with:
-   ```bash
-   cargo test output_format
-   ```
-
-   ## Documentation
-
-   - CLI_OUTPUT_FORMATS.md - User guide with examples
-   - IMPLEMENTATION_SUMMARY_CLI_FORMATS.md - Technical details
-   - FEATURE_COMPLETION_REPORT.md - Completion report
-
-   ## Backward Compatibility
-
-   ✅ Fully backward compatible
-   - Default format remains "table"
-   - Existing commands work unchanged
-   - New options are additive
-
-   Closes #965
-   ```
-
-4. **Set Base and Head**:
-   - Base: `main`
-   - Head: `feature/Add-CLI-output-formats`
-
-5. **Add Labels** (if available):
-   - feature
-   - cli
-   - enhancement
-
-6. **Assign Reviewers** (if applicable):
-   - Add appropriate reviewers
-
-7. **Click "Create pull request"**
-
-### Option 2: Using GitHub CLI
-
-If you have GitHub CLI with proper authentication:
-
-```bash
-gh pr create \
-  --title "feat: Add CLI output formats for machine-readable automation" \
-  --body "$(cat PR_DESCRIPTION.md)" \
-  --base main \
-  --head feature/Add-CLI-output-formats
-```
-
-## PR Details Summary
-
-| Field | Value |
-|-------|-------|
-| Title | feat: Add CLI output formats for machine-readable automation |
-| Base Branch | main |
-| Head Branch | feature/Add-CLI-output-formats |
-| Closes | #965 |
-| Files Changed | 13 |
-| Insertions | 2,269 |
-| Deletions | 16 |
-| Commits | 4 |
-
-## What's in the PR
-
-### Code Changes
-- `cli/src/output_format.rs` - New centralized formatting module (316 lines)
-- `cli/src/contracts.rs` - Added YAML support
-- `cli/src/analytics.rs` - Added YAML support
-- `cli/src/main.rs` - Updated documentation
-
-### Tests
-- `cli/tests/output_format_tests.rs` - Integration tests (143 lines)
-
-### Documentation
-- `CLI_OUTPUT_FORMATS.md` - User guide (289 lines)
-- `IMPLEMENTATION_SUMMARY_CLI_FORMATS.md` - Technical details (252 lines)
-- `PR_DESCRIPTION.md` - PR template (199 lines)
-- `FEATURE_COMPLETION_REPORT.md` - Completion report (291 lines)
-- `TASK_COMPLETION_SUMMARY.md` - Task summary (221 lines)
-- `AUTHENTICATION_AND_PUSH_GUIDE.md` - Auth guide (202 lines)
-- `FINAL_STATUS_REPORT.md` - Status report (327 lines)
-- `README_PUSH_STATUS.md` - Push status (221 lines)
-
-## Supported Formats
-
-1. **Table** (default) - Human-readable with ANSI colors
-2. **JSON** - Pretty-printed with stable schema
-3. **CSV** - Comma-separated with proper escaping
-4. **YAML** - Human-readable structured data
-
-## Usage Examples
-
-```bash
-# List contracts as JSON
-soroban-registry list --format json
-
-# Export analytics as CSV
-soroban-registry analytics top-contracts --period 30d --format csv --export analytics.csv
-
-# Generate YAML configuration
-soroban-registry stats --format yaml --output stats.yaml
-
-# Pipe JSON to jq for processing
-soroban-registry list --format json | jq '.contracts[] | select(.is_verified == true)'
-```
-
-## Verification
-
-To verify the PR is ready:
-
-```bash
-# Check branch exists on remote
-git branch -r | grep feature/Add-CLI-output-formats
-
-# Check commits
-git log --oneline origin/feature/Add-CLI-output-formats -5
-
-# Check files changed
-git diff main..origin/feature/Add-CLI-output-formats --stat
-```
-
-## After PR Creation
-
-1. **Wait for CI/CD**: GitHub Actions will run tests
-2. **Code Review**: Reviewers will provide feedback
-3. **Address Feedback**: Make any requested changes
-4. **Merge**: Once approved, merge to main
-5. **Delete Branch**: Delete the feature branch after merge
-
-## PR Checklist
-
-Before creating the PR, verify:
-- ✅ Branch is pushed to remote
-- ✅ All commits are included
-- ✅ All tests pass locally
-- ✅ Documentation is complete
-- ✅ No merge conflicts with main
-- ✅ Backward compatibility maintained
-
-## Links
-
-- **Repository**: https://github.com/fairbid01/Soroban-Registry
-- **Branch**: https://github.com/fairbid01/Soroban-Registry/tree/feature/Add-CLI-output-formats
-- **Issue**: https://github.com/fairbid01/Soroban-Registry/issues/965
-
-## Summary
-
-✅ **Branch Pushed**: feature/Add-CLI-output-formats
-✅ **Ready for PR**: Yes
-✅ **Documentation**: Complete
-✅ **Tests**: Included
-✅ **Backward Compatible**: Yes
-
-The feature is ready for code review and merge!
+> A step-by-step guide for contributors opening pull requests against the Soroban Registry.
 
 ---
 
-**Next Step**: Create the pull request using the instructions above.
+## Prerequisites
+
+Before creating a PR, make sure you've completed these steps:
+
+- [ ] Forked and cloned the repository ([see CONTRIBUTING.md](CONTRIBUTING.md#getting-started))
+- [ ] Created a feature branch following the [naming conventions](CONTRIBUTING.md#feature-branch-naming)
+- [ ] Made atomic, well-messaged commits ([commit format guide](CONTRIBUTING.md#commit-message-format))
+- [ ] All tests pass locally (`cargo test` / `pnpm test`)
+- [ ] Linting passes (`cargo clippy`, `cargo fmt --check`, `pnpm lint`)
+- [ ] Your branch is rebased on the latest `main`
+
+---
+
+## Step 1 — Push Your Branch
+
+```bash
+# Sync with upstream first
+git fetch upstream
+git rebase upstream/main
+
+# Push to your fork
+git push origin feature/issue-<NUMBER>-<short-description>
+```
+
+---
+
+## Step 2 — Open the Pull Request
+
+### Option A: GitHub Web UI (Recommended)
+
+1. Navigate to [the repository](https://github.com/ALIPHATICHYD/Soroban-Registry).
+2. You'll see a banner: **"Compare & pull request"** — click it.
+   - If the banner doesn't appear, go to **Pull requests → New pull request** and select your branch.
+3. GitHub will **automatically load the PR template** with sections to fill in.
+4. Complete every section of the template — the more detail you provide, the faster the review.
+5. Set **Base**: `main` and **Head**: your feature branch.
+6. Add labels (e.g., `feature`, `fix`, `docs`, `enhancement`).
+7. Request reviewers if you know who should review.
+8. Click **"Create pull request"**.
+
+### Option B: GitHub CLI
+
+```bash
+# The --fill flag will use the PR template automatically
+gh pr create \
+  --base main \
+  --head feature/issue-<NUMBER>-<short-description> \
+  --title "feat: <Short description of your change>" \
+  --fill
+```
+
+> **Tip:** If you want to edit the body interactively, omit `--fill` and the CLI will open your default editor with the template pre-loaded.
+
+---
+
+## Step 3 — Fill In the PR Template
+
+When you open a PR, GitHub auto-populates the description with our [PR template](/.github/pull_request_template.md). Here's a quick overview of each section:
+
+| Section | What to Write |
+|---------|---------------|
+| **Summary** | A concise explanation of *what* and *why*. |
+| **Changes Made** | Bullet list of specific code, API, or schema changes. |
+| **Related Issue** | Link to the issue this PR resolves (e.g., `Closes #42`). |
+| **Type of Change** | Check the box that applies (feature, bug fix, docs, etc.). |
+| **How Has This Been Tested?** | Describe the testing you performed (unit, integration, manual). |
+| **Screenshots / Recordings** | Attach visuals for any UI changes. |
+| **Checklist** | Confirm you've met all quality requirements before requesting review. |
+
+---
+
+## Step 4 — After Submitting
+
+1. **CI Pipeline** — GitHub Actions will automatically run tests, linting, and builds. Fix any failures.
+2. **Code Review** — A maintainer will review your PR. Respond to feedback promptly.
+3. **Iterate** — Push follow-up commits to the same branch to address review comments.
+4. **Merge** — Once approved and CI is green, a maintainer will merge your PR.
+5. **Clean Up** — Delete your feature branch after the merge:
+   ```bash
+   git branch -d feature/issue-<NUMBER>-<short-description>
+   git push origin --delete feature/issue-<NUMBER>-<short-description>
+   ```
+
+---
+
+## PR Best Practices
+
+| Practice | Details |
+|----------|---------|
+| **One feature per PR** | Keep PRs focused — don't bundle unrelated changes. |
+| **Keep it small** | Aim for 200–500 lines when possible. Smaller PRs get reviewed faster. |
+| **Link the issue** | Always include `Closes #<issue-number>` so the issue auto-closes on merge. |
+| **Write clear titles** | Use the conventional format: `feat:`, `fix:`, `docs:`, `refactor:`, `test:`, `chore:` |
+| **Describe your testing** | Reviewers want to know *how* you verified correctness. |
+| **Update docs** | If your change adds or modifies behavior, update the relevant documentation. |
+| **No merge conflicts** | Rebase on `main` before requesting review. |
+
+---
+
+## Troubleshooting
+
+<details>
+<summary><strong>I don't see the PR template when opening a PR</strong></summary>
+
+The template lives at `.github/pull_request_template.md`. If GitHub doesn't auto-load it:
+- Make sure the file is committed on the `main` branch.
+- Try appending `?template=pull_request_template.md` to the URL.
+</details>
+
+<details>
+<summary><strong>CI is failing but tests pass locally</strong></summary>
+
+- Check you're using the correct Rust toolchain (`rust-toolchain.toml`).
+- Ensure your `.env` or environment variables match CI expectations.
+- Review the CI logs for the specific step that failed.
+</details>
+
+<details>
+<summary><strong>Merge conflicts after rebase</strong></summary>
+
+```bash
+git fetch upstream
+git rebase upstream/main
+# Resolve conflicts in each file, then:
+git add .
+git rebase --continue
+git push --force-with-lease origin feature/issue-<NUMBER>-<short-description>
+```
+</details>
+
+---
+
+## Quick Reference
+
+```text
+Fork → Clone → Branch → Code → Test → Push → PR → Review → Merge → Clean Up
+```
+
+For the full contribution workflow, see [CONTRIBUTING.md](CONTRIBUTING.md).
