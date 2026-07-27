@@ -4694,8 +4694,7 @@ async fn publish_contract_inner(
     let insert_result = sqlx::query_as::<_, Contract>(
         "INSERT INTO contracts (contract_id, wasm_hash, name, slug, description, publisher_id, network, category, tags, logical_id, network_configs, visibility, artifact_scan_status, artifact_scan_findings)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, CASE WHEN $12 = 'passed' THEN 'public'::visibility_type ELSE 'private'::visibility_type END, $12, $13)
-         RETURNING *")
-    
+         RETURNING *",
     )
     .bind(&req.contract_id)
     .bind(&wasm_hash)
