@@ -6655,6 +6655,22 @@ pub async fn confirm_ownership_transfer(
             .await
             .map_err(|err| db_internal_error("write completed transfer log", err))?;
 
+            // ── Emit ownership.transferred webhook (best-effort) ───────────────
+            // Notify the new owner (to_publisher_id) since they now hold the contract.
+            crate::webhook_events::emit_webhook_event(
+                &state.db,
+                to_publisher_id,
+                crate::webhook_events::EVENT_OWNERSHIP_TRANSFERRED,
+                json!({
+                    "contract_id": contract_id,
+                    "transfer_id": transfer_uuid,
+                    "from_publisher_id": from_publisher_id,
+                    "to_publisher_id": to_publisher_id,
+                    "completed_at": transfer.completed_at,
+                }),
+            )
+            .await;
+
             state.cache.invalidate_contracts().await;
             return Ok(Json(transfer));
         }

@@ -345,6 +345,35 @@ pub async fn deprecate_contract(
 
     notify_dependents(&state, contract_uuid, &contract_id, req.retirement_at).await?;
 
+    // ── Emit contract.deprecated webhook (best-effort) ────────────────────────
+    // Fetch the publisher_id for this contract so we can route the webhook to
+    // the correct set of subscriptions.
+    if let Ok(publisher_id) = sqlx::query_scalar::<_, uuid::Uuid>(
+        "SELECT publisher_id FROM contracts WHERE id = $1",
+    )
+    .bind(contract_uuid)
+    .fetch_optional(&state.db)
+    .await
+    .map(|opt| opt.unwrap_or(uuid::Uuid::nil()))
+    {
+        if !publisher_id.is_nil() {
+            crate::webhook_events::emit_webhook_event(
+                &state.db,
+                publisher_id,
+                crate::webhook_events::EVENT_CONTRACT_DEPRECATED,
+                serde_json::json!({
+                    "contract_id": contract_id,
+                    "contract_uuid": contract_uuid,
+                    "deprecated_reason": reason,
+                    "replacement_contract_id": req.replacement_contract_id,
+                    "migration_guide_url": req.migration_guide_url,
+                    "retirement_at": req.retirement_at,
+                }),
+            )
+            .await;
+        }
+    }
+
     // Best-effort ES reindex so search paths stay consistent.
     reindex_contract_search(&state, contract_uuid).await;
 
