@@ -17,12 +17,60 @@ use sqlx::PgPool;
 use std::fmt;
 use tracing::instrument;
 
+fn redact_metadata(mut value: serde_json::Value) -> serde_json::Value {
+    const MAX_DEPTH: usize = 8;
+    fn is_sensitive_key(key: &str) -> bool {
+        matches!(
+            key,
+            "authorization"
+                | "auth"
+                | "token"
+                | "access_token"
+                | "refresh_token"
+                | "api_key"
+                | "secret"
+                | "password"
+                | "private_key"
+                | "seed"
+                | "mnemonic"
+                | "cert_signature"
+                | "signature"
+        )
+    }
+    fn walk(value: &mut serde_json::Value, depth: usize) {
+        if depth >= MAX_DEPTH {
+            return;
+        }
+        match value {
+            serde_json::Value::Array(arr) => {
+                for v in arr {
+                    walk(v, depth + 1);
+                }
+            }
+            serde_json::Value::Object(map) => {
+                for (k, v) in map.iter_mut() {
+                    if is_sensitive_key(&k.to_ascii_lowercase()) {
+                        *v = serde_json::Value::String("[REDACTED]".to_string());
+                    } else {
+                        walk(v, depth + 1);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    walk(&mut value, 0);
+    value
+}
+
 /// A security-sensitive operation that must be audited.
 #[derive(Debug, Clone)]
 pub struct AuditEvent {
     /// Who performed the action. `None` for system/anonymous.
     pub actor_id: Option<String>,
     pub actor_email: Option<String>,
+    pub actor_ip: Option<String>,
+    pub request_id: Option<String>,
     /// Operation identifier, e.g. `"contract.verify"`.
     pub operation: String,
     /// Type of the affected resource, e.g. `"contract"`.
@@ -72,10 +120,11 @@ impl AuditLogger {
     #[instrument(skip(self), fields(operation = %event.operation, resource_id = %event.resource_id))]
     pub async fn log(&self, event: AuditEvent) -> Result<i64, sqlx::Error> {
         // Fetch the most recent chain hash (or genesis value).
-        let prev_hash: String =
-            sqlx::query_scalar("SELECT COALESCE(MAX(chain_hash), 'genesis') FROM audit_logs")
-                .fetch_one(&self.pool)
-                .await?;
+        let prev_hash: String = sqlx::query_scalar(
+            "SELECT COALESCE((SELECT chain_hash FROM audit_logs ORDER BY id DESC LIMIT 1), 'genesis')",
+        )
+        .fetch_one(&self.pool)
+        .await?;
 
         let now = chrono::Utc::now();
         let chain_input = format!(
@@ -87,21 +136,25 @@ impl AuditLogger {
         );
         let chain_hash = hex::encode(Sha256::digest(chain_input.as_bytes()));
 
+        let metadata = redact_metadata(event.metadata);
+
         let id: i64 = sqlx::query_scalar(
             r#"
             INSERT INTO audit_logs
-                (actor_id, actor_email, operation, resource_type, resource_id,
+                (actor_id, actor_email, actor_ip, request_id, operation, resource_type, resource_id,
                  metadata, status, error_message, chain_hash, created_at)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
             RETURNING id
             "#,
         )
         .bind(&event.actor_id)
         .bind(&event.actor_email)
+        .bind(&event.actor_ip)
+        .bind(&event.request_id)
         .bind(&event.operation)
         .bind(&event.resource_type)
         .bind(&event.resource_id)
-        .bind(&event.metadata)
+        .bind(&metadata)
         .bind(event.status.to_string())
         .bind(&event.error_message)
         .bind(&chain_hash)
@@ -122,7 +175,7 @@ impl AuditLogger {
     pub async fn export_all_logs(&self) -> Result<Vec<AuditRow>, sqlx::Error> {
         sqlx::query_as::<_, AuditRow>(
             r#"
-            SELECT id, actor_id, actor_email, operation, resource_type,
+            SELECT id, actor_id, actor_email, actor_ip, request_id, operation, resource_type,
                    resource_id, metadata, status, error_message, chain_hash,
                    created_at
             FROM audit_logs
@@ -152,7 +205,7 @@ impl AuditLogger {
     ) -> Result<Vec<AuditRow>, sqlx::Error> {
         sqlx::query_as::<_, AuditRow>(
             r#"
-            SELECT id, actor_id, actor_email, operation, resource_type,
+            SELECT id, actor_id, actor_email, actor_ip, request_id, operation, resource_type,
                    resource_id, metadata, status, error_message, chain_hash,
                    created_at
             FROM audit_logs
@@ -176,7 +229,7 @@ impl AuditLogger {
     ) -> Result<Vec<AuditRow>, sqlx::Error> {
         sqlx::query_as::<_, AuditRow>(
             r#"
-            SELECT id, actor_id, actor_email, operation, resource_type,
+            SELECT id, actor_id, actor_email, actor_ip, request_id, operation, resource_type,
                    resource_id, metadata, status, error_message, chain_hash,
                    created_at
             FROM audit_logs
@@ -198,6 +251,8 @@ pub struct AuditRow {
     pub id: i64,
     pub actor_id: Option<String>,
     pub actor_email: Option<String>,
+    pub actor_ip: Option<String>,
+    pub request_id: Option<String>,
     pub operation: String,
     pub resource_type: String,
     pub resource_id: String,
@@ -216,6 +271,14 @@ pub mod ops {
     pub const PUBLISHER_CHANGE: &str = "publisher.change";
     pub const USER_ROLE_CHANGE: &str = "user.role_change";
     pub const ADMIN_ACTION: &str = "admin.action";
+    pub const CONTRACT_DEPRECATE: &str = "contract.deprecate";
+    pub const CONTRACT_UNDEPRECATE: &str = "contract.undeprecate";
+    pub const SIGNING_KEY_REGISTER: &str = "signing_key.register";
+    pub const SIGNING_KEY_ROTATE: &str = "signing_key.rotate";
+    pub const SIGNING_KEY_REVOKE: &str = "signing_key.revoke";
+    pub const SIGNATURE_STORE: &str = "signature.store";
+    pub const OWNERSHIP_TRANSFER_CREATE: &str = "ownership_transfer.create";
+    pub const OWNERSHIP_TRANSFER_CONFIRM: &str = "ownership_transfer.confirm";
 }
 
 #[cfg(test)]
