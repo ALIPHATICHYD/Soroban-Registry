@@ -22,7 +22,9 @@ impl {{CONTRACT_NAME}} {
         sender.require_auth();
         assert!(amount > 0, "amount must be positive");
         let nonce = env.crypto().sha256(&recipient);
-        let nonce_bytes = Bytes::from_slice(&env, nonce.as_ref());
+        // `Hash<32>` exposes `to_array` / `to_bytes`; it has no `as_ref`, so the previous
+        // form meant this template generated code that did not compile.
+        let nonce_bytes = Bytes::from_array(&env, &nonce.to_array());
         let processed: bool = env.storage().instance().get(&DataKey::Processed(nonce_bytes.clone())).unwrap_or(false);
         assert!(!processed, "transfer already processed");
         env.storage().instance().set(&DataKey::Nonce(nonce_bytes.clone()), &(sender, amount, target_chain));
