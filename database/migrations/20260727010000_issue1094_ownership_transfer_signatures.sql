@@ -108,7 +108,7 @@ END $$;
 DO $$ BEGIN
     ALTER TABLE ownership_transfers
         ADD CONSTRAINT chk_ownership_transfers_signature_algorithm
-        CHECK (signature_algorithm = 'ed25519');
+        CHECK (signature_algorithm = 'ed25519') NOT VALID;
 EXCEPTION
     WHEN duplicate_object THEN NULL;
 END $$;
