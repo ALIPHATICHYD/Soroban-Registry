@@ -1,12 +1,12 @@
-import { StatsResponse, TimePeriod } from '@/types/stats';
+import type { StatsResponse, TimePeriod } from "@/types";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
-const USE_MOCKS = process.env.NEXT_PUBLIC_USE_MOCKS === 'true';
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "";
+const USE_MOCKS = process.env.NEXT_PUBLIC_USE_MOCKS === "true";
 
 export async function fetchStats(period: TimePeriod): Promise<StatsResponse> {
   if (!USE_MOCKS) {
     const res = await fetch(
-      `${API_URL}/api/stats?period=${encodeURIComponent(period)}`
+      `${API_URL}/api/stats?period=${encodeURIComponent(period)}`,
     );
     if (!res.ok) {
       throw new Error(`Failed to fetch stats: ${res.status}`);
@@ -21,8 +21,8 @@ export async function fetchStats(period: TimePeriod): Promise<StatsResponse> {
   await new Promise((resolve) => setTimeout(resolve, delay));
 
   let trendDays = 30;
-  if (period === '7d') trendDays = 7;
-  if (period === '90d') trendDays = 90;
+  if (period === "7d") trendDays = 7;
+  if (period === "90d") trendDays = 90;
 
   const totalContracts = getRandomInt(1000, 5000);
   const verifiedPercentage = getRandomInt(60, 95);
@@ -64,15 +64,29 @@ export async function fetchStats(period: TimePeriod): Promise<StatsResponse> {
 // ---------------------------------------------------------------------------
 
 const CATEGORIES = [
-  'DeFi', 'NFT', 'Gaming', 'Infrastructure',
-  'DAO', 'Wallet', 'Social', 'Tooling',
+  "DeFi",
+  "NFT",
+  "Gaming",
+  "Infrastructure",
+  "DAO",
+  "Wallet",
+  "Social",
+  "Tooling",
 ];
 
-const NETWORKS = ['Mainnet', 'Testnet', 'Futurenet'];
+const NETWORKS = ["Mainnet", "Testnet", "Futurenet"];
 
 const PUBLISHER_NAMES = [
-  'StellarFoundation', 'SorobanLabs', 'DefiKingdoms', 'OpenSea',
-  'Coinbase', 'Kraken', 'Circle', 'SettleNetwork', 'UltraStellar', 'Lobstr',
+  "StellarFoundation",
+  "SorobanLabs",
+  "DefiKingdoms",
+  "OpenSea",
+  "Coinbase",
+  "Kraken",
+  "Circle",
+  "SettleNetwork",
+  "UltraStellar",
+  "Lobstr",
 ];
 
 function getRandomInt(min: number, max: number): number {
@@ -86,7 +100,7 @@ function generateTrendData(days: number): { date: string; count: number }[] {
     const date = new Date(today);
     date.setDate(date.getDate() - i);
     data.push({
-      date: date.toISOString().split('T')[0],
+      date: date.toISOString().split("T")[0],
       count: getRandomInt(5, 50),
     });
   }

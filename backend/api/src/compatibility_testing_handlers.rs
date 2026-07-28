@@ -1,6 +1,7 @@
 // compatibility_testing_handlers.rs
 // Handlers for the SDK/Wasm/Network contract compatibility testing matrix (Issue #261).
 
+use crate::validation::extractors::ValidatedJson;
 use axum::{
     extract::{Path, Query, State},
     Json,
@@ -234,7 +235,7 @@ pub async fn get_compatibility_matrix(
 pub async fn run_compatibility_test(
     State(state): State<AppState>,
     Path(contract_id): Path<Uuid>,
-    Json(body): Json<RunCompatibilityTestRequest>,
+    ValidatedJson(body): ValidatedJson<RunCompatibilityTestRequest>,
 ) -> ApiResult<Json<CompatibilityTestEntry>> {
     // Verify contract exists
     let exists: bool = sqlx::query_scalar("SELECT COUNT(*) > 0 FROM contracts WHERE id = $1")

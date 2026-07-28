@@ -1,3 +1,4 @@
+use crate::validation::extractors::ValidatedJson;
 use axum::{
     extract::{Json, Path, Query, State},
     http::StatusCode,
@@ -35,7 +36,7 @@ fn default_limit() -> i64 {
 pub async fn create_ab_test(
     State(state): State<AppState>,
     Path(contract_id): Path<String>,
-    Json(req): Json<CreateAbTestRequest>,
+    ValidatedJson(req): ValidatedJson<CreateAbTestRequest>,
 ) -> ApiResult<impl IntoResponse> {
     let contract_uuid = parse_uuid(&contract_id, "contract")?;
     let variant_a_uuid = parse_uuid(&req.variant_a_deployment_id, "variant_a_deployment")?;
@@ -273,7 +274,7 @@ pub async fn cancel_ab_test(
 pub async fn record_ab_test_metric(
     State(state): State<AppState>,
     Path(test_id): Path<String>,
-    Json(req): Json<RecordAbTestMetricRequest>,
+    ValidatedJson(req): ValidatedJson<RecordAbTestMetricRequest>,
 ) -> ApiResult<impl IntoResponse> {
     let test_uuid = parse_uuid(&test_id, "test")?;
 
@@ -370,7 +371,7 @@ pub async fn get_ab_test_results(
 
 fn parse_uuid(id: &str, label: &str) -> Result<Uuid, ApiError> {
     Uuid::parse_str(id).map_err(|_| {
-        ApiError::bad_request("InvalidId", format!("Invalid {} ID format: {}", label, id))
+        ApiError::bad_request_with("InvalidId", format!("Invalid {} ID format: {}", label, id))
     })
 }
 

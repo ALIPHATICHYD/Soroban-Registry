@@ -1,3 +1,4 @@
+use crate::validation::extractors::ValidatedJson;
 use axum::{
     extract::{Json, Path, Query, State},
     http::StatusCode,
@@ -36,7 +37,7 @@ fn default_limit() -> i64 {
 pub async fn create_canary(
     State(state): State<AppState>,
     Path(contract_id): Path<String>,
-    Json(req): Json<CreateCanaryRequest>,
+    ValidatedJson(req): ValidatedJson<CreateCanaryRequest>,
 ) -> ApiResult<impl IntoResponse> {
     let contract_uuid = parse_uuid(&contract_id, "contract")?;
     let to_deployment_uuid = parse_uuid(&req.to_deployment_id, "to_deployment")?;
@@ -163,7 +164,7 @@ pub async fn get_canary(
 pub async fn advance_canary(
     State(state): State<AppState>,
     Path(canary_id): Path<String>,
-    Json(req): Json<AdvanceCanaryRequest>,
+    ValidatedJson(req): ValidatedJson<AdvanceCanaryRequest>,
 ) -> ApiResult<Json<CanaryRelease>> {
     let canary_uuid = parse_uuid(&canary_id, "canary")?;
 
@@ -289,7 +290,7 @@ pub async fn complete_canary(
 pub async fn record_canary_metric(
     State(state): State<AppState>,
     Path(canary_id): Path<String>,
-    Json(req): Json<RecordCanaryMetricRequest>,
+    ValidatedJson(req): ValidatedJson<RecordCanaryMetricRequest>,
 ) -> ApiResult<impl IntoResponse> {
     let canary_uuid = parse_uuid(&canary_id, "canary")?;
     let error_rate = if req.requests > 0 {
@@ -378,7 +379,7 @@ pub async fn list_canary_metrics(
 
 fn parse_uuid(id: &str, label: &str) -> Result<Uuid, ApiError> {
     Uuid::parse_str(id).map_err(|_| {
-        ApiError::bad_request("InvalidId", format!("Invalid {} ID format: {}", label, id))
+        ApiError::bad_request_with("InvalidId", format!("Invalid {} ID format: {}", label, id))
     })
 }
 

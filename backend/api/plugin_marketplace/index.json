@@ -1,0 +1,32 @@
+{
+  "plugins": [
+    {
+      "name": "hello",
+      "version": "0.1.0",
+      "description": "Example community plugin (safe, declarative steps)",
+      "commands": [
+        {
+          "name": "hello",
+          "description": "Print a greeting"
+        }
+      ],
+      "manifest": {
+        "name": "hello",
+        "version": "0.1.0",
+        "description": "Example community plugin (safe, declarative steps)",
+        "commands": [
+          {
+            "name": "hello",
+            "description": "Print a greeting",
+            "steps": [
+              {
+                "type": "print",
+                "text": "Hello from the Soroban Registry plugin marketplace!"
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

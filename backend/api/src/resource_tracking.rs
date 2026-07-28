@@ -284,6 +284,9 @@ fn project_exhaustion(
 mod tests {
     use super::*;
     use chrono::TimeZone;
+    use proptest::prelude::*;
+
+    // ── helpers ──────────────────────────────────────────────────────────────
 
     fn rising(n: usize) -> Vec<ResourceUsage> {
         let base = Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap();
@@ -297,18 +300,40 @@ mod tests {
             .collect()
     }
 
+    fn flat(n: usize, cpu: u64, mem: u64) -> Vec<ResourceUsage> {
+        let base = Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap();
+        (0..n)
+            .map(|i| ResourceUsage {
+                cpu_instructions: cpu,
+                mem_bytes: mem,
+                storage_bytes: 0,
+                timestamp: base + chrono::Duration::hours(i as i64),
+            })
+            .collect()
+    }
+
+    fn fill(mgr: &mut ResourceManager, id: &str, samples: Vec<ResourceUsage>) {
+        for u in samples {
+            mgr.record_usage(id, u);
+        }
+    }
+
+    // ── existing tests (kept + enhanced) ─────────────────────────────────────
+
     #[test]
     fn forecasts_cpu_exhaustion() {
         let mut mgr = ResourceManager::new();
-        let hist = rising(48);
-        for u in &hist {
-            mgr.record_usage("c1", u.clone());
+        for u in rising(48) {
+            mgr.record_usage("c1", u);
         }
         let summary = mgr.summary("c1").unwrap();
         assert!(summary.forecast.cpu_exhaustion_ts.is_some());
         assert!(summary.forecast.cpu_trend_per_sec > 0.0);
     }
 
+    /// p90 exhaustion must not precede the point estimate, and the gap between
+    /// the two should be within a 10× multiplier (i.e., the p90 bound is not
+    /// pathologically far in the future for a smoothly rising signal).
     #[test]
     fn p90_is_not_earlier_than_expected() {
         let mut mgr = ResourceManager::new();
@@ -326,12 +351,47 @@ mod tests {
             );
         }
         let summary = mgr.summary("cp90").unwrap();
-        assert!(summary.forecast.cpu_exhaustion_ts.is_some());
-        assert!(summary.forecast.cpu_exhaustion_ts_p90.is_some());
+        let mean_ts = summary
+            .forecast
+            .cpu_exhaustion_ts
+            .expect("mean exhaustion present");
+        let p90_ts = summary
+            .forecast
+            .cpu_exhaustion_ts_p90
+            .expect("p90 exhaustion present");
+
+        // p90 uses a lower burn rate, so it must not be earlier than the point estimate
         assert!(
-            summary.forecast.cpu_exhaustion_ts.unwrap()
-                <= summary.forecast.cpu_exhaustion_ts_p90.unwrap()
+            mean_ts <= p90_ts,
+            "p90 ({p90_ts}) must not precede mean ({mean_ts})"
         );
+
+        // forecast accuracy margin: for a near-linear 72-sample signal the p90
+        // bound should fall within 10× of the mean forecast horizon
+        let mean_secs = (mean_ts - base).num_seconds();
+        let p90_secs = (p90_ts - base).num_seconds();
+        assert!(
+            p90_secs <= mean_secs * 10,
+            "p90 horizon ({p90_secs}s) is unreasonably far beyond mean ({mean_secs}s)"
+        );
+
+        // the confidence score should be meaningful (> 0.5) for 72 samples
+        assert!(
+            summary.forecast.confidence > 0.5,
+            "confidence {} too low for a 72-sample history",
+            summary.forecast.confidence
+        );
+
+        // mem p90 bound should also be present and ordered
+        let mem_mean = summary
+            .forecast
+            .mem_exhaustion_ts
+            .expect("mem mean present");
+        let mem_p90 = summary
+            .forecast
+            .mem_exhaustion_ts_p90
+            .expect("mem p90 present");
+        assert!(mem_mean <= mem_p90, "mem p90 must not precede mem mean");
     }
 
     #[test]
@@ -369,5 +429,353 @@ mod tests {
         }
         let summary = mgr.summary("c3").unwrap();
         assert!(summary.forecast.seasonal_factor > 1.0);
+    }
+
+    // ── edge cases ───────────────────────────────────────────────────────────
+
+    #[test]
+    fn summary_returns_none_for_unknown_contract() {
+        let mgr = ResourceManager::new();
+        assert!(mgr.summary("ghost").is_none());
+    }
+
+    #[test]
+    fn single_sample_no_crash_and_no_exhaustion() {
+        let mut mgr = ResourceManager::new();
+        mgr.record_usage(
+            "s1",
+            ResourceUsage {
+                cpu_instructions: 10_000_000,
+                mem_bytes: 5_000_000,
+                storage_bytes: 1024,
+                timestamp: Utc::now(),
+            },
+        );
+        let summary = mgr.summary("s1").unwrap();
+        // A single point has no trend, so exhaustion cannot be projected
+        assert!(summary.forecast.cpu_exhaustion_ts.is_none());
+        assert!(summary.forecast.mem_exhaustion_ts.is_none());
+    }
+
+    #[test]
+    fn flat_usage_produces_no_exhaustion_forecast() {
+        let mut mgr = ResourceManager::new();
+        // Constant usage: zero delta means zero burn rate
+        fill(&mut mgr, "flat", flat(20, 10_000_000, 2_000_000));
+        let summary = mgr.summary("flat").unwrap();
+        assert!(
+            summary.forecast.cpu_exhaustion_ts.is_none(),
+            "flat CPU should yield no exhaustion"
+        );
+        assert!(
+            summary.forecast.mem_exhaustion_ts.is_none(),
+            "flat mem should yield no exhaustion"
+        );
+    }
+
+    #[test]
+    fn already_at_limit_exhausts_at_base_timestamp() {
+        let base = Utc.with_ymd_and_hms(2026, 6, 1, 0, 0, 0).unwrap();
+        let mut mgr = ResourceManager::new();
+        // Two samples both at or above MAX_CPU so remaining capacity is <= 0
+        for i in 0..2_u64 {
+            mgr.record_usage(
+                "full",
+                ResourceUsage {
+                    cpu_instructions: MAX_CPU,
+                    mem_bytes: MAX_MEM,
+                    storage_bytes: 0,
+                    timestamp: base + chrono::Duration::hours(i as i64),
+                },
+            );
+        }
+        let summary = mgr.summary("full").unwrap();
+        // When already at the limit project_exhaustion returns base immediately
+        if let Some(ts) = summary.forecast.cpu_exhaustion_ts {
+            assert!(
+                ts <= base + chrono::Duration::seconds(1),
+                "exhaustion should be at or before base when already at limit"
+            );
+        }
+    }
+
+    #[test]
+    fn no_alert_below_threshold() {
+        let mut mgr = ResourceManager::new();
+        let alerts = mgr.record_usage(
+            "ok",
+            ResourceUsage {
+                cpu_instructions: (MAX_CPU as f64 * 0.79) as u64,
+                mem_bytes: (MAX_MEM as f64 * 0.79) as u64,
+                storage_bytes: 0,
+                timestamp: Utc::now(),
+            },
+        );
+        assert!(alerts.is_empty(), "no alert expected below 80%");
+    }
+
+    #[test]
+    fn memory_alert_fires_independently() {
+        let mut mgr = ResourceManager::new();
+        let alerts = mgr.record_usage(
+            "memhog",
+            ResourceUsage {
+                cpu_instructions: 0,
+                mem_bytes: (MAX_MEM as f64 * 0.85) as u64,
+                storage_bytes: 0,
+                timestamp: Utc::now(),
+            },
+        );
+        assert!(!alerts.is_empty());
+        assert!(alerts.iter().any(|a| a.metric == "mem_bytes"));
+    }
+
+    #[test]
+    fn both_alerts_fire_when_both_exceed_threshold() {
+        let mut mgr = ResourceManager::new();
+        let alerts = mgr.record_usage(
+            "both",
+            ResourceUsage {
+                cpu_instructions: (MAX_CPU as f64 * 0.90) as u64,
+                mem_bytes: (MAX_MEM as f64 * 0.90) as u64,
+                storage_bytes: 0,
+                timestamp: Utc::now(),
+            },
+        );
+        assert_eq!(alerts.len(), 2);
+    }
+
+    // ── statistical correctness ───────────────────────────────────────────────
+
+    #[test]
+    fn std_dev_of_uniform_sample_is_zero() {
+        let data = vec![5.0_f64; 10];
+        assert!(
+            std_dev(&data) < 1e-10,
+            "std_dev of constant slice must be zero"
+        );
+    }
+
+    #[test]
+    fn std_dev_single_element_returns_zero() {
+        assert_eq!(std_dev(&[42.0]), 0.0);
+    }
+
+    #[test]
+    fn std_dev_empty_returns_zero() {
+        assert_eq!(std_dev(&[]), 0.0);
+    }
+
+    #[test]
+    fn std_dev_known_value() {
+        // [2, 4, 4, 4, 5, 5, 7, 9] — population std dev = 2.0
+        let data = vec![2.0, 4.0, 4.0, 4.0, 5.0, 5.0, 7.0, 9.0];
+        let got = std_dev(&data);
+        assert!(
+            (got - 2.0).abs() < 1e-6,
+            "expected std_dev ≈ 2.0, got {got}"
+        );
+    }
+
+    #[test]
+    fn deltas_of_constant_series_are_zero() {
+        let data = vec![7.0_f64; 5];
+        let d = deltas(&data);
+        assert!(
+            d.iter().all(|&v| v == 0.0),
+            "deltas of flat series must all be 0"
+        );
+    }
+
+    #[test]
+    fn deltas_of_monotone_series_are_positive() {
+        let data = vec![1.0, 3.0, 6.0, 10.0, 15.0];
+        let d = deltas(&data);
+        assert!(
+            d.iter().all(|&v| v > 0.0),
+            "deltas of strictly increasing series must be > 0"
+        );
+    }
+
+    #[test]
+    fn confidence_bounded_between_zero_and_one() {
+        let mut mgr = ResourceManager::new();
+        fill(&mut mgr, "conf", rising(30));
+        let summary = mgr.summary("conf").unwrap();
+        let c = summary.forecast.confidence;
+        assert!((0.0..=1.0).contains(&c), "confidence {c} out of [0, 1]");
+    }
+
+    #[test]
+    fn confidence_increases_with_more_samples() {
+        let mut mgr_small = ResourceManager::new();
+        fill(&mut mgr_small, "s", rising(5));
+
+        let mut mgr_large = ResourceManager::new();
+        fill(&mut mgr_large, "l", rising(48));
+
+        let c_small = mgr_small.summary("s").unwrap().forecast.confidence;
+        let c_large = mgr_large.summary("l").unwrap().forecast.confidence;
+        assert!(
+            c_large > c_small,
+            "confidence should increase with more samples: small={c_small}, large={c_large}"
+        );
+    }
+
+    #[test]
+    fn forecast_accuracy_within_reasonable_margin_for_linear_growth() {
+        // Build a perfectly linear rising signal over 48 hours so the forecast
+        // should predict exhaustion close to the true analytic horizon.
+        let base = Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap();
+        let steps: u64 = 48;
+        let burn_per_step = MAX_CPU / steps; // exact per-hour increment
+
+        let mut mgr = ResourceManager::new();
+        for i in 0..steps {
+            mgr.record_usage(
+                "linear",
+                ResourceUsage {
+                    cpu_instructions: (i + 1) * burn_per_step,
+                    mem_bytes: 1_000_000,
+                    storage_bytes: 0,
+                    timestamp: base + chrono::Duration::hours(i as i64),
+                },
+            );
+        }
+
+        let summary = mgr.summary("linear").unwrap();
+        let exhaust_ts = summary
+            .forecast
+            .cpu_exhaustion_ts
+            .expect("linear growth must forecast exhaustion");
+
+        // The true exhaustion is close to `base + steps hours` (already near MAX_CPU).
+        // We allow a generous ±24-hour margin to account for the Holt-Winters smoother.
+        let true_exhaust = base + chrono::Duration::hours(steps as i64);
+        let delta_hours = (exhaust_ts - true_exhaust).num_hours().abs();
+        assert!(
+            delta_hours <= 24,
+            "forecast off by {delta_hours}h — expected within 24h of true exhaustion"
+        );
+    }
+
+    // ── outlier handling ──────────────────────────────────────────────────────
+
+    #[test]
+    fn single_outlier_does_not_crash_forecast() {
+        let base = Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap();
+        let mut mgr = ResourceManager::new();
+        for i in 0..20_u64 {
+            let cpu = if i == 10 { MAX_CPU - 1 } else { 5_000_000 };
+            mgr.record_usage(
+                "outlier",
+                ResourceUsage {
+                    cpu_instructions: cpu,
+                    mem_bytes: 1_000_000,
+                    storage_bytes: 0,
+                    timestamp: base + chrono::Duration::hours(i as i64),
+                },
+            );
+        }
+        // Must not panic and must return a valid summary
+        let summary = mgr.summary("outlier").unwrap();
+        let c = summary.forecast.confidence;
+        assert!((0.0..=1.0).contains(&c));
+    }
+
+    #[test]
+    fn all_zeros_does_not_crash() {
+        let base = Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap();
+        let mut mgr = ResourceManager::new();
+        for i in 0..5_u64 {
+            mgr.record_usage(
+                "zeros",
+                ResourceUsage {
+                    cpu_instructions: 0,
+                    mem_bytes: 0,
+                    storage_bytes: 0,
+                    timestamp: base + chrono::Duration::hours(i as i64),
+                },
+            );
+        }
+        let summary = mgr.summary("zeros").unwrap();
+        assert!(summary.forecast.cpu_exhaustion_ts.is_none());
+    }
+
+    // ── property-based tests ──────────────────────────────────────────────────
+
+    proptest! {
+        /// For any non-empty sequence of strictly rising CPU values the p90
+        /// exhaustion timestamp must never precede the point estimate.
+        #[test]
+        fn prop_p90_never_earlier_than_mean(
+            increments in prop::collection::vec(1_u64..500_000_u64, 4..30)
+        ) {
+            let base = Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap();
+            let mut mgr = ResourceManager::new();
+            let mut cpu: u64 = 1_000_000;
+            for (i, inc) in increments.iter().enumerate() {
+                cpu = cpu.saturating_add(*inc).min(MAX_CPU - 1);
+                mgr.record_usage("prop_p90", ResourceUsage {
+                    cpu_instructions: cpu,
+                    mem_bytes: 1_000_000,
+                    storage_bytes: 0,
+                    timestamp: base + chrono::Duration::hours(i as i64),
+                });
+            }
+            let summary = mgr.summary("prop_p90").unwrap();
+            if let (Some(mean), Some(p90)) = (
+                summary.forecast.cpu_exhaustion_ts,
+                summary.forecast.cpu_exhaustion_ts_p90,
+            ) {
+                prop_assert!(mean <= p90, "mean={mean}, p90={p90}");
+            }
+        }
+
+        /// Confidence must always be in [0, 1] regardless of input shape.
+        #[test]
+        fn prop_confidence_always_in_unit_interval(
+            values in prop::collection::vec(0_u64..MAX_CPU, 2..50)
+        ) {
+            let base = Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap();
+            let mut mgr = ResourceManager::new();
+            for (i, v) in values.iter().enumerate() {
+                mgr.record_usage("prop_conf", ResourceUsage {
+                    cpu_instructions: *v,
+                    mem_bytes: 1_000_000,
+                    storage_bytes: 0,
+                    timestamp: base + chrono::Duration::hours(i as i64),
+                });
+            }
+            let c = mgr.summary("prop_conf").unwrap().forecast.confidence;
+            prop_assert!((0.0..=1.0).contains(&c), "confidence={c}");
+        }
+
+        /// cpu_trend_per_sec must be non-negative for a monotonically rising signal.
+        #[test]
+        fn prop_trend_non_negative_for_rising_input(
+            increments in prop::collection::vec(1_u64..200_000_u64, 3..20)
+        ) {
+            let base = Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap();
+            let mut mgr = ResourceManager::new();
+            let mut cpu: u64 = 500_000;
+            for (i, inc) in increments.iter().enumerate() {
+                cpu = cpu.saturating_add(*inc).min(MAX_CPU - 1);
+                mgr.record_usage("prop_trend", ResourceUsage {
+                    cpu_instructions: cpu,
+                    mem_bytes: 500_000,
+                    storage_bytes: 0,
+                    timestamp: base + chrono::Duration::hours(i as i64),
+                });
+            }
+            let trend = mgr.summary("prop_trend").unwrap().forecast.cpu_trend_per_sec;
+            prop_assert!(trend >= 0.0, "trend={trend}");
+        }
+
+        /// std_dev is always non-negative for any slice.
+        #[test]
+        fn prop_std_dev_non_negative(data in prop::collection::vec(-1e9_f64..1e9_f64, 0..50)) {
+            prop_assert!(std_dev(&data) >= 0.0);
+        }
     }
 }

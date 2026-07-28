@@ -1,4 +1,3 @@
-import React from 'react';
 import { TimePeriod } from '@/types/stats';
 
 interface TimePeriodSelectorProps {

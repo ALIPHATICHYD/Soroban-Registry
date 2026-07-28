@@ -8,9 +8,9 @@ use uuid::Uuid;
 
 use crate::error::{ApiError, ApiResult};
 use crate::state::AppState;
-use crate::type_safety::parser::parse_json_spec;
-use crate::type_safety::types::{
-    ContractABI, ContractFunction, EnumVariant, SorobanType, StructField,
+use contract_abi::{
+    self, parser::parse_json_spec, ContractABI, ContractFunction, EnumVariant, SorobanType,
+    StructField,
 };
 
 #[derive(Debug, Serialize, Clone, Copy, PartialEq, Eq, utoipa::ToSchema)]
@@ -45,6 +45,7 @@ pub struct BreakingChangeReport {
 pub struct BreakingChangeQuery {
     pub old_id: String,
     pub new_id: String,
+    pub bypass_cache: Option<bool>,
 }
 
 #[utoipa::path(
@@ -64,14 +65,15 @@ pub async fn get_breaking_changes(
     Query(query): Query<BreakingChangeQuery>,
     State(state): State<AppState>,
 ) -> ApiResult<Json<BreakingChangeReport>> {
-    let old_abi = resolve_abi(&state, &query.old_id).await?;
-    let new_abi = resolve_abi(&state, &query.new_id).await?;
+    let bypass = query.bypass_cache.unwrap_or(false);
+    let old_abi = resolve_abi(&state, &query.old_id, bypass).await?;
+    let new_abi = resolve_abi(&state, &query.new_id, bypass).await?;
 
     let old_spec = parse_json_spec(&old_abi, &query.old_id).map_err(|e| {
-        ApiError::bad_request("InvalidABI", format!("Failed to parse old ABI: {}", e))
+        ApiError::bad_request_with("InvalidABI", format!("Failed to parse old ABI: {}", e))
     })?;
     let new_spec = parse_json_spec(&new_abi, &query.new_id).map_err(|e| {
-        ApiError::bad_request("InvalidABI", format!("Failed to parse new ABI: {}", e))
+        ApiError::bad_request_with("InvalidABI", format!("Failed to parse new ABI: {}", e))
     })?;
 
     let changes = diff_abi(&old_spec, &new_spec);
@@ -376,8 +378,12 @@ fn diff_enum_variants(
     }
 }
 
-pub(crate) async fn resolve_abi(state: &AppState, selector: &str) -> ApiResult<String> {
-    if let Some(cached) = state.cache.get_abi(selector).await {
+pub(crate) async fn resolve_abi(
+    state: &AppState,
+    selector: &str,
+    bypass_cache: bool,
+) -> ApiResult<String> {
+    if let Some(cached) = state.cache.get_abi(selector, bypass_cache).await {
         return Ok(cached);
     }
 
@@ -505,9 +511,7 @@ pub fn has_breaking_changes(changes: &[BreakingChange]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::type_safety::types::{
-        ContractABI, ContractFunction, FunctionParam, FunctionVisibility,
-    };
+    use contract_abi::{ContractABI, ContractFunction, FunctionParam, FunctionVisibility};
 
     fn func(name: &str, params: Vec<FunctionParam>, return_type: SorobanType) -> ContractFunction {
         ContractFunction {

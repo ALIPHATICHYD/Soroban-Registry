@@ -1,0 +1,121 @@
+{
+  "navbar": {
+    "contracts": "Contratos",
+    "publish": "Publicar",
+    "stats": "Estadísticas",
+    "verification": "Verificación",
+    "search": "Buscar contratos...",
+    "language": "Idioma"
+  },
+  "home": {
+    "title_part1": "Registro de",
+    "title_part2": "Contratos Inteligentes Soroban",
+    "subtitle": "Descubre, verifica e interactúa con contratos inteligentes en la red Stellar.",
+    "getStarted": "Empezar",
+    "viewContracts": "Ver Contratos",
+    "whyTitle": "Por qué los constructores eligen el",
+    "whySubtitle": "Todo lo que necesitas para descubrir, verificar e integrar contratos inteligentes Soroban.",
+    "features": {
+      "verified": {
+        "title": "Contratos Verificados",
+        "desc": "Cada contrato pasa por una verificación. La validación del código fuente, la puntuación de seguridad y el monitoreo de salud aseguran que estés usando código probado."
+      },
+      "graph": {
+        "title": "Grafo de Dependencias",
+        "desc": "Visualiza todo el ecosistema de contratos. Comprende las dependencias, descubre contratos relacionados y rastrea el impacto de los cambios en la red."
+      },
+      "easy": {
+        "title": "Publicación Fácil",
+        "desc": "Publica contratos en segundos a través de la CLI o la interfaz web. Añade metadatos, ejemplos y documentación para ayudar a otros a integrar tu trabajo."
+      }
+    },
+    "recent": "Contratos Recientes",
+    "viewAll": "Ver todos"
+  },
+  "contractCard": {
+    "verified": "Verificado",
+    "pending": "Pendiente",
+    "deployments": "Despliegues",
+    "updated": "Actualizado",
+    "quickView": "Vista Rápida",
+    "viewDetails": "Ver Detalles",
+    "copied": "Copiado",
+    "copyAddress": "Copiar Dirección"
+  },
+  "activityFeed": {
+    "title": "Actividad del Registro",
+    "liveUpdates": "Actualizaciones en vivo activas",
+    "allEvents": "Todos los Eventos",
+    "published": "Publicado",
+    "verified": "Verificado",
+    "deployed": "Desplegado",
+    "newVersion": "Nueva Versión",
+    "updated": "Actualizado",
+    "loading": "Cargando feed de actividad...",
+    "failed": "Error al cargar el feed de actividad.",
+    "noActivity": "No se encontró actividad reciente.",
+    "loadMore": "Cargar más actividad",
+    "by": "por",
+    "type": "Tipo",
+    "justNow": "ahora mismo",
+    "m_ago": "m atrás",
+    "h_ago": "h atrás"
+  },
+  "verificationBadge": {
+    "verified": "Verificado",
+    "underReview": "En Revisión",
+    "rejected": "Rechazado",
+    "submitted": "Enviado",
+    "draft": "Borrador"
+  },
+  "publish": {
+    "title": "Publicar Contrato",
+    "contractId": "ID del Contrato",
+    "contractIdPlaceholder": "nombre-del-contrato",
+    "name": "Nombre",
+    "version": "Versión",
+    "versionPlaceholder": "1.2.3",
+    "sourceUrl": "URL de la Fuente",
+    "sourceUrlPlaceholder": "https://github.com/usuario/repo",
+    "publisherAddress": "Dirección Stellar del Publicador",
+    "publisherAddressPlaceholder": "G...",
+    "network": "Red",
+    "description": "Descripción",
+    "submit": "Publicar",
+    "success": "Publicado con éxito",
+    "error": "Error al publicar"
+  },
+  "stats": {
+    "title": "Estadísticas del Registro",
+    "subtitle": "Descripción general de los despliegues de contratos Soroban y actividad de la red",
+    "failed": "Error al cargar las estadísticas",
+    "tryAgain": "Intentar de nuevo"
+  },
+  "graph": {
+    "loading": "Cargando grafo de dependencias...",
+    "apiUnavailable": "API del backend no disponible",
+    "apiUnavailableDesc": "No se pudieron cargar los datos del grafo de contratos. Todavía puedes explorar la visualización usando el Modo Demo con datos sintéticos.",
+    "enableDemo": "Activar Modo Demo",
+    "noContracts": "Aún no hay contratos",
+    "noContractsDesc": "Publica algunos contratos o activa el Modo Demo para explorar la visualización del grafo.",
+    "viewDetails": "Ver Detalles del Contrato",
+    "dependents": "Dependientes",
+    "dependencies": "Dependencias",
+    "verified": "Verificado",
+    "network": "Red",
+    "type": "Tipo"
+  },
+  "footer": {
+    "registry": "Registro",
+    "explore": "Explorar",
+    "developers": "Desarrolladores",
+    "community": "Comunidad",
+    "builtFor": "Construido para la Comunidad de Desarrolladores de Stellar",
+    "poweredBy": "Impulsado por Contratos Inteligentes Soroban"
+  },
+  "common": {
+    "loading": "Cargando...",
+    "error": "Ocurrió un error",
+    "back": "Volver"
+  }
+}

@@ -2,6 +2,29 @@ use shared::{AnalyticsEventType, Network};
 use sqlx::PgPool;
 use uuid::Uuid;
 
+/// Increment the view_count for a contract by 1 in a background task.
+///
+/// This is intentionally fire-and-forget so that fetching a contract page
+/// is never blocked waiting for a write.  Any database error is logged at
+/// the WARN level but never propagated to the caller.
+#[allow(dead_code)]
+pub fn increment_view_count_async(pool: PgPool, contract_id: Uuid) {
+    tokio::spawn(async move {
+        let result = sqlx::query("UPDATE contracts SET view_count = view_count + 1 WHERE id = $1")
+            .bind(contract_id)
+            .execute(&pool)
+            .await;
+
+        if let Err(err) = result {
+            tracing::warn!(
+                contract_id = %contract_id,
+                error = ?err,
+                "failed to increment view_count"
+            );
+        }
+    });
+}
+
 /// Record an analytics event.
 ///
 /// This is intentionally fire-and-forget: callers should log errors but

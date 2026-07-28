@@ -1,121 +1,78 @@
-//! Activity feed handler — GET /api/activity-feed
-//!
-//! Implements cursor-based pagination so clients can scroll through
-//! analytics events without the bugs described in issue #337:
-//!
-//!  • total      = real COUNT(*), not entries.len()
-//!  • page       = removed in favour of next_cursor
-//!  • next_cursor = created_at of the last returned entry
-
-use axum::{
-    extract::{Query, State},
-    Json,
-};
-use chrono::{DateTime, Duration, Utc};
-use shared::{ActivityFeedParams, AnalyticsEvent, CursorPaginatedResponse};
-
-use crate::{error::AppError, state::AppState};
+use crate::error::ApiError;
+use crate::error::ApiResult;
+use crate::state::AppState;
+use axum::extract::{Query, State};
+use axum::Json;
+use shared::models::{ActivityFeedParams, AnalyticsEvent, CursorPaginatedResponse};
+use sqlx::QueryBuilder;
 
 /// GET /api/activity-feed
-///
-/// Query params (all optional):
-///   cursor     – ISO-8601 timestamp (from previous response's next_cursor)
-///   limit      – page size, default 20, capped at 100
-///   event_type – filter to a single event type
+/// Returns a cursor-paginated list of analytics events across the registry.
 pub async fn get_activity_feed(
     State(state): State<AppState>,
-    Query(mut params): Query<ActivityFeedParams>,
-) -> Result<Json<CursorPaginatedResponse<AnalyticsEvent>>, AppError> {
-    // ── Clamp inputs to safe ranges ───────────────────────────────────────
-    if params.limit > 100 {
-        params.limit = 100;
+    Query(params): Query<ActivityFeedParams>,
+) -> ApiResult<Json<CursorPaginatedResponse<AnalyticsEvent>>> {
+    let limit = params.limit.clamp(1, 100);
+
+    // 1. Build the main query
+    let mut query_builder: QueryBuilder<sqlx::Postgres> = QueryBuilder::new(
+        r#"
+        SELECT id, event_type, contract_id, user_id, metadata, created_at
+        FROM analytics_events
+        WHERE 1=1
+        "#,
+    );
+
+    if let Some(cursor) = params.cursor {
+        query_builder.push(" AND created_at < ");
+        query_builder.push_bind(cursor);
     }
-    let start_time: DateTime<Utc> = Utc::now() - Duration::days(7);
 
-    // ── 1. Real COUNT(*) with identical filters ───────────────────────────
-    //    WHERE clause must mirror the SELECT below exactly.
-    let total: i64 = match &params.event_type {
-        Some(et) => {
-            sqlx::query_scalar(
-                r#"
-                SELECT COUNT(*)
-                FROM   analytics_events
-                WHERE  created_at >= $1
-                AND    ($2::timestamptz IS NULL OR created_at < $2)
-                AND    event_type = $3
-                "#,
-            )
-            .bind(start_time)
-            .bind(params.cursor)
-            .bind(et)
-            .fetch_one(&state.db)
-            .await?
-        }
-        None => {
-            sqlx::query_scalar(
-                r#"
-                SELECT COUNT(*)
-                FROM   analytics_events
-                WHERE  created_at >= $1
-                AND    ($2::timestamptz IS NULL OR created_at < $2)
-                "#,
-            )
-            .bind(start_time)
-            .bind(params.cursor)
-            .fetch_one(&state.db)
-            .await?
-        }
-    };
+    if let Some(ref event_type) = params.event_type {
+        query_builder.push(" AND event_type = ");
+        query_builder.push_bind(event_type);
+    }
 
-    // ── 2. Fetch the page ─────────────────────────────────────────────────
-    let entries: Vec<AnalyticsEvent> = match &params.event_type {
-        Some(et) => {
-            sqlx::query_as(
-                r#"
-                SELECT id, event_type, contract_id, user_address,
-                       network, metadata, created_at
-                FROM   analytics_events
-                WHERE  created_at >= $1
-                AND    ($2::timestamptz IS NULL OR created_at < $2)
-                AND    event_type = $3
-                ORDER  BY created_at DESC
-                LIMIT  $4
-                "#,
-            )
-            .bind(start_time)
-            .bind(params.cursor)
-            .bind(et)
-            .bind(params.limit)
-            .fetch_all(&state.db)
-            .await?
-        }
-        None => {
-            sqlx::query_as(
-                r#"
-                SELECT id, event_type, contract_id, user_address,
-                       network, metadata, created_at
-                FROM   analytics_events
-                WHERE  created_at >= $1
-                AND    ($2::timestamptz IS NULL OR created_at < $2)
-                ORDER  BY created_at DESC
-                LIMIT  $3
-                "#,
-            )
-            .bind(start_time)
-            .bind(params.cursor)
-            .bind(params.limit)
-            .fetch_all(&state.db)
-            .await?
-        }
-    };
+    if let Some(contract_id) = params.contract_id {
+        query_builder.push(" AND contract_id = ");
+        query_builder.push_bind(contract_id);
+    }
 
-    // ── 3. Compute next_cursor from the oldest entry on this page ─────────
-    let next_cursor = entries.last().map(|e| e.created_at);
+    query_builder.push(" ORDER BY created_at DESC LIMIT ");
+    query_builder.push_bind(limit);
+
+    let events: Vec<AnalyticsEvent> = query_builder
+        .build_query_as()
+        .fetch_all(&state.db)
+        .await
+        .map_err(|e| ApiError::internal(format!("fetch activity feed failed: {}", e)))?;
+
+    // 2. Count total matches for this filter
+    let mut count_builder: QueryBuilder<sqlx::Postgres> =
+        QueryBuilder::new("SELECT COUNT(*) FROM analytics_events WHERE 1=1");
+
+    if let Some(ref event_type) = params.event_type {
+        count_builder.push(" AND event_type = ");
+        count_builder.push_bind(event_type);
+    }
+
+    if let Some(contract_id) = params.contract_id {
+        count_builder.push(" AND contract_id = ");
+        count_builder.push_bind(contract_id);
+    }
+
+    let total: i64 = count_builder
+        .build_query_scalar()
+        .fetch_one(&state.db)
+        .await
+        .map_err(|e| ApiError::internal(format!("count activity feed failed: {}", e)))?;
+
+    let next_cursor = events.last().map(|e| e.created_at);
 
     Ok(Json(CursorPaginatedResponse::new(
-        entries,
+        events,
         total,
-        params.limit,
+        limit,
         next_cursor,
     )))
 }

@@ -1,0 +1,18 @@
+FROM rust:1.72-slim
+
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends \
+    build-essential \
+    pkg-config \
+    libssl-dev \
+    clang \
+    llvm \
+    ca-certificates \
+    git \
+    curl \
+  && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /work
+
+# Keep the image generic so we can mount the repo at runtime
+ENTRYPOINT ["/bin/bash"]

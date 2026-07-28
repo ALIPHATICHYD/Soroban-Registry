@@ -286,7 +286,7 @@ fn dry_run(wasm_path: &str, params: &serde_json::Value) -> Result<()> {
     Ok(())
 }
 
-fn mask_secret(s: &str) -> String {
+pub fn mask_secret(s: &str) -> String {
     let s = s.trim();
     if s.starts_with('S') && s.len() >= 8 {
         let head = &s[..4];
@@ -301,7 +301,7 @@ fn mask_secret(s: &str) -> String {
     }
 }
 
-fn prompt(label: &str, default: Option<String>) -> Result<String> {
+pub fn prompt(label: &str, default: Option<String>) -> Result<String> {
     print!(
         "{}{}: ",
         label.bold(),
@@ -321,7 +321,7 @@ fn prompt(label: &str, default: Option<String>) -> Result<String> {
     }
 }
 
-fn prompt_with_validation<F>(
+pub fn prompt_with_validation<F>(
     label: &str,
     default: Option<String>,
     mut validate: F,
@@ -340,14 +340,14 @@ where
     }
 }
 
-fn confirm(label: &str, default_yes: bool) -> Result<bool> {
+pub fn confirm(label: &str, default_yes: bool) -> Result<bool> {
     let default = if default_yes { "Y" } else { "N" };
     let ans = prompt(label, Some(default.into()))?;
     let ans_l = ans.to_lowercase();
     Ok(matches!(ans_l.as_str(), "y" | "yes"))
 }
 
-fn detect_soroban() -> bool {
+pub fn detect_soroban() -> bool {
     Command::new(if cfg!(windows) { "where" } else { "which" })
         .arg("soroban")
         .output()

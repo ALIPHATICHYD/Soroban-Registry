@@ -36,6 +36,7 @@ The indexer is built with a modular architecture with clear separation of concer
 ### Installation
 
 1. **Clone and navigate to the indexer**:
+
    ```bash
    cd backend/indexer
    ```
@@ -43,6 +44,7 @@ The indexer is built with a modular architecture with clear separation of concer
 2. **Set up environment variables** (see Configuration section below)
 
 3. **Build the service**:
+
    ```bash
    cargo build --release
    ```
@@ -120,22 +122,25 @@ sudo systemctl start soroban-indexer
 ### Monitoring
 
 **Check current state:**
+
 ```sql
 SELECT * FROM indexer_state WHERE network = 'testnet';
 ```
 
 **View recent contracts:**
+
 ```sql
-SELECT contract_id, created_at FROM contracts 
+SELECT contract_id, created_at FROM contracts
 WHERE is_verified = false AND network = 'testnet'
-ORDER BY created_at DESC 
+ORDER BY created_at DESC
 LIMIT 10;
 ```
 
 **Check for errors:**
+
 ```sql
-SELECT network, consecutive_failures, error_message, updated_at 
-FROM indexer_state 
+SELECT network, consecutive_failures, error_message, updated_at
+FROM indexer_state
 ORDER BY updated_at DESC;
 ```
 
@@ -144,24 +149,28 @@ ORDER BY updated_at DESC;
 If the indexer falls significantly behind:
 
 1. **Check the logs for errors:**
+
    ```bash
    tail -f indexer.log | grep ERROR
    ```
 
 2. **Verify RPC endpoint is responsive:**
+
    ```bash
    curl https://rpc-testnet.stellar.org/health
    ```
 
 3. **Check database connection:**
+
    ```bash
    psql $DATABASE_URL -c "SELECT 1"
    ```
 
 4. **Manual state adjustment (if needed):**
+
    ```sql
    -- WARNING: Only do this if you understand the implications
-   UPDATE indexer_state 
+   UPDATE indexer_state
    SET last_indexed_ledger_height = 12345
    WHERE network = 'testnet';
    ```
@@ -185,13 +194,14 @@ When a reorg occurs:
    ```
 
 **Manual recovery if automatic fails:**
+
 ```sql
 -- View current checkpoint
-SELECT last_checkpoint_ledger_height FROM indexer_state 
+SELECT last_checkpoint_ledger_height FROM indexer_state
 WHERE network = 'testnet';
 
 -- Update to safe checkpoint (example: 100 ledgers back)
-UPDATE indexer_state 
+UPDATE indexer_state
 SET last_indexed_ledger_height = last_checkpoint_ledger_height - 100
 WHERE network = 'testnet';
 ```
@@ -231,18 +241,20 @@ systemctl status soroban-indexer
 journalctl -u soroban-indexer -n 100
 
 # Check database state
-SELECT network, consecutive_failures, indexed_at 
+SELECT network, consecutive_failures, indexed_at
 FROM indexer_state;
 ```
 
 ## Performance Tuning
 
 ### Polling Interval
+
 - **Faster indexing (10s):** `STELLAR_POLL_INTERVAL_SECS=10` - More RPC calls
 - **Balanced (30s):** `STELLAR_POLL_INTERVAL_SECS=30` - Recommended default
 - **Lower load (60s):** `STELLAR_POLL_INTERVAL_SECS=60` - Less frequent indexing
 
 ### Database Connections
+
 ```bash
 # Small deployments
 DB_MAX_CONNECTIONS=5
@@ -252,6 +264,7 @@ DB_MAX_CONNECTIONS=20
 ```
 
 ### Backoff Strategy
+
 ```bash
 # Aggressive recovery (retry quickly)
 INDEXER_BACKOFF_BASE_SECS=1
@@ -272,6 +285,7 @@ The service outputs structured, machine-parseable logs to stdout with the follow
 - **Context** - Ledger height, contract ID, network, attempt count, etc.
 
 **Example log entries:**
+
 ```
 INFO: Stellar Blockchain Indexer Service starting...
 INFO: Network configuration loaded: network=testnet, endpoint=https://rpc-testnet.stellar.org, poll_interval=30s
@@ -292,7 +306,9 @@ WARN: attempt=2, backoff_secs=2, Backing off before retry
 The indexer uses these tables:
 
 ### indexer_state
+
 Tracks indexing progress per network:
+
 ```sql
 CREATE TABLE indexer_state (
     id SERIAL PRIMARY KEY,
@@ -308,7 +324,9 @@ CREATE TABLE indexer_state (
 ```
 
 ### contracts
+
 Discovered contract records:
+
 ```sql
 CREATE TABLE contracts (
     id UUID PRIMARY KEY,
@@ -323,11 +341,13 @@ CREATE TABLE contracts (
 ## Testing
 
 Run all tests:
+
 ```bash
 cargo test
 ```
 
 Run specific module tests:
+
 ```bash
 cargo test backoff::tests
 cargo test detector::tests
@@ -335,6 +355,7 @@ cargo test state::tests
 ```
 
 Run with output:
+
 ```bash
 cargo test -- --nocapture
 ```
@@ -342,54 +363,64 @@ cargo test -- --nocapture
 ## Acceptance Criteria Verification
 
 ### ✅ Service Stability (24+ hours)
+
 - [x] No unwrap() calls in production code paths
 - [x] All errors handled explicitly with Result types
 - [x] Graceful shutdown via SIGTERM/SIGINT
 - [x] Exponential backoff prevents RPC hammering
 
 ### ✅ Polling Interval (30 seconds)
+
 - [x] Configurable via STELLAR_POLL_INTERVAL_SECS
 - [x] Validated at startup (1-300 second range)
 - [x] No hardcoded intervals
 
 ### ✅ Contract Detection
+
 - [x] Identifies createContract operations (type_code 110)
 - [x] Extracts contract ID and deployer address
 - [x] Validates contract ID format (56 chars, starts with 'C')
 
 ### ✅ Database Records
+
 - [x] Contracts inserted with is_verified = false
 - [x] Duplicate handling via existence checks
 - [x] Automatic publisher record creation
 
 ### ✅ State Persistence
+
 - [x] Last ledger height stored in indexer_state table
 - [x] Resume on restart without re-processing
 - [x] Atomic updates - state only advanced after successful DB write
 
 ### ✅ Exponential Backoff
+
 - [x] Triggered on RPC failures
 - [x] Doubles interval on each retry
 - [x] Capped at configurable maximum
 - [x] Every retry logged with timestamp and reason
 
 ### ✅ Reorg Handling
+
 - [x] Detects ledger reorgs
 - [x] Falls back to checkpoint
 - [x] Resumes cleanly without state corruption
 
 ### ✅ Multi-Network Support
+
 - [x] Mainnet, Testnet, Futurenet via STELLAR_NETWORK
 - [x] No hardcoded values
 - [x] No code changes required for network switch
 
 ### ✅ Structured Logging
+
 - [x] Timestamps on all entries
 - [x] Ledger height included
 - [x] Contract IDs logged
 - [x] Error and backoff events logged
 
 ### ✅ 2-Minute Latency
+
 - [x] 30-second polling interval
 - [x] <10 seconds processing
 - [x] <20 seconds DB write
@@ -398,21 +429,25 @@ cargo test -- --nocapture
 ## Troubleshooting
 
 ### "Failed to load indexer state"
+
 - Check database connection string
 - Verify migrations have run
 - Check database permissions
 
 ### "RPC endpoint health check failed"
+
 - Verify endpoint URL is correct
 - Check network connectivity
 - Try alternative RPC endpoint
 
 ### "Reorg detected repeatedly"
+
 - Check if RPC node is synced
 - Consider longer checkpoint depth
 - May indicate network instability
 
 ### "High consecutive failures"
+
 - Check logs for specific errors
 - Verify database is accessible
 - Check RPC endpoint availability
@@ -430,4 +465,3 @@ To add new features or modify the indexer:
 ## License
 
 MIT - See LICENSE file in repository
-

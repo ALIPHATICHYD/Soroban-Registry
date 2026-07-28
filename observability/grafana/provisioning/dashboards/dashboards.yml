@@ -1,0 +1,12 @@
+apiVersion: 1
+
+providers:
+  - name: Soroban Registry
+    orgId: 1
+    folder: Soroban Registry
+    type: file
+    disableDeletion: false
+    editable: true
+    options:
+      path: /etc/grafana/dashboards
+

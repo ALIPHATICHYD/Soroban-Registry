@@ -1,5 +1,5 @@
-import React from 'react';
 import FormField from './FormField';
+import { getFormControlId, getTextareaClassName, getAriaDescribedBy } from '@/lib/utils/form';
 
 type Props = React.TextareaHTMLAttributes<HTMLTextAreaElement> & {
   label?: string;
@@ -8,17 +8,18 @@ type Props = React.TextareaHTMLAttributes<HTMLTextAreaElement> & {
 };
 
 export default function FormTextarea({ label, error, description, className, ...rest }: Props) {
-  const id = rest.id || rest.name;
+  const id = getFormControlId(rest.id, rest.name);
+  const controlClassName = getTextareaClassName(className);
+  const ariaDescribedBy = getAriaDescribedBy(id, !!error);
+
   return (
     <FormField label={label} id={id} error={error} description={description}>
       <textarea
         {...rest}
         id={id}
-        className={
-          'w-full px-3 py-2 rounded-lg border border-border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/20 ' +
-          (className || '')
-        }
+        className={controlClassName}
         aria-invalid={!!error}
+        aria-describedby={ariaDescribedBy}
       />
     </FormField>
   );

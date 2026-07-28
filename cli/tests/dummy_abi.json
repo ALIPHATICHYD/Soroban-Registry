@@ -1,35 +1,35 @@
 [
-    {
-        "type": "function",
-        "name": "hello",
-        "inputs": [
-            {
-                "name": "to",
-                "value": {
-                    "type": "symbol"
-                },
-                "doc": "The name to say hello to"
-            }
-        ],
-        "outputs": [
-            {
-                "type": "symbol"
-            }
-        ],
-        "doc": "Say hello to someone"
-    },
-    {
-        "type": "struct",
-        "name": "HelloConfig",
-        "fields": [
-            {
-                "name": "greeting",
-                "value": {
-                    "type": "string"
-                },
-                "doc": "The greeting to use"
-            }
-        ],
-        "doc": "Configuration for the hello function"
-    }
+  {
+    "type": "function",
+    "name": "hello",
+    "inputs": [
+      {
+        "name": "to",
+        "value": {
+          "type": "symbol"
+        },
+        "doc": "The name to say hello to"
+      }
+    ],
+    "outputs": [
+      {
+        "type": "symbol"
+      }
+    ],
+    "doc": "Say hello to someone"
+  },
+  {
+    "type": "struct",
+    "name": "HelloConfig",
+    "fields": [
+      {
+        "name": "greeting",
+        "value": {
+          "type": "string"
+        },
+        "doc": "The greeting to use"
+      }
+    ],
+    "doc": "Configuration for the hello function"
+  }
 ]

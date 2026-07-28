@@ -1,3 +1,4 @@
+use crate::net::RequestBuilderExt;
 use anyhow::{bail, Context, Result};
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use chrono::Utc;
@@ -45,11 +46,11 @@ pub async fn sign_package(
     println!("  {}: {}", "Contract ID".bold(), contract_id.bright_black());
     println!("  {}: {}", "Version".bold(), version);
 
-    let client = reqwest::Client::new();
+    let client = crate::net::client();
     let url = format!("{}/api/signatures", api_url);
 
     let expires_dt = expires_at
-        .map(|s| chrono::DateTime::parse_from_rfc3339(s))
+        .map(chrono::DateTime::parse_from_rfc3339)
         .transpose()
         .context("Invalid expires_at format, use RFC3339 (e.g., 2025-12-31T23:59:59Z)")?
         .map(|dt| dt.with_timezone(&Utc));
@@ -68,7 +69,7 @@ pub async fn sign_package(
     let response = client
         .post(&url)
         .json(&payload)
-        .send()
+        .send_with_retry()
         .await
         .context("Failed to reach registry API")?;
 
@@ -115,7 +116,7 @@ pub async fn verify_package(
     println!("  {}: {}", "Package".bold(), package_path.bright_black());
     println!("  {}: {}", "Hash".bold(), package_hash.bright_black());
 
-    let client = reqwest::Client::new();
+    let client = crate::net::client();
 
     if let Some(sig_b64) = signature_arg {
         verify_with_signature(
@@ -152,7 +153,7 @@ async fn verify_with_signature(
     let response = client
         .post(&url)
         .json(&payload)
-        .send()
+        .send_with_retry()
         .await
         .context("Failed to reach registry API")?;
 
@@ -206,7 +207,7 @@ async fn verify_from_registry(
 
     let response = client
         .get(&url)
-        .send()
+        .send_with_retry()
         .await
         .context("Failed to reach registry API")?;
 
@@ -293,7 +294,7 @@ pub async fn revoke_signature(
 ) -> Result<()> {
     println!("\n{}", "Revoking signature...".bold().cyan());
 
-    let client = reqwest::Client::new();
+    let client = crate::net::client();
     let url = format!("{}/api/signatures/{}/revoke", api_url, signature_id);
 
     let payload = json!({
@@ -304,7 +305,7 @@ pub async fn revoke_signature(
     let response = client
         .post(&url)
         .json(&payload)
-        .send()
+        .send_with_retry()
         .await
         .context("Failed to reach registry API")?;
 
@@ -330,12 +331,12 @@ pub async fn get_chain_of_custody(api_url: &str, contract_id: &str) -> Result<()
     println!("\n{}", "Chain of Custody".bold().cyan());
     println!("{}", "=".repeat(70).cyan());
 
-    let client = reqwest::Client::new();
+    let client = crate::net::client();
     let url = format!("{}/api/signatures/custody/{}", api_url, contract_id);
 
     let response = client
         .get(&url)
-        .send()
+        .send_with_retry()
         .await
         .context("Failed to reach registry API")?;
 
@@ -393,7 +394,7 @@ pub async fn get_transparency_log(
     println!("\n{}", "Transparency Log".bold().cyan());
     println!("{}", "=".repeat(70).cyan());
 
-    let client = reqwest::Client::new();
+    let client = crate::net::client();
     let mut url = format!("{}/api/signatures/transparency?limit={}", api_url, limit);
 
     if let Some(cid) = contract_id {
@@ -405,7 +406,7 @@ pub async fn get_transparency_log(
 
     let response = client
         .get(&url)
-        .send()
+        .send_with_retry()
         .await
         .context("Failed to reach registry API")?;
 
@@ -539,12 +540,12 @@ fn derive_stellar_address(public_key_bytes: &[u8; 32]) -> String {
     use sha2::{Digest as _, Sha256};
 
     let sha256_hash = Sha256::digest(public_key_bytes);
-    let ripemd_hash = Ripemd160::digest(&sha256_hash);
+    let ripemd_hash = Ripemd160::digest(sha256_hash);
 
     let mut versioned = vec![0x00];
     versioned.extend_from_slice(&ripemd_hash);
 
-    let checksum = Sha256::digest(&Sha256::digest(&versioned));
+    let checksum = Sha256::digest(Sha256::digest(&versioned));
     versioned.extend_from_slice(&checksum[..4]);
 
     bs58::encode(&versioned).into_string()
@@ -559,7 +560,10 @@ pub fn verify_contract_local(
     signature_b64: &str,
     public_key_b64: &str,
 ) -> Result<()> {
-    println!("\n{}", "Verifying contract binary signature...".bold().cyan());
+    println!(
+        "\n{}",
+        "Verifying contract binary signature...".bold().cyan()
+    );
 
     let wasm_bytes = read_package_file(wasm_path)?;
     let wasm_hash = compute_hash(&wasm_bytes);

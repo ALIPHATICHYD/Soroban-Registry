@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 /// Soroban native types supported in contracts
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum SorobanType {
     Bool,
@@ -163,14 +163,14 @@ impl SorobanType {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(PartialEq, Eq, Serialize, Deserialize)]
 pub struct StructField {
     pub name: String,
     pub field_type: SorobanType,
     pub doc: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(PartialEq, Eq, Serialize, Deserialize)]
 pub struct EnumVariant {
     pub name: String,
     pub value: Option<u32>,
@@ -178,7 +178,7 @@ pub struct EnumVariant {
     pub doc: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum FunctionVisibility {
     #[default]
@@ -186,14 +186,14 @@ pub enum FunctionVisibility {
     Internal,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Serialize, Deserialize)]
 pub struct FunctionParam {
     pub name: String,
     pub param_type: SorobanType,
     pub doc: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Serialize, Deserialize)]
 pub struct ContractFunction {
     pub name: String,
     pub visibility: FunctionVisibility,
@@ -203,7 +203,7 @@ pub struct ContractFunction {
     pub is_mutable: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Serialize, Deserialize)]
 pub struct ContractABI {
     pub name: String,
     pub version: Option<String>,
@@ -240,7 +240,7 @@ impl ContractABI {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Serialize, Deserialize)]
 pub struct ContractEvent {
     pub name: String,
     pub topics: Vec<FunctionParam>,
@@ -248,9 +248,99 @@ pub struct ContractEvent {
     pub doc: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Serialize, Deserialize)]
 pub struct ContractError {
     pub name: String,
     pub code: u32,
     pub doc: Option<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn soroban_type_serialization_round_trips() {
+        let ty = SorobanType::Map {
+            key_type: Box::new(SorobanType::Symbol),
+            value_type: Box::new(SorobanType::Option {
+                value_type: Box::new(SorobanType::BytesN { n: 32 }),
+            }),
+        };
+
+        let json = serde_json::to_string(&ty).expect("SorobanType should serialize");
+        let decoded: SorobanType =
+            serde_json::from_str(&json).expect("SorobanType should deserialize");
+
+        assert!(matches!(
+            decoded,
+            SorobanType::Map {
+                key_type,
+                value_type
+            } if *key_type == SorobanType::Symbol
+                && matches!(*value_type, SorobanType::Option { .. })
+        ));
+    }
+
+    #[test]
+    fn contract_abi_serialization_round_trips() {
+        let mut abi = ContractABI::new("Token".to_string());
+        abi.version = Some("1.0.0".to_string());
+        abi.types.insert(
+            "Balance".to_string(),
+            SorobanType::Struct {
+                name: "Balance".to_string(),
+                fields: vec![StructField {
+                    name: "amount".to_string(),
+                    field_type: SorobanType::I128,
+                    doc: Some("Current balance".to_string()),
+                }],
+            },
+        );
+        abi.functions.push(ContractFunction {
+            name: "balance".to_string(),
+            visibility: FunctionVisibility::Public,
+            params: vec![FunctionParam {
+                name: "id".to_string(),
+                param_type: SorobanType::Address,
+                doc: None,
+            }],
+            return_type: SorobanType::I128,
+            doc: Some("Read balance".to_string()),
+            is_mutable: false,
+        });
+        abi.events.push(ContractEvent {
+            name: "Transfer".to_string(),
+            topics: vec![FunctionParam {
+                name: "from".to_string(),
+                param_type: SorobanType::Address,
+                doc: None,
+            }],
+            data: vec![FunctionParam {
+                name: "amount".to_string(),
+                param_type: SorobanType::I128,
+                doc: None,
+            }],
+            doc: None,
+        });
+        abi.errors.push(ContractError {
+            name: "InsufficientBalance".to_string(),
+            code: 1,
+            doc: None,
+        });
+
+        let json = serde_json::to_string(&abi).expect("ContractABI should serialize");
+        let decoded: ContractABI =
+            serde_json::from_str(&json).expect("ContractABI should deserialize");
+
+        assert_eq!(decoded.name, "Token");
+        assert_eq!(decoded.version.as_deref(), Some("1.0.0"));
+        assert!(decoded.has_function("balance"));
+        assert_eq!(decoded.functions[0].return_type.display_name(), "i128");
+        assert_eq!(
+            decoded.events[0].topics[0].param_type.display_name(),
+            "Address"
+        );
+        assert_eq!(decoded.errors[0].code, 1);
+    }
 }

@@ -90,7 +90,14 @@ impl NetworkConfig {
 #[derive(Debug, Clone)]
 pub struct DatabaseConfig {
     pub connection_string: String,
+    pub min_connections: u32,
     pub max_connections: u32,
+    /// Idle connections are closed after this many seconds.
+    pub idle_timeout_secs: u64,
+    /// Connections are recycled after this many seconds.
+    pub max_lifetime_secs: u64,
+    /// Queries exceeding this duration (ms) trigger a warning log.
+    pub slow_query_threshold_ms: f64,
 }
 
 impl DatabaseConfig {
@@ -99,19 +106,51 @@ impl DatabaseConfig {
         let connection_string = env::var("DATABASE_URL")
             .map_err(|_| ConfigError::MissingEnv("DATABASE_URL".to_string()))?;
 
-        let max_connections = env::var("DB_MAX_CONNECTIONS")
+        let min_connections = env::var("DB_MIN_POOL_SIZE")
+            .unwrap_or_else(|_| "2".to_string())
+            .parse::<u32>()
+            .map_err(|e| ConfigError::InvalidConfig(format!("Invalid DB_MIN_POOL_SIZE: {}", e)))?;
+
+        let max_connections = env::var("DB_MAX_POOL_SIZE")
+            .or_else(|_| env::var("DB_MAX_CONNECTIONS"))
             .unwrap_or_else(|_| "10".to_string())
             .parse::<u32>()
-            .map_err(|e| ConfigError::InvalidConfig(format!("Invalid max_connections: {}", e)))?;
+            .map_err(|e| ConfigError::InvalidConfig(format!("Invalid max_connections: {}", e)))?
+            .min(50);
+
+        let idle_timeout_secs = env::var("DB_IDLE_TIMEOUT_SECS")
+            .unwrap_or_else(|_| "600".to_string())
+            .parse::<u64>()
+            .map_err(|e| {
+                ConfigError::InvalidConfig(format!("Invalid DB_IDLE_TIMEOUT_SECS: {}", e))
+            })?;
+
+        let max_lifetime_secs = env::var("DB_MAX_LIFETIME_SECS")
+            .unwrap_or_else(|_| "1800".to_string())
+            .parse::<u64>()
+            .map_err(|e| {
+                ConfigError::InvalidConfig(format!("Invalid DB_MAX_LIFETIME_SECS: {}", e))
+            })?;
+
+        let slow_query_threshold_ms = env::var("DB_SLOW_QUERY_THRESHOLD_MS")
+            .unwrap_or_else(|_| "100".to_string())
+            .parse::<f64>()
+            .map_err(|e| {
+                ConfigError::InvalidConfig(format!("Invalid DB_SLOW_QUERY_THRESHOLD_MS: {}", e))
+            })?;
 
         debug!(
-            "Database configuration loaded: max_connections={}",
-            max_connections
+            "Database configuration loaded: min_connections={}, max_connections={}, idle_timeout={}s",
+            min_connections, max_connections, idle_timeout_secs
         );
 
         Ok(DatabaseConfig {
             connection_string,
+            min_connections,
             max_connections,
+            idle_timeout_secs,
+            max_lifetime_secs,
+            slow_query_threshold_ms,
         })
     }
 }

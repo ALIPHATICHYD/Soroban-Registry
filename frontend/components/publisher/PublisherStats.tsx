@@ -7,9 +7,10 @@ interface PublisherStatsProps {
 }
 
 export function PublisherStats({ publisher }: PublisherStatsProps) {
-  const successRate = publisher.totalContracts > 0
-    ? (publisher.verifiedContracts / publisher.totalContracts) * 100
-    : 0;
+  const successRate =
+    publisher.totalContracts > 0
+      ? (publisher.verifiedContracts / publisher.totalContracts) * 100
+      : 0;
 
   const getSuccessColor = (rate: number) => {
     if (rate >= 70) return "text-green-600 bg-green-50 dark:bg-green-900/20";

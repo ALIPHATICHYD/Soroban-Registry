@@ -1,5 +1,6 @@
 #![allow(dead_code)]
 
+use crate::net::RequestBuilderExt;
 use anyhow::{Context, Result};
 use colored::*;
 use serde::{Deserialize, Serialize};
@@ -118,7 +119,7 @@ pub async fn run(
             println!("\n{}", "Posting results to registry...".bold().cyan());
         }
 
-        let client = reqwest::Client::new();
+        let client = crate::net::client();
         // Just demonstrating the endpoint structure.
         let url = format!(
             "{}/api/contracts/00000000-0000-0000-0000-000000000000/formal-verification",
@@ -156,7 +157,7 @@ pub async fn run(
             }).collect::<Vec<_>>()
         });
 
-        let resp = client.post(&url).json(&payload).send().await;
+        let resp = client.post(&url).json(&payload).send_with_retry().await;
         match resp {
             Ok(r) if r.status().is_success() => {
                 if output_format != "json" {

@@ -1,4 +1,4 @@
-export type TimePeriod = '7d' | '30d' | '90d' | 'all-time';
+export type TimePeriod = "7d" | "30d" | "90d" | "all-time";
 
 export interface StatsResponse {
   totalContracts: number;

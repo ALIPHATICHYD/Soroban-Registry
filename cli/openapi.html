@@ -1,84 +1,86 @@
-<!DOCTYPE html>
+<!doctype html>
 <html>
-<head>
-  <meta charset="UTF-8">
-  <title>dummy_abi - API Docs</title>
-  <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css">
-</head>
-<body>
-  <div id="swagger-ui"></div>
-  <script type="application/json" id="openapi-spec">{
-  "openapi": "3.0.0",
-  "info": {
-    "title": "dummy_abi",
-    "description": null,
-    "version": "0.0.0"
-  },
-  "paths": {
-    "/invoke/hello": {
-      "post": {
-        "operation_id": "hello",
-        "summary": "Say hello to someone",
-        "description": "Say hello to someone",
-        "request_body": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "to": {
-                    "type": "string",
-                    "description": "Symbol",
-                    "example": ""
+  <head>
+    <meta charset="UTF-8" />
+    <title>dummy_abi - API Docs</title>
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css"
+    />
+  </head>
+  <body>
+    <div id="swagger-ui"></div>
+    <script type="application/json" id="openapi-spec">
+      {
+        "openapi": "3.0.0",
+        "info": {
+          "title": "dummy_abi",
+          "description": null,
+          "version": "0.0.0"
+        },
+        "paths": {
+          "/invoke/hello": {
+            "post": {
+              "operation_id": "hello",
+              "summary": "Say hello to someone",
+              "description": "Say hello to someone",
+              "request_body": {
+                "required": true,
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "type": "object",
+                      "properties": {
+                        "to": {
+                          "type": "string",
+                          "description": "Symbol",
+                          "example": ""
+                        }
+                      },
+                      "required": ["to"],
+                      "example": {
+                        "to": ""
+                      }
+                    },
+                    "example": {
+                      "to": ""
+                    }
                   }
-                },
-                "required": [
-                  "to"
-                ],
-                "example": {
-                  "to": ""
                 }
               },
-              "example": {
-                "to": ""
-              }
+              "responses": {
+                "200": {
+                  "description": "Success. Returns: Symbol",
+                  "content": {
+                    "application/json": {
+                      "schema": {
+                        "type": "string",
+                        "description": "Symbol",
+                        "example": ""
+                      },
+                      "example": ""
+                    }
+                  }
+                }
+              },
+              "tags": ["Contract"]
             }
           }
-        },
-        "responses": {
-          "200": {
-            "description": "Success. Returns: Symbol",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "string",
-                  "description": "Symbol",
-                  "example": ""
-                },
-                "example": ""
-              }
-            }
-          }
-        },
-        "tags": [
-          "Contract"
-        ]
+        }
       }
-    }
-  }
-}</script>
-  <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js"></script>
-  <script>
-    (function() {
-      var el = document.getElementById('openapi-spec');
-      try {
-        var spec = JSON.parse(el.textContent);
-        SwaggerUIBundle({ spec: spec, dom_id: '#swagger-ui' });
-      } catch (e) {
-        document.getElementById('swagger-ui').innerHTML = '<p>Failed to load spec: ' + e.message + '</p>';
-      }
-    })();
-  </script>
-</body>
+    </script>
+    <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js"></script>
+    <script>
+      (function () {
+        var el = document.getElementById("openapi-spec");
+        try {
+          var spec = JSON.parse(el.textContent);
+          SwaggerUIBundle({ spec: spec, dom_id: "#swagger-ui" });
+        } catch (e) {
+          document.getElementById("swagger-ui").innerHTML =
+            "<p>Failed to load spec: " + e.message + "</p>";
+        }
+      })();
+    </script>
+  </body>
 </html>

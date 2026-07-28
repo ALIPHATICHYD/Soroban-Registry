@@ -1,9 +1,9 @@
-import { Tag } from '../types/tag';
-import { MOCK_TAGS } from '../mocks/tags.mock';
-import { globalCache } from '../utils/cache';
+import { Tag } from "../types/tag";
+import { MOCK_TAGS } from "../mocks/tags.mock";
+import { globalCache } from "../utils/cache";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
-const USE_MOCKS = process.env.NEXT_PUBLIC_USE_MOCKS === 'true';
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "";
+const USE_MOCKS = process.env.NEXT_PUBLIC_USE_MOCKS === "true";
 const CACHE_TTL_SECONDS = 300; // 5 minutes
 
 export async function getTags(prefix: string): Promise<Tag[]> {
@@ -25,7 +25,7 @@ export async function getTags(prefix: string): Promise<Tag[]> {
   if (!USE_MOCKS) {
     // Real API call
     const res = await fetch(
-      `${API_URL}/api/tags?prefix=${encodeURIComponent(normalizedPrefix)}`
+      `${API_URL}/api/tags?prefix=${encodeURIComponent(normalizedPrefix)}`,
     );
     if (!res.ok) {
       throw new Error(`Failed to fetch tags: ${res.status}`);
@@ -34,14 +34,17 @@ export async function getTags(prefix: string): Promise<Tag[]> {
   } else {
     // Mock fallback
     const filteredTags = MOCK_TAGS.filter((tag) =>
-      tag.name.toLowerCase().includes(normalizedPrefix)
+      tag.name.toLowerCase().includes(normalizedPrefix),
     );
 
     const uniqueTagsMap = new Map<string, Tag>();
     const uniqueNamesSet = new Set<string>();
 
     filteredTags.forEach((tag) => {
-      if (!uniqueTagsMap.has(tag.id) && !uniqueNamesSet.has(tag.name.toLowerCase())) {
+      if (
+        !uniqueTagsMap.has(tag.id) &&
+        !uniqueNamesSet.has(tag.name.toLowerCase())
+      ) {
         uniqueTagsMap.set(tag.id, tag);
         uniqueNamesSet.add(tag.name.toLowerCase());
       }

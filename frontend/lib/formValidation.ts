@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from "react";
 
 export type Errors<T> = Partial<Record<keyof T, string | undefined>>;
 
@@ -43,19 +43,30 @@ export function useFormValidation<T extends Record<string, unknown>>(opts: {
   }, [values, validate, debounceMs, runValidation]);
 
   const handleChange = useCallback(
-    (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
+    (
+      e: React.ChangeEvent<
+        HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement
+      >,
+    ) => {
       const { name, type } = e.target as HTMLInputElement;
       let value: string | boolean = (e.target as HTMLInputElement).value;
-      if (type === 'checkbox') value = (e.target as HTMLInputElement).checked;
+      if (type === "checkbox") value = (e.target as HTMLInputElement).checked;
       setValues((v) => ({ ...v, [name]: value }));
     },
     [],
   );
 
-  const handleBlur = useCallback((e: React.FocusEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
-    const name = e.target.name;
-    setTouched((t) => ({ ...t, [name]: true }));
-  }, []);
+  const handleBlur = useCallback(
+    (
+      e: React.FocusEvent<
+        HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement
+      >,
+    ) => {
+      const name = e.target.name;
+      setTouched((t) => ({ ...t, [name]: true }));
+    },
+    [],
+  );
 
   const setFieldValue = useCallback((name: keyof T, value: unknown) => {
     setValues((v) => ({ ...v, [name]: value }));
@@ -63,7 +74,7 @@ export function useFormValidation<T extends Record<string, unknown>>(opts: {
 
   const handleSubmit = useCallback(
     async (e?: React.FormEvent) => {
-      if (e && typeof e.preventDefault === 'function') e.preventDefault();
+      if (e && typeof e.preventDefault === "function") e.preventDefault();
       if (validate) {
         const next = await runValidation(values);
         setErrors(next);
@@ -91,26 +102,29 @@ export function useFormValidation<T extends Record<string, unknown>>(opts: {
 
 // Basic validators
 export const validators = {
-  required: (v: unknown) => (v === undefined || v === null || v === '' ? 'Required' : undefined),
+  required: (v: unknown) =>
+    v === undefined || v === null || v === "" ? "Required" : undefined,
   url: (v: unknown) => {
     if (!v) return undefined;
     try {
       new URL(String(v));
       return undefined;
     } catch {
-      return 'Invalid URL';
+      return "Invalid URL";
     }
   },
   semver: (v: unknown) => {
     if (!v) return undefined;
     const semverRe = /^\d+\.\d+\.\d+(-[0-9A-Za-z-.]+)?(\+[0-9A-Za-z-.]+)?$/;
-    return semverRe.test(String(v)) ? undefined : 'Invalid semver (e.g. 1.2.3)';
+    return semverRe.test(String(v)) ? undefined : "Invalid semver (e.g. 1.2.3)";
   },
   // Stellar public key (starts with G, 56 chars)
   stellarPublicKey: (v: unknown) => {
     if (!v) return undefined;
     const s = String(v);
-    return s.length === 56 && s[0] === 'G' ? undefined : 'Invalid Stellar public key';
+    return s.length === 56 && s[0] === "G"
+      ? undefined
+      : "Invalid Stellar public key";
   },
 };
 

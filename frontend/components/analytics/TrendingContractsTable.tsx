@@ -1,8 +1,7 @@
-import React from 'react';
 import Link from 'next/link';
 import { ArrowUpRight, Minus, ArrowDownRight } from 'lucide-react';
 
-export default function TrendingContractsTable({ data }: { data: any[] }) {
+export default function TrendingContractsTable({ data }: { data: Record<string, unknown>[] }) {
   if (!data || data.length === 0) {
     return <div className="h-32 flex items-center justify-center text-muted-foreground text-sm border-t border-border">No trending contracts available</div>;
   }
@@ -21,8 +20,8 @@ export default function TrendingContractsTable({ data }: { data: any[] }) {
         </thead>
         <tbody className="divide-y divide-border">
           {data.map((contract, idx) => {
-            const current = contract.interactions_this_week || 0;
-            const previous = contract.interactions_last_week || 0;
+            const current = (contract.interactions_this_week as number) || 0;
+            const previous = (contract.interactions_last_week as number) || 0;
             let trendIcon = <Minus className="w-4 h-4 text-muted-foreground" />;
             let trendClass = "text-muted-foreground bg-accent";
             let percentChange = 0;
@@ -42,17 +41,17 @@ export default function TrendingContractsTable({ data }: { data: any[] }) {
             }
 
             return (
-              <tr key={contract.id} className="hover:bg-muted/30 transition-colors">
+              <tr key={contract.id as React.Key} className="hover:bg-muted/30 transition-colors">
                 <td className="px-5 py-4 font-semibold text-foreground">#{idx + 1}</td>
                 <td className="px-5 py-4">
-                  <Link href={`/contracts/${contract.id}`} className="font-semibold text-foreground hover:text-primary transition-colors pr-8">
-                    {contract.name || 'Unnamed'}
+                  <Link href={`/contracts/${contract.id as string}`} className="font-semibold text-foreground hover:text-primary transition-colors pr-8">
+                    {(contract.name as string) || 'Unnamed'}
                   </Link>
-                  <p className="text-xs text-muted-foreground font-mono mt-0.5">{contract.contract_id.substring(0, 8)}...{contract.contract_id.slice(-8)}</p>
+                  <p className="text-xs text-muted-foreground font-mono mt-0.5">{(contract.contract_id as string).substring(0, 8)}...{(contract.contract_id as string).slice(-8)}</p>
                 </td>
                 <td className="px-5 py-4">
                   <span className="px-2.5 py-1 rounded-full text-xs font-medium bg-secondary text-secondary-foreground">
-                    {contract.network}
+                    {contract.network as string}
                   </span>
                 </td>
                 <td className="px-5 py-4 text-foreground font-semibold">

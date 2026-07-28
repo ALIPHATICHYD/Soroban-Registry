@@ -4,10 +4,11 @@
 //! that need validation when received from clients.
 
 use shared::models::{
-    ChangePublisherRequest, CreateContractVersionRequest, CreateInteractionBatchRequest,
+    AdvancedSearchRequest, BulkStatusUpdateRequest, ChangePublisherRequest, ContractExportRequest,
+    ContractImportRequest, CreateContractVersionRequest, CreateInteractionBatchRequest,
     CreateInteractionRequest, CreateMigrationRequest, DependencyDeclaration, PublishRequest,
-    Publisher, UpdateContractMetadataRequest, UpdateContractStatusRequest,
-    UpdateMigrationStatusRequest, VerifyRequest,
+    Publisher, SaveFavoriteSearchRequest, UpdateContractMetadataRequest,
+    UpdateContractStatusRequest, UpdateMigrationStatusRequest, VerifyRequest,
 };
 
 use super::extractors::{FieldError, Validatable, ValidationBuilder};
@@ -39,7 +40,13 @@ const MAX_TAG_LENGTH: usize = 50;
 const MAX_SOURCE_CODE_BYTES: usize = 1024 * 1024;
 /// Maximum JSON nesting depth
 const MAX_JSON_DEPTH: usize = 10;
-/// Allowed categories for contracts
+/// Allowed categories for contracts.
+///
+/// TODO(issue #414): Replace this static whitelist with a live database lookup
+/// against the `contract_categories` table once the category management system
+/// is fully integrated.  The seeded default categories below match the rows
+/// inserted by migration 051_contract_categories.sql, so existing contract data
+/// continues to validate correctly in the meantime.
 const ALLOWED_CATEGORIES: &[&str] = &["DEX", "Lending", "Bridge", "Oracle", "Token", "Other"];
 /// Maximum length for dependency name
 const MAX_DEPENDENCY_NAME_LENGTH: usize = 255;
@@ -55,6 +62,7 @@ const MAX_DEPENDENCIES_COUNT: usize = 50;
 impl Validatable for PublishRequest {
     fn sanitize(&mut self) {
         self.contract_id = normalize_contract_id(&self.contract_id);
+        self.wasm_hash = trim(&self.wasm_hash);
         self.name = sanitize_name(&self.name);
         sanitize_description_optional(&mut self.description);
         self.publisher_address = normalize_stellar_address(&self.publisher_address);
@@ -78,6 +86,8 @@ impl Validatable for PublishRequest {
         let mut builder = ValidationBuilder::new();
 
         builder.check("contract_id", || validate_contract_id(&self.contract_id));
+
+        builder.check("wasm_hash", || validate_wasm_hash(&self.wasm_hash));
 
         builder.check("name", || {
             if self.name.is_empty() {
@@ -173,6 +183,78 @@ impl Validatable for VerifyRequest {
     }
 }
 
+impl Validatable for ContractExportRequest {
+    fn sanitize(&mut self) {
+        if let Some(ref mut query) = self.filters.query {
+            *query = trim(query);
+            if query.is_empty() {
+                self.filters.query = None;
+            }
+        }
+
+        if let Some(ref mut category) = self.filters.category {
+            *category = trim(category);
+            if category.is_empty() {
+                self.filters.category = None;
+            }
+        }
+
+        if let Some(ref mut categories) = self.filters.categories {
+            *categories = categories
+                .iter()
+                .map(|value| trim(value))
+                .filter(|value| !value.is_empty())
+                .collect();
+            if categories.is_empty() {
+                self.filters.categories = None;
+            }
+        }
+
+        if let Some(ref mut tags) = self.filters.tags {
+            *tags = sanitize_tags(tags);
+            if tags.is_empty() {
+                self.filters.tags = None;
+            }
+        }
+    }
+
+    fn validate(&self) -> Result<(), Vec<FieldError>> {
+        let mut builder = ValidationBuilder::new();
+
+        if let Some(ref query) = self.filters.query {
+            builder.check("filters.query", || validate_length(query, 1, 255));
+            builder.check("filters.query", || validate_no_xss(query));
+        }
+
+        if let Some(ref category) = self.filters.category {
+            builder.check("filters.category", || validate_length(category, 1, 100));
+            builder.check("filters.category", || validate_no_xss(category));
+        }
+
+        if let Some(ref categories) = self.filters.categories {
+            builder.check("filters.categories", || {
+                if categories.len() > 20 {
+                    return Err("at most 20 categories are allowed".to_string());
+                }
+                Ok(())
+            });
+            for (index, category) in categories.iter().enumerate() {
+                builder.check(&format!("filters.categories[{index}]"), || {
+                    validate_length(category, 1, 100)
+                });
+            }
+        }
+
+        if let Some(ref tags) = self.filters.tags {
+            builder.check("filters.tags", || {
+                validate_tags(tags, MAX_TAGS_COUNT, MAX_TAG_LENGTH)
+            });
+        }
+
+        builder.build()
+    }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // CreateMigrationRequest validation
 // ─────────────────────────────────────────────────────────────────────────────
@@ -248,6 +330,12 @@ impl Validatable for CreateInteractionRequest {
         if let Some(ref mut t) = self.transaction_hash {
             *t = trim(t);
         }
+        if let Some(ref mut target) = self.target_contract_id {
+            *target = trim(target);
+            if target.is_empty() {
+                self.target_contract_id = None;
+            }
+        }
         if let Some(ref mut p) = self.parameters {
             super::sanitizers::sanitize_json_value(p);
         }
@@ -269,6 +357,11 @@ impl Validatable for CreateInteractionRequest {
 
         if let Some(ref t) = self.transaction_hash {
             builder.check("transaction_hash", || validate_length(t, 64, 64));
+        }
+
+        if let Some(ref target) = self.target_contract_id {
+            builder.check("target_contract_id", || validate_length(target, 1, 128));
+            builder.check("target_contract_id", || validate_no_xss(target));
         }
 
         if let Some(ref p) = self.parameters {
@@ -433,6 +526,52 @@ impl Validatable for UpdateContractStatusRequest {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// BulkStatusUpdateRequest validation
+// ─────────────────────────────────────────────────────────────────────────────
+
+impl Validatable for BulkStatusUpdateRequest {
+    fn sanitize(&mut self) {
+        for item in &mut self.items {
+            item.status = trim(&item.status).to_lowercase();
+            if let Some(ref mut msg) = item.error_message {
+                *msg = trim(msg);
+                if msg.is_empty() {
+                    item.error_message = None;
+                }
+            }
+        }
+    }
+
+    fn validate(&self) -> Result<(), Vec<FieldError>> {
+        let mut builder = ValidationBuilder::new();
+
+        builder.check("items", || {
+            if self.items.is_empty() {
+                return Err("at least one item is required".to_string());
+            }
+            Ok(())
+        });
+
+        for (index, item) in self.items.iter().enumerate() {
+            builder.check(&format!("items[{index}].status"), || {
+                match item.status.as_str() {
+                    "pending" | "verified" | "failed" => Ok(()),
+                    _ => Err("status must be pending, verified, or failed".to_string()),
+                }
+            });
+
+            if let Some(ref msg) = item.error_message {
+                builder.check(&format!("items[{index}].error_message"), || {
+                    validate_no_xss(msg)
+                });
+            }
+        }
+
+        builder.build()
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Publisher validation
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -496,6 +635,185 @@ impl Validatable for DependencyDeclaration {
     }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// ContractImportRequest validation
+// ─────────────────────────────────────────────────────────────────────────────
+
+impl Validatable for ContractImportRequest {
+    fn sanitize(&mut self) {
+        for contract in &mut self.contracts {
+            contract.contract_id = normalize_contract_id(&contract.contract_id);
+            contract.wasm_hash = trim(&contract.wasm_hash);
+            contract.name = sanitize_name(&contract.name);
+            sanitize_description_optional(&mut contract.description);
+            contract.publisher_address = normalize_stellar_address(&contract.publisher_address);
+
+            if let Some(ref mut cat) = contract.category {
+                *cat = trim(cat);
+                if cat.is_empty() {
+                    contract.category = None;
+                }
+            }
+
+            if let Some(ref mut tags) = contract.tags {
+                *tags = sanitize_tags(tags);
+                if tags.is_empty() {
+                    contract.tags = None;
+                }
+            }
+
+            if let Some(ref mut visibility) = contract.visibility {
+                *visibility = trim(visibility).to_lowercase();
+            }
+
+            if let Some(ref mut versions) = contract.versions {
+                for version in versions.iter_mut() {
+                    version.version = trim(&version.version);
+                    version.wasm_hash = trim(&version.wasm_hash);
+                    if let Some(ref mut url) = version.source_url {
+                        *url = trim(url);
+                    }
+                    if let Some(ref mut hash) = version.commit_hash {
+                        *hash = trim(hash);
+                    }
+                    if let Some(ref mut notes) = version.release_notes {
+                        *notes = trim(notes);
+                    }
+                }
+            }
+        }
+    }
+
+    fn validate(&self) -> Result<(), Vec<FieldError>> {
+        let mut builder = ValidationBuilder::new();
+
+        if self.contracts.is_empty() {
+            builder.add_error("contracts", "at least one contract is required");
+        }
+
+        if self.contracts.len() > 10_000 {
+            builder.add_error("contracts", "maximum 10,000 contracts per batch");
+        }
+
+        for (i, contract) in self.contracts.iter().enumerate() {
+            let prefix = format!("contracts[{}]", i);
+
+            builder.check(&format!("{}.contract_id", prefix), || {
+                validate_contract_id(&contract.contract_id)
+            });
+
+            builder.check(&format!("{}.wasm_hash", prefix), || {
+                validate_wasm_hash(&contract.wasm_hash)
+            });
+
+            builder.check(&format!("{}.name", prefix), || {
+                if contract.name.is_empty() {
+                    return Err("name is required".to_string());
+                }
+                validate_length(&contract.name, MIN_NAME_LENGTH, MAX_NAME_LENGTH)
+            });
+            builder.check(&format!("{}.name", prefix), || {
+                validate_no_xss(&contract.name)
+            });
+
+            builder.check(&format!("{}.publisher_address", prefix), || {
+                validate_stellar_address(&contract.publisher_address)
+            });
+
+            if let Some(ref desc) = contract.description {
+                builder.check(&format!("{}.description", prefix), || {
+                    validate_length(desc, 0, MAX_DESCRIPTION_LENGTH)
+                });
+                builder.check(&format!("{}.description", prefix), || validate_no_xss(desc));
+            }
+
+            if let Some(ref cat) = contract.category {
+                builder.check(&format!("{}.category", prefix), || {
+                    validate_category_whitelist(cat, ALLOWED_CATEGORIES)
+                });
+                builder.check(&format!("{}.category", prefix), || validate_no_xss(cat));
+            }
+
+            if let Some(ref tags) = contract.tags {
+                builder.check(&format!("{}.tags", prefix), || {
+                    validate_tags(tags, MAX_TAGS_COUNT, MAX_TAG_LENGTH)
+                });
+            }
+
+            if let Some(ref versions) = contract.versions {
+                for (vi, version) in versions.iter().enumerate() {
+                    let vprefix = format!("{}.versions[{}]", prefix, vi);
+
+                    builder.check(&format!("{}.version", vprefix), || {
+                        if version.version.is_empty() {
+                            return Err("version is required".to_string());
+                        }
+                        validate_semver(&version.version)
+                    });
+
+                    builder.check(&format!("{}.wasm_hash", vprefix), || {
+                        validate_wasm_hash(&version.wasm_hash)
+                    });
+
+                    if let Some(ref url) = version.source_url {
+                        builder.check(&format!("{}.source_url", vprefix), || {
+                            validate_url_optional(&Some(url.clone()))
+                        });
+                    }
+                }
+            }
+        }
+
+        builder.build()
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SaveFavoriteSearchRequest validation
+// ─────────────────────────────────────────────────────────────────────────────
+
+impl Validatable for SaveFavoriteSearchRequest {
+    fn sanitize(&mut self) {
+        self.user_address = normalize_stellar_address(&self.user_address);
+        self.name = sanitize_name(&self.name);
+        super::sanitizers::sanitize_json_value(&mut self.query_json);
+    }
+
+    fn validate(&self) -> Result<(), Vec<FieldError>> {
+        let mut builder = ValidationBuilder::new();
+        builder.check("user_address", || {
+            validate_stellar_address(&self.user_address)
+        });
+        builder.check("name", || validate_length(&self.name, 1, 100));
+        builder.check("name", || validate_no_xss(&self.name));
+        builder.check("query_json", || {
+            validate_json_depth(&self.query_json, MAX_JSON_DEPTH)
+        });
+        builder.build()
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// AdvancedSearchRequest validation
+// ─────────────────────────────────────────────────────────────────────────────
+
+impl Validatable for AdvancedSearchRequest {
+    fn sanitize(&mut self) {
+        // No direct sanitization needed for the query tree currently
+    }
+
+    fn validate(&self) -> Result<(), Vec<FieldError>> {
+        let mut builder = ValidationBuilder::new();
+        // Pagination limits
+        if let Some(limit) = self.limit {
+            if limit <= 0 || limit > 100 {
+                builder.add_error("limit", "limit must be between 1 and 100");
+            }
+        }
+        builder.build()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -515,6 +833,7 @@ mod tests {
             contract_id: valid_contract_id(),
             wasm_hash: "a".repeat(64),
             name: "My Contract".to_string(),
+            slug: None,
             description: Some("A test contract".to_string()),
             network: Network::Testnet,
             category: Some("Token".to_string()),
@@ -522,6 +841,8 @@ mod tests {
             source_url: Some("https://github.com/user/repo".to_string()),
             publisher_address: valid_stellar_address(),
             dependencies: vec![],
+            is_cicd: false,
+            wasm_artifact_base64: None,
         };
 
         assert!(req.validate().is_ok());
@@ -533,6 +854,7 @@ mod tests {
             contract_id: "invalid".to_string(),
             wasm_hash: "a".repeat(64),
             name: "My Contract".to_string(),
+            slug: None,
             description: None,
             network: Network::Testnet,
             category: None,
@@ -540,6 +862,8 @@ mod tests {
             source_url: None,
             publisher_address: valid_stellar_address(),
             dependencies: vec![],
+            is_cicd: false,
+            wasm_artifact_base64: None,
         };
 
         let result = req.validate();
@@ -549,11 +873,36 @@ mod tests {
     }
 
     #[test]
+    fn test_publish_request_invalid_wasm_hash() {
+        let req = PublishRequest {
+            contract_id: valid_contract_id(),
+            wasm_hash: "invalid".to_string(),
+            name: "My Contract".to_string(),
+            slug: None,
+            description: None,
+            network: Network::Testnet,
+            category: None,
+            tags: vec![],
+            source_url: None,
+            publisher_address: valid_stellar_address(),
+            dependencies: vec![],
+            is_cicd: false,
+            wasm_artifact_base64: None,
+        };
+
+        let result = req.validate();
+        assert!(result.is_err());
+        let errors = result.unwrap_err();
+        assert!(errors.iter().any(|e| e.field == "wasm_hash"));
+    }
+
+    #[test]
     fn test_publish_request_sanitization() {
         let mut req = PublishRequest {
             contract_id: "  cdlzfc3syjydzt7k67vz75hpjvieuvnixf47zg2fb2rmqqvu2hhgcysc  ".to_string(),
             wasm_hash: format!("  {}  ", "a".repeat(64)),
             name: "  <b>My Contract</b>  ".to_string(),
+            slug: None,
             description: Some("  <script>alert('xss')</script>Description  ".to_string()),
             network: Network::Testnet,
             category: Some("  DeFi  ".to_string()),
@@ -562,12 +911,14 @@ mod tests {
             publisher_address: "  gdlzfc3syjydzt7k67vz75hpjvieuvnixf47zg2fb2rmqqvu2hhgcysc  "
                 .to_string(),
             dependencies: vec![],
+            is_cicd: false,
+            wasm_artifact_base64: None,
         };
 
         req.sanitize();
 
         assert_eq!(req.contract_id, valid_contract_id());
-        assert_eq!(req.wasm_hash.trim(), "a".repeat(64));
+        assert_eq!(req.wasm_hash, "a".repeat(64));
         assert_eq!(req.name, "My Contract");
         assert_eq!(req.description, Some("alert('xss')Description".to_string()));
         assert_eq!(req.publisher_address, valid_stellar_address());

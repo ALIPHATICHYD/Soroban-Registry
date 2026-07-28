@@ -1,11 +1,11 @@
 'use client';
 
-import React from 'react';
 import { api } from '@/lib/api';
 import useFormValidation, { validators } from '@/lib/formValidation';
 import { FormInput, FormSelect, FormTextarea } from '@/components/Form';
 import Navbar from '@/components/Navbar';
 import { useToast } from '@/hooks/useToast';
+import { useTranslation } from '@/lib/i18n/client';
 
 type Values = {
   contract_id: string;
@@ -19,6 +19,7 @@ type Values = {
 };
 
 export default function PublishPage() {
+  const { t } = useTranslation('common');
   const { showSuccess, showError } = useToast();
 
   const { values, errors, handleChange, handleBlur, handleSubmit, setValues } = useFormValidation<Values>({
@@ -56,7 +57,7 @@ export default function PublishPage() {
           source_url: vals.source_url,
           publisher_address: vals.publisher_address,
         });
-        showSuccess('Published successfully');
+        showSuccess(t('publish.success'));
         setValues({
           contract_id: '',
           name: '',
@@ -68,7 +69,7 @@ export default function PublishPage() {
           is_public: true,
         });
       } catch (err: unknown) {
-        showError(err instanceof Error ? err.message : 'Failed to publish');
+        showError(err instanceof Error ? err.message : t('publish.error'));
       }
     },
   });
@@ -77,24 +78,24 @@ export default function PublishPage() {
     <div className="flex flex-col min-h-screen bg-background">
       <Navbar />
       <div className="max-w-3xl mx-auto py-8 px-4 sm:px-6 lg:px-8 w-full flex-grow">
-        <h1 className="text-2xl sm:text-3xl font-bold mb-4 text-center sm:text-left">Publish Contract</h1>
+        <h1 className="text-2xl sm:text-3xl font-bold mb-4 text-center sm:text-left">{t('publish.title')}</h1>
 
         <form
           onSubmit={handleSubmit}
           className="space-y-4 bg-card p-4 sm:p-6 rounded-2xl border border-border w-full"
         >
           <FormInput
-            label="Contract ID"
+            label={t('publish.contractId')}
             name="contract_id"
             value={values.contract_id}
             onChange={handleChange}
             onBlur={handleBlur}
             error={errors.contract_id}
-            placeholder="contract-name"
+            placeholder={t('publish.contractIdPlaceholder')}
           />
 
           <FormInput
-            label="Name"
+            label={t('publish.name')}
             name="name"
             value={values.name}
             onChange={handleChange}
@@ -103,37 +104,37 @@ export default function PublishPage() {
           />
 
           <FormInput
-            label="Version"
+            label={t('publish.version')}
             name="version"
             value={values.version}
             onChange={handleChange}
             onBlur={handleBlur}
             error={errors.version}
-            placeholder="1.2.3"
+            placeholder={t('publish.versionPlaceholder')}
           />
 
           <FormInput
-            label="Source URL"
+            label={t('publish.sourceUrl')}
             name="source_url"
             value={values.source_url}
             onChange={handleChange}
             onBlur={handleBlur}
             error={errors.source_url}
-            placeholder="https://github.com/owner/repo"
+            placeholder={t('publish.sourceUrlPlaceholder')}
           />
 
           <FormInput
-            label="Publisher Stellar Address"
+            label={t('publish.publisherAddress')}
             name="publisher_address"
             value={values.publisher_address}
             onChange={handleChange}
             onBlur={handleBlur}
             error={errors.publisher_address}
-            placeholder="G..."
+            placeholder={t('publish.publisherAddressPlaceholder')}
           />
 
           <FormSelect
-            label="Network"
+            label={t('publish.network')}
             name="network"
             value={values.network}
             onChange={(e) => handleChange(e as React.ChangeEvent<HTMLInputElement & HTMLSelectElement>)}
@@ -145,7 +146,7 @@ export default function PublishPage() {
           />
 
           <FormTextarea
-            label="Description"
+            label={t('publish.description')}
             name="description"
             value={values.description}
             onChange={handleChange}
@@ -153,7 +154,7 @@ export default function PublishPage() {
 
           <div className="flex flex-col sm:flex-row items-center sm:justify-between gap-2">
             <button type="submit" className="w-full sm:w-auto px-6 py-2.5 rounded-lg btn-glow text-primary-foreground font-medium">
-              Publish
+              {t('publish.submit')}
             </button>
           </div>
         </form>

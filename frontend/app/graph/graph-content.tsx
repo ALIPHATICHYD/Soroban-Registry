@@ -8,6 +8,7 @@ import { useState, useCallback, useRef, useMemo, useEffect } from 'react';
 import { AlertCircle, Sparkles, ExternalLink, X } from 'lucide-react';
 import { useAnalytics } from '@/hooks/useAnalytics';
 import type { DependencyGraphHandle } from '@/components/DependencyGraph';
+import { useTranslation } from '@/lib/i18n/client';
 
 // Generate synthetic demo data for testing at scale
 function generateDemoData(nodeCount: number): { nodes: GraphNode[]; edges: GraphEdge[] } {
@@ -38,37 +39,95 @@ function generateDemoData(nodeCount: number): { nodes: GraphNode[]; edges: Graph
         });
     }
 
-    // Create edges — power-law distribution: some nodes get many dependents
     const edges: GraphEdge[] = [];
     const edgeCount = Math.min(nodeCount * 2, nodeCount * (nodeCount - 1) / 2);
     const edgeSet = new Set<string>();
+
+    const pushEdge = (source: number, target: number, isCircular = false) => {
+        if (source === target) return;
+        const key = `${source}-${target}`;
+        if (edgeSet.has(key)) return;
+        edgeSet.add(key);
+        const callFrequency = 1 + Math.floor(Math.random() * 250);
+        const isEstimated = Math.random() > 0.6;
+        edges.push({
+            source: nodes[source].id,
+            target: nodes[target].id,
+            dependency_type: Math.random() > 0.7 ? 'imports' : 'calls',
+            call_frequency: callFrequency,
+            call_volume: callFrequency * (1 + Math.floor(Math.random() * 8)),
+            is_estimated: isEstimated,
+            is_circular: isCircular,
+        });
+    };
+
     for (let i = 0; i < edgeCount; i++) {
-        // Bias towards lower-index nodes as targets to create hub nodes
         const sourceIdx = Math.floor(Math.random() * nodeCount);
         const targetIdx = Math.floor(Math.pow(Math.random(), 2) * nodeCount);
-        if (sourceIdx === targetIdx) continue;
-        const key = `${sourceIdx}-${targetIdx}`;
-        if (edgeSet.has(key)) continue;
-        edgeSet.add(key);
-        edges.push({
-            source: nodes[sourceIdx].id,
-            target: nodes[targetIdx].id,
-            dependency_type: Math.random() > 0.7 ? 'imports' : 'calls',
-        });
+        pushEdge(sourceIdx, targetIdx);
+    }
+
+    const cycleGroups = Math.min(8, Math.floor(nodeCount / 10));
+    for (let i = 0; i < cycleGroups; i++) {
+        const a = i * 3;
+        const b = a + 1;
+        const c = a + 2;
+        if (c >= nodeCount) break;
+        pushEdge(a, b, true);
+        pushEdge(b, c, true);
+        pushEdge(c, a, true);
     }
 
     return { nodes, edges };
 }
 
 export function GraphContent() {
+    const { t } = useTranslation('common');
     const [networkFilter, setNetworkFilter] = useState<string>('');
+    const [dependencyTypeFilter, setDependencyTypeFilter] = useState<string>('');
+    const [showCyclesOnly, setShowCyclesOnly] = useState(false);
+    const [minCallFrequency, setMinCallFrequency] = useState(0);
     const [searchQuery, setSearchQuery] = useState('');
     const [demoMode, setDemoMode] = useState(false);
     const [demoNodeCount, setDemoNodeCount] = useState(200);
     const [selectedNode, setSelectedNode] = useState<GraphNode | null>(null);
+    const [explorationMode, setExplorationMode] = useState(false);
+    const [expandedNodeIds, setExpandedNodeIds] = useState<Set<string>>(new Set());
+    const [explorationNodes, setExplorationNodes] = useState<GraphNode[]>([]);
+    const [explorationEdges, setExplorationEdges] = useState<GraphEdge[]>([]);
     const [searchMatchIndex, setSearchMatchIndex] = useState(0);
     const graphRef = useRef<DependencyGraphHandle | null>(null);
     const { logEvent } = useAnalytics();
+
+    // Reset exploration state when mode is toggled off
+    useEffect(() => {
+        if (!explorationMode) {
+            requestAnimationFrame(() => {
+                setExplorationNodes([]);
+                setExplorationEdges([]);
+                setExpandedNodeIds(new Set());
+            });
+        }
+    }, [explorationMode]);
+
+    const fetchLocalGraph = useCallback(async (id: string) => {
+        if (!id) return;
+        try {
+            const localData = await api.getContractLocalGraph(id, 1);
+            setExplorationNodes(prev => {
+                const existingIds = new Set(prev.map(n => n.id));
+                const newNodes = localData.nodes.filter(n => !existingIds.has(n.id));
+                return [...prev, ...newNodes];
+            });
+            setExplorationEdges(prev => {
+                const existingKeys = new Set(prev.map(e => `${e.source}-${e.target}`));
+                const newEdges = localData.edges.filter(e => !existingKeys.has(`${e.source}-${e.target}`));
+                return [...prev, ...newEdges];
+            });
+        } catch (err) {
+            console.error('Failed to fetch local graph:', err);
+        }
+    }, []);
 
     const { data: apiData, isLoading, error } = useQuery({
         queryKey: ['contract-graph', networkFilter],
@@ -100,7 +159,6 @@ export function GraphContent() {
         [demoMode, demoNodeCount]
     );
 
-    // Apply client-side network filtering for demo mode
     const filteredDemoData = useMemo(() => {
         if (!demoData || !networkFilter) return demoData;
         const filteredNodes = demoData.nodes.filter((n) => n.network === networkFilter);
@@ -113,17 +171,44 @@ export function GraphContent() {
 
     const graphData = demoMode ? filteredDemoData : apiData;
 
-    // Safe nodes/edges (API may return missing or non-array values)
-    const nodes = useMemo(
+    const rawNodes = useMemo(
         () => (graphData && Array.isArray(graphData.nodes) ? graphData.nodes : []),
         [graphData]
     );
-    const edges = useMemo(
+    const rawEdges = useMemo(
         () => (graphData && Array.isArray(graphData.edges) ? graphData.edges : []),
         [graphData]
     );
 
-    // Compute dependent counts (how many nodes depend on this one = in-edges)
+    const filteredGraph = useMemo(() => {
+        if (explorationMode) {
+            return { nodes: explorationNodes, edges: explorationEdges };
+        }
+
+        const nodes = rawNodes.filter((n) => {
+            if (networkFilter && n.network !== networkFilter) return false;
+            if (searchQuery.trim()) {
+                const q = searchQuery.toLowerCase();
+                return n.name.toLowerCase().includes(q) || n.contract_id.toLowerCase().includes(q);
+            }
+            return true;
+        });
+
+        const nodeIds = new Set(nodes.map((n) => n.id));
+        const edges = rawEdges.filter((e) => {
+            if (!nodeIds.has(e.source) || !nodeIds.has(e.target)) return false;
+            if (dependencyTypeFilter && e.dependency_type !== dependencyTypeFilter) return false;
+            if (minCallFrequency > 0 && (e.call_frequency || 0) < minCallFrequency) return false;
+            if (showCyclesOnly && !e.is_circular) return false;
+            return true;
+        });
+
+        return { nodes, edges };
+    }, [explorationMode, explorationNodes, explorationEdges, rawNodes, rawEdges, networkFilter, searchQuery, dependencyTypeFilter, minCallFrequency, showCyclesOnly]);
+
+    const nodes = filteredGraph.nodes;
+    const edges = filteredGraph.edges;
+
     const dependentCounts = useMemo(() => {
         const counts = new Map<string, number>();
         for (const edge of edges) {
@@ -132,7 +217,6 @@ export function GraphContent() {
         return counts;
     }, [edges]);
 
-    // Compute dependency counts (how many nodes this one depends on = out-edges)
     const dependencyCounts = useMemo(() => {
         const counts = new Map<string, number>();
         for (const edge of edges) {
@@ -147,24 +231,48 @@ export function GraphContent() {
         return count;
     }, [dependentCounts]);
 
-    // Per-network node counts for the stats panel
     const networkCounts = useMemo(() => {
         const counts = { mainnet: 0, testnet: 0, futurenet: 0, other: 0 };
         for (const node of nodes) {
-            const n = node.network?.toLowerCase() ?? "";
-            if (n === "mainnet") counts.mainnet++;
-            else if (n === "testnet") counts.testnet++;
-            else if (n === "futurenet") counts.futurenet++;
+            const n = node.network?.toLowerCase() ?? '';
+            if (n === 'mainnet') counts.mainnet++;
+            else if (n === 'testnet') counts.testnet++;
+            else if (n === 'futurenet') counts.futurenet++;
             else counts.other++;
         }
         return counts;
     }, [nodes]);
 
-    const handleNodeClick = useCallback((node: GraphNode | null) => {
+    const handleNodeClick = (node: GraphNode | null) => {
         setSelectedNode(node);
-    }, []);
+        if (node && explorationMode) {
+            fetchLocalGraph(node.id);
+        }
+        if (node) {
+            logEvent('node_selected', {
+                contract_id: node.contract_id,
+                name: node.name,
+                source: 'graph_page',
+            });
+        }
+    };
 
-    // Search match navigation
+    const handleExpandNode = (id: string) => {
+        setExpandedNodeIds((prev: Set<string>) => {
+            const next = new Set(prev);
+            if (next.has(id)) {
+                next.delete(id);
+            } else {
+                next.add(id);
+                if (explorationMode) {
+                    fetchLocalGraph(id);
+                }
+            }
+            return next;
+        });
+        logEvent('node_expanded', { node_id: id });
+    };
+
     const searchMatches = useMemo(() => {
         if (!searchQuery || nodes.length === 0) return [];
         const q = searchQuery.toLowerCase();
@@ -173,12 +281,10 @@ export function GraphContent() {
             .map((n) => n.id);
     }, [searchQuery, nodes]);
 
-    // Reset match index when query or matches change
     useEffect(() => {
-        setSearchMatchIndex(0);
+        requestAnimationFrame(() => setSearchMatchIndex(0));
     }, [searchQuery]);
 
-    // Auto-focus on the active match
     useEffect(() => {
         if (searchMatches.length > 0 && graphRef.current) {
             graphRef.current.focusOnNode(searchMatches[searchMatchIndex] || searchMatches[0]);
@@ -193,10 +299,14 @@ export function GraphContent() {
         setSearchMatchIndex((i) => (i + 1) % searchMatches.length);
     }, [searchMatches.length]);
 
+    const cyclicEdgeCount = useMemo(
+        () => edges.filter((edge) => edge.is_circular).length,
+        [edges]
+    );
+
     // Keyboard shortcuts
     useEffect(() => {
         const handleKeyDown = (e: KeyboardEvent) => {
-            // Ignore when typing in inputs
             if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
             const g = graphRef.current;
             if (!g) return;
@@ -245,7 +355,7 @@ export function GraphContent() {
             <div className="flex items-center justify-center h-[calc(100vh-4rem)] bg-background">
                 <div className="text-center">
                     <div className="inline-block w-10 h-10 border-4 border-primary border-t-transparent rounded-full animate-spin mb-4" />
-                    <p className="text-muted-foreground text-sm">Loading graph data…</p>
+                    <p className="text-muted-foreground text-sm">{t('graph.loading')}</p>
                 </div>
             </div>
         );
@@ -259,9 +369,9 @@ export function GraphContent() {
                         <div className="w-14 h-14 rounded-2xl bg-amber-500/10 flex items-center justify-center mx-auto mb-4">
                             <AlertCircle className="w-7 h-7 text-amber-500" />
                         </div>
-                        <h3 className="text-xl font-semibold text-foreground mb-2">Backend API unavailable</h3>
+                        <h3 className="text-xl font-semibold text-foreground mb-2">{t('graph.apiUnavailable')}</h3>
                         <p className="text-muted-foreground mb-6 text-sm leading-relaxed">
-                            Could not load contract graph data. You can still explore the visualization using Demo Mode with synthetic data.
+                            {t('graph.apiUnavailableDesc')}
                         </p>
                         <button
                             onClick={() => setDemoMode(true)}
@@ -297,13 +407,22 @@ export function GraphContent() {
                 onSearchChange={setSearchQuery}
                 networkFilter={networkFilter}
                 onNetworkFilterChange={setNetworkFilter}
+                dependencyTypeFilter={dependencyTypeFilter}
+                onDependencyTypeFilterChange={setDependencyTypeFilter}
+                showCyclesOnly={showCyclesOnly}
+                onShowCyclesOnlyChange={setShowCyclesOnly}
+                minCallFrequency={minCallFrequency}
+                onMinCallFrequencyChange={setMinCallFrequency}
                 demoMode={demoMode}
                 onDemoModeChange={setDemoMode}
                 demoNodeCount={demoNodeCount}
                 onDemoNodeCountChange={setDemoNodeCount}
                 totalNodes={nodes.length}
                 totalEdges={edges.length}
+                cyclicEdgeCount={cyclicEdgeCount}
                 criticalCount={criticalCount}
+                explorationMode={explorationMode}
+                onExplorationModeChange={setExplorationMode}
                 searchMatchCount={searchMatches.length}
                 searchMatchIndex={searchMatchIndex}
                 onPrevMatch={handlePrevMatch}
@@ -323,7 +442,6 @@ export function GraphContent() {
             {/* Selected Node Panel */}
             {selectedNode && (
                 <div className="absolute bottom-4 left-4 z-30 w-80 bg-card/90 backdrop-blur-xl border border-border rounded-xl shadow-lg overflow-hidden">
-                    {/* Header */}
                     <div className="p-4 pb-3">
                         <div className="flex items-start justify-between">
                             <div className="flex-1 min-w-0 pr-2">
@@ -340,62 +458,61 @@ export function GraphContent() {
                         </div>
                     </div>
 
-                    {/* Stats row */}
                     <div className="grid grid-cols-3 gap-px bg-border">
                         <div className="bg-card p-2.5 text-center">
                             <div className="text-lg font-bold text-foreground">{dependentCounts.get(selectedNode.id) || 0}</div>
-                            <div className="text-[10px] text-muted-foreground">Dependents</div>
+                            <div className="text-[10px] text-muted-foreground">{t('graph.dependents')}</div>
                         </div>
                         <div className="bg-card p-2.5 text-center">
                             <div className="text-lg font-bold text-foreground">{dependencyCounts.get(selectedNode.id) || 0}</div>
-                            <div className="text-[10px] text-muted-foreground">Dependencies</div>
+                            <div className="text-[10px] text-muted-foreground">{t('graph.dependencies')}</div>
                         </div>
                         <div className="bg-card p-2.5 text-center">
                             <div className={`text-sm font-bold ${selectedNode.is_verified ? 'text-green-500' : 'text-muted-foreground'}`}>
-                                {selectedNode.is_verified ? '✓ Yes' : '—'}
+                                {selectedNode.is_verified ? `✓ ${t('common.yes', 'Yes')}` : '—'}
                             </div>
-                            <div className="text-[10px] text-muted-foreground">Verified</div>
+                            <div className="text-[10px] text-muted-foreground">{t('graph.verified')}</div>
                         </div>
                     </div>
 
-                    {/* Details + Tags */}
                     <div className="p-4 pt-3 space-y-3">
                         <div className="space-y-1.5 text-sm">
                             <div className="flex justify-between">
-                                <span className="text-muted-foreground">Network</span>
-                                <span className={`font-medium px-2 py-0.5 rounded-full text-xs ${selectedNode.network === 'mainnet' ? 'text-green-600 bg-green-500/10' :
-                                    selectedNode.network === 'testnet' ? 'text-blue-600 bg-blue-500/10' : 'text-purple-600 bg-purple-500/10'
-                                    }`}>{selectedNode.network}</span>
+                                <span className="text-muted-foreground">{t('graph.network')}</span>
+                                <span className={`font-medium px-2 py-0.5 rounded-full text-xs ${
+                                    selectedNode.network === 'mainnet' ? 'text-green-600 bg-green-500/10' :
+                                    selectedNode.network === 'testnet' ? 'text-blue-600 bg-blue-500/10' :
+                                    'text-purple-600 bg-purple-500/10'
+                                }`}>{selectedNode.network}</span>
                             </div>
                             {selectedNode.category && (
                                 <div className="flex justify-between">
-                                    <span className="text-muted-foreground">Type</span>
+                                    <span className="text-muted-foreground">{t('graph.type')}</span>
                                     <span className="text-foreground font-medium">{selectedNode.category}</span>
                                 </div>
                             )}
                         </div>
 
-                        {/* Tags */}
-                        {selectedNode.tags.length > 0 && (
-                            <div className="pt-2 border-t border-border">
-                                <div className="flex flex-wrap gap-1">
-                                    {selectedNode.tags.map((tag) => (
-                                        <span key={tag} className="px-2 py-0.5 bg-primary/10 text-primary rounded-md text-[10px] font-medium">
-                                            {tag}
-                                        </span>
-                                    ))}
-                                </div>
-                            </div>
-                        )}
-
-                        {/* Link */}
-                        <a
-                            href={`/contracts/${selectedNode.contract_id}`}
-                            className="flex items-center justify-center gap-1.5 w-full py-2 bg-primary text-primary-foreground rounded-lg text-xs font-semibold btn-glow hover:brightness-110 transition-all focus-visible:ring-1 focus-visible:ring-primary focus:outline-none"
-                        >
-                            <ExternalLink className="w-3 h-3" />
-                            View Contract Details
-                        </a>
+                        <div className="grid grid-cols-2 gap-2 pt-2">
+                            <button
+                                onClick={() => handleExpandNode(selectedNode.id)}
+                                className={`flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs font-semibold transition-all focus-visible:ring-1 focus:outline-none ${
+                                    expandedNodeIds.has(selectedNode.id)
+                                        ? 'bg-accent text-foreground border border-border hover:bg-accent/80'
+                                        : 'bg-primary/20 text-primary border border-primary/30 hover:bg-primary/30'
+                                }`}
+                            >
+                                <Sparkles className="w-3 h-3" />
+                                {expandedNodeIds.has(selectedNode.id) ? 'Collapse' : 'Expand'}
+                            </button>
+                            <a
+                                href={`/contracts/${selectedNode.contract_id}`}
+                                className="flex items-center justify-center gap-1.5 py-2 bg-primary text-primary-foreground rounded-lg text-xs font-semibold btn-glow hover:brightness-110 transition-all focus-visible:ring-1 focus-visible:ring-primary focus:outline-none"
+                            >
+                                <ExternalLink className="w-3 h-3" />
+                                Details
+                            </a>
+                        </div>
                     </div>
                 </div>
             )}
@@ -407,9 +524,9 @@ export function GraphContent() {
                         <div className="w-14 h-14 rounded-2xl bg-primary/10 flex items-center justify-center mx-auto mb-4">
                             <Sparkles className="w-7 h-7 text-primary" />
                         </div>
-                        <h3 className="text-xl font-semibold text-foreground mb-2">No contracts yet</h3>
+                        <h3 className="text-xl font-semibold text-foreground mb-2">{t('graph.noContracts')}</h3>
                         <p className="text-muted-foreground mb-6 text-sm leading-relaxed">
-                            Publish some contracts or enable Demo Mode to explore the graph visualization.
+                            {t('graph.noContractsDesc')}
                         </p>
                         <button
                             onClick={() => setDemoMode(true)}

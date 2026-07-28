@@ -1,6 +1,6 @@
-import Link from 'next/link';
-import { SearchX } from 'lucide-react';
-import Navbar from '@/components/Navbar';
+import Link from "next/link";
+import { SearchX } from "lucide-react";
+import Navbar from "@/components/Navbar";
 
 export default function NotFound() {
   return (
@@ -14,8 +14,8 @@ export default function NotFound() {
 
         <h1 className="text-4xl sm:text-5xl font-bold mb-4">Page not found</h1>
         <p className="text-lg text-muted-foreground mb-10">
-          The page you are looking for does not exist or may have moved.
-          Try browsing contracts or return to the homepage.
+          The page you are looking for does not exist or may have moved. Try
+          browsing contracts or return to the homepage.
         </p>
 
         <div className="flex flex-col sm:flex-row items-center justify-center gap-4">

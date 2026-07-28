@@ -184,15 +184,17 @@ pub async fn create_contracts(
 
         let contract_id = generate_contract_id(rng);
         let wasm_hash = generate_wasm_hash(rng);
+        let slug = shared::slugify(name);
 
         let contract: Contract = sqlx::query_as(
             "INSERT INTO contracts (
-                contract_id, wasm_hash, name, description, publisher_id, network,
+                contract_id, wasm_hash, name, slug, description, publisher_id, network,
                 category, tags, is_verified
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
             ON CONFLICT (contract_id, network) DO UPDATE SET
                 wasm_hash = EXCLUDED.wasm_hash,
                 name = EXCLUDED.name,
+                slug = EXCLUDED.slug,
                 description = EXCLUDED.description,
                 updated_at = NOW()
             RETURNING *",
@@ -200,6 +202,7 @@ pub async fn create_contracts(
         .bind(&contract_id)
         .bind(&wasm_hash)
         .bind(name)
+        .bind(slug)
         .bind(description)
         .bind(publisher.id)
         .bind(&network)
@@ -268,7 +271,7 @@ pub async fn create_verifications(
 
             let result = sqlx::query(
                 "INSERT INTO verifications (contract_id, status, compiler_version, verified_at)
-                 SELECT $1, $2, $3, $4
+                 SELECT $1, $2::verification_status, $3, $4
                  WHERE NOT EXISTS (
                      SELECT 1 FROM verifications WHERE contract_id = $1
                  )",

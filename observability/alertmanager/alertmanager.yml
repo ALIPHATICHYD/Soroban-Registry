@@ -1,46 +1,48 @@
 global:
   resolve_timeout: 5m
-  slack_api_url: "${SLACK_WEBHOOK_URL}"
+  # Populated at container start from the SLACK_WEBHOOK_URL env var — see
+  # docker-compose.yml's alertmanager service and docs/ALERTING.md.
+  slack_api_url_file: /alertmanager/secrets/slack_webhook_url
 
+# Escalation policy (see docs/ALERTING.md for the full runbook):
+#   critical -> PagerDuty page + Slack, paged again hourly until acknowledged/resolved
+#   warning  -> Slack only, no paging
 route:
-  group_by: [alertname, severity]
+  receiver: slack-warnings
+  group_by: ["alertname", "severity", "service"]
   group_wait: 30s
   group_interval: 5m
   repeat_interval: 4h
-  receiver: slack-warnings
   routes:
-    - match:
-        severity: critical
+    - matchers:
+        - severity = "critical"
       receiver: pagerduty-critical
-      continue: true
-    - match:
-        severity: critical
-      receiver: slack-critical
+      group_wait: 10s
+      repeat_interval: 1h
+    - matchers:
+        - severity = "warning"
+      receiver: slack-warnings
+      repeat_interval: 4h
 
 receivers:
   - name: slack-warnings
     slack_configs:
-      - channel: "#soroban-alerts"
-        title: "⚠️ {{ .GroupLabels.alertname }}"
-        text: "{{ range .Alerts }}{{ .Annotations.summary }}\n{{ end }}"
+      - channel: "#registry-alerts"
         send_resolved: true
-
-  - name: slack-critical
-    slack_configs:
-      - channel: "#soroban-incidents"
-        title: "🔴 CRITICAL: {{ .GroupLabels.alertname }}"
-        text: "{{ range .Alerts }}{{ .Annotations.summary }}\n{{ end }}"
-        send_resolved: true
+        title: '{{ .CommonAnnotations.summary }}'
+        text: '{{ .CommonAnnotations.description }}'
 
   - name: pagerduty-critical
+    slack_configs:
+      - channel: "#registry-alerts"
+        send_resolved: true
+        title: '🚨 {{ .CommonAnnotations.summary }}'
+        text: '{{ .CommonAnnotations.description }}'
     pagerduty_configs:
-      - service_key: "${PAGERDUTY_SERVICE_KEY}"
-        description: "{{ .GroupLabels.alertname }}: {{ range .Alerts }}{{ .Annotations.summary }}{{ end }}"
+      # Populated at container start from the PAGERDUTY_SERVICE_KEY env var.
+      - routing_key_file: /alertmanager/secrets/pagerduty_routing_key
+        send_resolved: true
         severity: critical
+        description: '{{ .CommonAnnotations.summary }}'
 
-inhibit_rules:
-  - source_match:
-      severity: critical
-    target_match:
-      severity: warning
-    equal: [alertname]
+templates: []

@@ -1,33 +1,37 @@
-'use client';
+"use client";
 
-import { useState, useEffect } from 'react';
-import { useQuery } from '@tanstack/react-query';
-import { api } from '@/lib/api';
-import ExampleCard from './ExampleCard';
-import ExampleCardSkeleton from './ExampleCardSkeleton';
-import { AlertCircle, Terminal, Search } from 'lucide-react';
-import { useAnalytics } from '@/hooks/useAnalytics';
+import { useState, useEffect } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { api } from "@/lib/api";
+import ExampleCard from "./ExampleCard";
+import ExampleCardSkeleton from "./ExampleCardSkeleton";
+import { AlertCircle, Terminal, Search } from "lucide-react";
+import { useAnalytics } from "@/hooks/useAnalytics";
 
 interface ExampleGalleryProps {
   contractId: string;
 }
 
 export default function ExampleGallery({ contractId }: ExampleGalleryProps) {
-  const { data: examples, isLoading, error } = useQuery({
-    queryKey: ['contract-examples', contractId],
+  const {
+    data: examples,
+    isLoading,
+    error,
+  } = useQuery({
+    queryKey: ["contract-examples", contractId],
     queryFn: () => api.getContractExamples(contractId),
   });
   const { logEvent } = useAnalytics();
 
-  const [selectedCategory, setSelectedCategory] = useState<string>('all');
-  const [searchQuery, setSearchQuery] = useState('');
+  const [selectedCategory, setSelectedCategory] = useState<string>("all");
+  const [searchQuery, setSearchQuery] = useState("");
 
   useEffect(() => {
     if (!error) return;
-    logEvent('error_event', {
-      source: 'example_gallery',
+    logEvent("error_event", {
+      source: "example_gallery",
       contract_id: contractId,
-      message: 'Failed to load examples',
+      message: "Failed to load examples",
     });
   }, [error, contractId, logEvent]);
 
@@ -70,21 +74,24 @@ export default function ExampleGallery({ contractId }: ExampleGalleryProps) {
           No Examples Yet
         </h3>
         <p className="text-muted-foreground max-w-sm mx-auto">
-          There are no code examples for this contract yet. Be the first to contribute one!
+          There are no code examples for this contract yet. Be the first to
+          contribute one!
         </p>
       </div>
     );
   }
 
-  const filteredExamples = examples.filter(e => {
-    const matchesCategory = selectedCategory === 'all' || e.category === selectedCategory;
-    const matchesSearch = !searchQuery.trim() ||
+  const filteredExamples = examples.filter((e) => {
+    const matchesCategory =
+      selectedCategory === "all" || e.category === selectedCategory;
+    const matchesSearch =
+      !searchQuery.trim() ||
       e.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
       e.description?.toLowerCase().includes(searchQuery.toLowerCase());
     return matchesCategory && matchesSearch;
   });
 
-  const categories = ['all', 'basic', 'advanced', 'integration'];
+  const categories = ["all", "basic", "advanced", "integration"];
 
   return (
     <div className="space-y-8">
@@ -121,8 +128,8 @@ export default function ExampleGallery({ contractId }: ExampleGalleryProps) {
                 onClick={() => setSelectedCategory(cat)}
                 className={`px-4 py-2 rounded-md text-sm font-medium transition-all capitalize whitespace-nowrap min-h-[44px] ${
                   selectedCategory === cat
-                    ? 'bg-card shadow-sm text-foreground'
-                    : 'text-muted-foreground hover:text-foreground'
+                    ? "bg-card shadow-sm text-foreground"
+                    : "text-muted-foreground hover:text-foreground"
                 }`}
               >
                 {cat}

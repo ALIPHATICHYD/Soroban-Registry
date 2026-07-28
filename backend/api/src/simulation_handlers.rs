@@ -1,3 +1,4 @@
+use crate::validation::extractors::ValidatedJson;
 use axum::{
     extract::{Json, State},
     response::IntoResponse,
@@ -13,7 +14,7 @@ use crate::{error::ApiResult, simulation, state::AppState, validation::validate_
 
 pub async fn simulate_deploy(
     State(_state): State<AppState>,
-    Json(req): Json<SimulateDeployRequest>,
+    ValidatedJson(req): ValidatedJson<SimulateDeployRequest>,
 ) -> ApiResult<impl IntoResponse> {
     let start_time = Instant::now();
 

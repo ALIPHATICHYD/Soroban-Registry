@@ -1,11 +1,7 @@
 "use client";
 
 import React, { useState } from "react";
-import {
-  api,
-  ReleaseNotesResponse,
-  ReleaseNotesStatus,
-} from "@/lib/api";
+import { api, ReleaseNotesResponse, ReleaseNotesStatus } from "@/lib/api";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 
 interface ReleaseNotesProps {
@@ -78,9 +74,7 @@ export default function ReleaseNotesPanel({ contractId }: ReleaseNotesProps) {
 
   if (error) {
     return (
-      <div className="text-red-500 text-sm">
-        Failed to load release notes.
-      </div>
+      <div className="text-red-500 text-sm">Failed to load release notes.</div>
     );
   }
 
@@ -88,9 +82,7 @@ export default function ReleaseNotesPanel({ contractId }: ReleaseNotesProps) {
     <div className="space-y-6">
       {/* Header */}
       <div className="flex items-center justify-between">
-        <h3 className="text-lg font-semibold text-foreground">
-          Release Notes
-        </h3>
+        <h3 className="text-lg font-semibold text-foreground">Release Notes</h3>
         <button
           onClick={() => setShowGenerateForm(!showGenerateForm)}
           className="px-3 py-1.5 text-sm font-medium rounded-md bg-primary text-primary-foreground hover:bg-primary/90 transition-colors"
@@ -117,9 +109,7 @@ export default function ReleaseNotesPanel({ contractId }: ReleaseNotesProps) {
             disabled={!generateVersion || generateMutation.isPending}
             className="px-4 py-2 text-sm font-medium rounded-md bg-green-600 text-white hover:bg-green-700 disabled:opacity-50 transition-colors"
           >
-            {generateMutation.isPending
-              ? "Generating..."
-              : "Auto-Generate"}
+            {generateMutation.isPending ? "Generating..." : "Auto-Generate"}
           </button>
           {generateMutation.isError && (
             <p className="text-red-500 text-sm">
@@ -166,7 +156,6 @@ export default function ReleaseNotesPanel({ contractId }: ReleaseNotesProps) {
     </div>
   );
 }
-
 
 interface ReleaseNotesCardProps {
   notes: ReleaseNotesResponse;
@@ -307,13 +296,13 @@ function DiffSummaryBar({
   diff: ReleaseNotesResponse["diff_summary"];
 }) {
   const added = diff.function_changes.filter(
-    (c) => c.change_type === "added"
+    (c) => c.change_type === "added",
   ).length;
   const removed = diff.function_changes.filter(
-    (c) => c.change_type === "removed"
+    (c) => c.change_type === "removed",
   ).length;
   const modified = diff.function_changes.filter(
-    (c) => c.change_type === "modified"
+    (c) => c.change_type === "modified",
   ).length;
 
   return (

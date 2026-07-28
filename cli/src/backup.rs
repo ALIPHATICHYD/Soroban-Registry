@@ -1,6 +1,6 @@
-#![allow(dead_code)]
-
-use anyhow::Result;
+use crate::net::RequestBuilderExt;
+use anyhow::{bail, Context, Result};
+use chrono::NaiveDate;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize)]
@@ -33,12 +33,34 @@ struct BackupRestoration {
     restored_at: String,
 }
 
+fn validate_contract_id(contract_id: &str) -> Result<()> {
+    if contract_id.trim().is_empty() {
+        bail!("Contract ID cannot be empty. Provide a valid on-chain contract ID.");
+    }
+    Ok(())
+}
+
+fn validate_backup_date(date: &str) -> Result<()> {
+    if date.trim().is_empty() {
+        bail!("Backup date cannot be empty. Provide a date in YYYY-MM-DD format.");
+    }
+    NaiveDate::parse_from_str(date, "%Y-%m-%d")
+        .map(|_| ())
+        .map_err(|_| {
+            anyhow::anyhow!(
+                "Invalid backup date format: '{}'. Expected format: YYYY-MM-DD (e.g. 2026-05-31)",
+                date
+            )
+        })
+}
+
 pub async fn create_backup(api_url: &str, contract_id: &str, include_state: bool) -> Result<()> {
-    let client = reqwest::Client::new();
+    validate_contract_id(contract_id)?;
+    let client = crate::net::client();
     let backup: ContractBackup = client
         .post(format!("{}/api/contracts/{}/backups", api_url, contract_id))
         .json(&CreateBackupRequest { include_state })
-        .send()
+        .send_with_retry()
         .await?
         .json()
         .await?;
@@ -51,10 +73,11 @@ pub async fn create_backup(api_url: &str, contract_id: &str, include_state: bool
 }
 
 pub async fn list_backups(api_url: &str, contract_id: &str) -> Result<()> {
-    let client = reqwest::Client::new();
+    validate_contract_id(contract_id)?;
+    let client = crate::net::client();
     let backups: Vec<ContractBackup> = client
         .get(format!("{}/api/contracts/{}/backups", api_url, contract_id))
-        .send()
+        .send_with_retry()
         .await?
         .json()
         .await?;
@@ -72,9 +95,11 @@ pub async fn list_backups(api_url: &str, contract_id: &str) -> Result<()> {
 }
 
 pub async fn restore_backup(api_url: &str, contract_id: &str, backup_date: &str) -> Result<()> {
-    let client = reqwest::Client::new();
+    validate_contract_id(contract_id)?;
+    validate_backup_date(backup_date)?;
+    let client = crate::net::client();
 
-    println!("🔄 Restoring backup from {}...", backup_date);
+    println!("Restoring backup from {}...", backup_date);
 
     let restoration: BackupRestoration = client
         .post(format!(
@@ -84,43 +109,46 @@ pub async fn restore_backup(api_url: &str, contract_id: &str, backup_date: &str)
         .json(&RestoreBackupRequest {
             backup_date: backup_date.to_string(),
         })
-        .send()
+        .send_with_retry()
         .await?
         .json()
         .await?;
 
     if restoration.success {
-        println!("✅ Restoration completed successfully");
+        println!("Restoration completed successfully");
         println!("   Duration: {}ms", restoration.restore_duration_ms);
         println!("   Restored at: {}", restoration.restored_at);
     } else {
-        println!("❌ Restoration failed");
+        bail!("Restoration failed for contract '{}' backup '{}'. The backup may be corrupted or incomplete.", contract_id, backup_date);
     }
     Ok(())
 }
 
 pub async fn verify_backup(api_url: &str, contract_id: &str, backup_date: &str) -> Result<()> {
-    let client = reqwest::Client::new();
+    validate_contract_id(contract_id)?;
+    validate_backup_date(backup_date)?;
+    let client = crate::net::client();
     client
         .post(format!(
             "{}/api/contracts/{}/backups/{}/verify",
             api_url, contract_id, backup_date
         ))
-        .send()
+        .send_with_retry()
         .await?;
 
-    println!("✅ Backup verified: {}", backup_date);
+    println!("Backup verified: {}", backup_date);
     Ok(())
 }
 
 pub async fn backup_stats(api_url: &str, contract_id: &str) -> Result<()> {
-    let client = reqwest::Client::new();
+    validate_contract_id(contract_id)?;
+    let client = crate::net::client();
     let stats: serde_json::Value = client
         .get(format!(
             "{}/api/contracts/{}/backups/stats",
             api_url, contract_id
         ))
-        .send()
+        .send_with_retry()
         .await?
         .json()
         .await?;

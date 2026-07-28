@@ -1,18 +1,27 @@
 import React from "react";
 import Image from "next/image";
 import { PublisherResponse } from "@/types/publisher";
-import { Calendar, ExternalLink, Github, Globe, CheckCircle } from "lucide-react";
+import {
+  Calendar,
+  ExternalLink,
+  Github,
+  Globe,
+  CheckCircle,
+} from "lucide-react";
 
 interface PublisherHeaderProps {
   publisher: PublisherResponse;
 }
 
 export function PublisherHeader({ publisher }: PublisherHeaderProps) {
-  const formattedDate = new Date(publisher.createdAt).toLocaleDateString("en-US", {
-    year: "numeric",
-    month: "long",
-    day: "numeric",
-  });
+  const formattedDate = new Date(publisher.createdAt).toLocaleDateString(
+    "en-US",
+    {
+      year: "numeric",
+      month: "long",
+      day: "numeric",
+    },
+  );
 
   return (
     <div className="bg-card rounded-2xl shadow-sm border border-border p-6 md:p-8">
@@ -20,7 +29,10 @@ export function PublisherHeader({ publisher }: PublisherHeaderProps) {
         {/* Avatar */}
         <div className="relative shrink-0">
           <Image
-            src={publisher.avatarUrl || `https://ui-avatars.com/api/?name=${encodeURIComponent(publisher.displayName)}`}
+            src={
+              publisher.avatarUrl ||
+              `https://ui-avatars.com/api/?name=${encodeURIComponent(publisher.displayName)}`
+            }
             alt={publisher.displayName}
             width={128}
             height={128}
@@ -36,14 +48,17 @@ export function PublisherHeader({ publisher }: PublisherHeaderProps) {
               <h1 className="text-2xl md:text-3xl font-bold text-foreground flex items-center gap-2">
                 {publisher.displayName}
                 {publisher.verifiedContracts > 0 && (
-                  <CheckCircle className="w-6 h-6 text-primary" aria-label="Verified Publisher" />
+                  <CheckCircle
+                    className="w-6 h-6 text-primary"
+                    aria-label="Verified Publisher"
+                  />
                 )}
               </h1>
               <p className="text-sm text-muted-foreground font-mono mt-1 break-all">
                 {publisher.address}
               </p>
             </div>
-            
+
             <button
               disabled
               className="px-4 py-2 bg-primary hover:opacity-90 disabled:bg-muted disabled:cursor-not-allowed text-primary-foreground rounded-lg font-medium transition-colors text-sm w-full md:w-auto"

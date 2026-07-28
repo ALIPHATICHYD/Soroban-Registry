@@ -1,4 +1,3 @@
-import React from 'react';
 
 const StatsSkeleton: React.FC = () => {
   return (

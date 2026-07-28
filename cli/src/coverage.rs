@@ -29,7 +29,7 @@ pub async fn run(contract_path: &str, _tests: &str, threshold: f64, output: &str
 
     let mut cmd = Command::new("cargo");
     cmd.current_dir(path);
-    cmd.args(&[
+    cmd.args([
         "tarpaulin",
         "--out",
         "Html",
@@ -102,7 +102,7 @@ pub async fn run(contract_path: &str, _tests: &str, threshold: f64, output: &str
 
 fn ensure_tarpaulin_installed() -> Result<()> {
     let check = Command::new("cargo")
-        .args(&["tarpaulin", "--version"])
+        .args(["tarpaulin", "--version"])
         .output();
 
     if check.is_err() || !check.unwrap().status.success() {
@@ -113,7 +113,7 @@ fn ensure_tarpaulin_installed() -> Result<()> {
                 .bold()
         );
         let install = Command::new("cargo")
-            .args(&["install", "cargo-tarpaulin"])
+            .args(["install", "cargo-tarpaulin"])
             .status()
             .context("Failed to run cargo install cargo-tarpaulin")?;
 

@@ -1,0 +1,2255 @@
+﻿cargo : warning: unused 
+import: `uuid::Uuid`
+At line:1 char:1
++ cargo check > 
+compile_errors.txt 2>&1
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~
+    + CategoryInfo          
+    : NotSpecified: (warni  
+  ng: unused import: `uui   
+ d::Uuid`:String) [], Re    
+moteException
+    + FullyQualifiedErrorId 
+    : NativeCommandError
+ 
+ --> api\src\error.rs:9:5
+  |
+9 | use uuid::Uuid;
+  |     ^^^^^^^^^^
+  |
+  = note: 
+`#[warn(unused_imports)]` 
+(part of `#[warn(unused)]`) 
+on by default
+
+warning: `api` (lib) 
+generated 1 warning (run 
+`cargo fix --lib -p api` to 
+apply 1 suggestion)
+    Checking api v0.1.0 (C:\
+Users\ADMIN\Desktop\innovati
+ve-drips\Soroban-Registry\ba
+ckend\api)
+error: set `DATABASE_URL` 
+to use query macros online, 
+or run `cargo sqlx prepare` 
+to update the query cache
+  --> api\src\org_handlers.r
+s:27:30
+   |
+27 |       let 
+publisher_id: Uuid = 
+sqlx::query_scalar!(
+   |  ______________________
+________^
+28 | |         "SELECT id 
+FROM publishers WHERE 
+stellar_address = $1",
+29 | |         claims.sub
+30 | |     )
+   | |_____^
+   |
+   = note: this error 
+originates in the macro `$cr
+ate::sqlx_macros::expand_que
+ry` which comes from the 
+expansion of the macro 
+`sqlx::query_scalar` (in 
+Nightly builds, run with -Z 
+macro-backtrace for more 
+info)
+
+error[E0432]: unresolved 
+imports `shared::ContractPer
+formanceSummaryResponse`, `s
+hared::PerformanceBenchmark`
+, `shared::PerformanceCompar
+isonEntry`, `shared::Perform
+anceMetricSnapshot`, `shared
+::PerformanceRegression`, `s
+hared::PerformanceTrendPoint
+`, `shared::RecordPerformanc
+eBenchmarkRequest`
+  --> api\src\performance_ha
+ndlers.rs:10:5
+   |
+10 |     ContractPerformance
+SummaryResponse, 
+CreateAlertConfigRequest, 
+PerformanceAlert,
+   |     ^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^ no `Contract
+PerformanceSummaryResponse` 
+in the root
+11 |     
+PerformanceAlertConfig, 
+PerformanceAnomaly, 
+PerformanceBenchmark, 
+PerformanceComparisonEntry,
+   |                        
+                         
+^^^^^^^^^^^^^^^^^^^^  
+^^^^^^^^^^^^^^^^^^^^^^^^^^ 
+no `PerformanceComparisonEnt
+ry` in the root
+   |                        
+                         |
+   |                        
+                         no 
+`PerformanceBenchmark` in 
+the root
+12 |     PerformanceMetric, 
+PerformanceMetricSnapshot, 
+PerformanceRegression, 
+PerformanceTrendPoint,
+   |                        
+^^^^^^^^^^^^^^^^^^^^^^^^^  
+^^^^^^^^^^^^^^^^^^^^^  
+^^^^^^^^^^^^^^^^^^^^^ no 
+`PerformanceTrendPoint` in 
+the root
+   |                        
+|                          |
+   |                        
+|                          
+no `PerformanceRegression` 
+in the root
+   |                        
+no 
+`PerformanceMetricSnapshot` 
+in the root
+13 |     RecordPerformanceBe
+nchmarkRequest, RecordPerfor
+manceMetricRequest,
+   |     ^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^ no `RecordPer
+formanceBenchmarkRequest` 
+in the root
+   |
+help: a similar name exists 
+in the module
+   |
+11 -     
+PerformanceAlertConfig, 
+PerformanceAnomaly, 
+PerformanceBenchmark, 
+PerformanceComparisonEntry,
+11 +     
+PerformanceAlertConfig, 
+PerformanceAnomaly, 
+PerformanceAnomaly, 
+PerformanceComparisonEntry,
+   |
+help: a similar name exists 
+in the module
+   |
+12 -     PerformanceMetric, 
+PerformanceMetricSnapshot, 
+PerformanceRegression, 
+PerformanceTrendPoint,
+12 +     PerformanceMetric, 
+PerformanceMetrics, 
+PerformanceRegression, 
+PerformanceTrendPoint,
+   |
+help: a similar name exists 
+in the module
+   |
+12 -     PerformanceMetric, 
+PerformanceMetricSnapshot, 
+PerformanceRegression, 
+PerformanceTrendPoint,
+12 +     PerformanceMetric, 
+PerformanceMetricSnapshot, 
+PerformanceMetric, 
+PerformanceTrendPoint,
+   |
+help: a similar name exists 
+in the module
+   |
+12 -     PerformanceMetric, 
+PerformanceMetricSnapshot, 
+PerformanceRegression, 
+PerformanceTrendPoint,
+12 +     PerformanceMetric, 
+PerformanceMetricSnapshot, 
+PerformanceRegression, 
+PerformanceTrend,
+   |
+help: a similar name exists 
+in the module
+   |
+13 -     RecordPerformanceBe
+nchmarkRequest, RecordPerfor
+manceMetricRequest,
+13 +     RecordPerformanceMe
+tricRequest, RecordPerforman
+ceMetricRequest,
+   |
+
+error[E0425]: cannot find 
+type `AuthClaims` in crate 
+`shared`
+    --> 
+api\src\handlers.rs:1253:28
+     |
+1253 |     claims: 
+Option<shared::AuthClaims>,
+     |                      
+      ^^^^^^^^^^ not found 
+in `shared`
+     |
+help: consider importing 
+one of these structs
+     |
+   1 + use 
+crate::auth::AuthClaims;
+     |
+   1 + use 
+api::auth::AuthClaims;
+     |
+help: if you import 
+`AuthClaims`, refer to it 
+directly
+     |
+1253 -     claims: 
+Option<shared::AuthClaims>,
+1253 +     claims: 
+Option<AuthClaims>,
+     |
+
+error[E0425]: cannot find 
+type `AuthClaims` in crate 
+`shared`
+    --> 
+api\src\handlers.rs:1599:28
+     |
+1599 |     claims: 
+Option<shared::AuthClaims>,
+     |                      
+      ^^^^^^^^^^ not found 
+in `shared`
+     |
+help: consider importing 
+one of these structs
+     |
+   1 + use 
+crate::auth::AuthClaims;
+     |
+   1 + use 
+api::auth::AuthClaims;
+     |
+help: if you import 
+`AuthClaims`, refer to it 
+directly
+     |
+1599 -     claims: 
+Option<shared::AuthClaims>,
+1599 +     claims: 
+Option<AuthClaims>,
+     |
+
+error[E0433]: failed to 
+resolve: could not find 
+`SourceFormat` in `models`
+    --> 
+api\src\handlers.rs:1880:35
+     |
+1880 |         "rust" => sha
+red::models::SourceFormat::R
+ust,
+     |                      
+             ^^^^^^^^^^^^ 
+could not find 
+`SourceFormat` in `models`
+     |
+help: consider importing 
+this enum
+     |
+   1 + use shared::source_st
+orage::SourceFormat;
+     |
+help: if you import 
+`SourceFormat`, refer to it 
+directly
+     |
+1880 -         "rust" => sha
+red::models::SourceFormat::R
+ust,
+1880 +         "rust" => 
+SourceFormat::Rust,
+     |
+
+error[E0433]: failed to 
+resolve: could not find 
+`SourceFormat` in `models`
+    --> 
+api\src\handlers.rs:1881:35
+     |
+1881 |         "wasm" => sha
+red::models::SourceFormat::W
+asm,
+     |                      
+             ^^^^^^^^^^^^ 
+could not find 
+`SourceFormat` in `models`
+     |
+help: consider importing 
+this enum
+     |
+   1 + use shared::source_st
+orage::SourceFormat;
+     |
+help: if you import 
+`SourceFormat`, refer to it 
+directly
+     |
+1881 -         "wasm" => sha
+red::models::SourceFormat::W
+asm,
+1881 +         "wasm" => 
+SourceFormat::Wasm,
+     |
+
+error[E0433]: failed to 
+resolve: could not find 
+`SourceFormat` in `models`
+    --> 
+api\src\handlers.rs:1976:35
+     |
+1976 |         "rust" => sha
+red::models::SourceFormat::R
+ust,
+     |                      
+             ^^^^^^^^^^^^ 
+could not find 
+`SourceFormat` in `models`
+     |
+help: consider importing 
+this enum
+     |
+   1 + use shared::source_st
+orage::SourceFormat;
+     |
+help: if you import 
+`SourceFormat`, refer to it 
+directly
+     |
+1976 -         "rust" => sha
+red::models::SourceFormat::R
+ust,
+1976 +         "rust" => 
+SourceFormat::Rust,
+     |
+
+error[E0433]: failed to 
+resolve: could not find 
+`SourceFormat` in `models`
+    --> 
+api\src\handlers.rs:1977:35
+     |
+1977 |         "wasm" => sha
+red::models::SourceFormat::W
+asm,
+     |                      
+             ^^^^^^^^^^^^ 
+could not find 
+`SourceFormat` in `models`
+     |
+help: consider importing 
+this enum
+     |
+   1 + use shared::source_st
+orage::SourceFormat;
+     |
+help: if you import 
+`SourceFormat`, refer to it 
+directly
+     |
+1977 -         "wasm" => sha
+red::models::SourceFormat::W
+asm,
+1977 +         "wasm" => 
+SourceFormat::Wasm,
+     |
+
+error[E0433]: failed to 
+resolve: could not find 
+`SourceFormat` in `models`
+    --> 
+api\src\handlers.rs:2080:39
+     |
+2080 |             "rust" 
+=> shared::models::SourceFor
+mat::Rust,
+     |                      
+                 
+^^^^^^^^^^^^ could not find 
+`SourceFormat` in `models`
+     |
+help: consider importing 
+this enum
+     |
+   1 + use shared::source_st
+orage::SourceFormat;
+     |
+help: if you import 
+`SourceFormat`, refer to it 
+directly
+     |
+2080 -             "rust" 
+=> shared::models::SourceFor
+mat::Rust,
+2080 +             "rust" 
+=> SourceFormat::Rust,
+     |
+
+error[E0433]: failed to 
+resolve: could not find 
+`SourceFormat` in `models`
+    --> 
+api\src\handlers.rs:2081:39
+     |
+2081 |             "wasm" 
+=> shared::models::SourceFor
+mat::Wasm,
+     |                      
+                 
+^^^^^^^^^^^^ could not find 
+`SourceFormat` in `models`
+     |
+help: consider importing 
+this enum
+     |
+   1 + use shared::source_st
+orage::SourceFormat;
+     |
+help: if you import 
+`SourceFormat`, refer to it 
+directly
+     |
+2081 -             "wasm" 
+=> shared::models::SourceFor
+mat::Wasm,
+2081 +             "wasm" 
+=> SourceFormat::Wasm,
+     |
+
+error[E0425]: cannot find 
+value `get_category` in 
+module `category_handlers`
+   --> 
+api\src\routes.rs:300:62
+    |
+300 |           .route("/api
+/categories/:id", get(catego
+ry_handlers::get_category))
+    |                       
+                            
+             ^^^^^^^^^^^^ 
+help: a function with a 
+similar name exists: 
+`create_category`
+    |
+   ::: api\src\category_hand
+lers.rs:234:1
+    |
+234 | / pub async fn 
+create_category(
+235 | |     State(state): 
+State<AppState>,
+236 | |     Json(req): 
+Json<CreateCategoryRequest>,
+237 | | ) -> 
+ApiResult<(StatusCode, 
+Json<CategoryResponse>)> {
+...   |
+299 | |     
+Ok((StatusCode::CREATED, Jso
+n(CategoryResponse::from(row
+))))
+300 | | }
+    | |_- similarly named 
+function `create_category` 
+defined here
+
+warning: unused import: 
+`crate::state::AppState`
+  --> 
+api\src\graphql\mod.rs:11:5
+   |
+11 | use 
+crate::state::AppState;
+   |     
+^^^^^^^^^^^^^^^^^^^^^^
+   |
+note: the lint level is 
+defined here
+  --> api\src\main.rs:1:9
+   |
+ 1 | 
+#![warn(unused_imports)]
+   |         ^^^^^^^^^^^^^^
+
+warning: unused import: 
+`uuid::Uuid`
+ --> api\src\error.rs:9:5
+  |
+9 | use uuid::Uuid;
+  |     ^^^^^^^^^^
+
+warning: unused import: 
+`Method`
+ --> 
+api\src\handlers.rs:7:31
+  |
+7 |     http::{header, 
+HeaderMap, Method, 
+StatusCode},
+  |                         
+      ^^^^^^
+
+warning: unused imports: `Co
+ntractAnalyticsResponse`, 
+`DeploymentStats`, 
+`InteractorStats`, 
+`TimelineEntry`, and 
+`TopUser`
+  --> 
+api\src\handlers.rs:16:39
+   |
+16 |     
+ChangePublisherRequest, 
+Contract, 
+ContractAnalyticsResponse, 
+ContractAuditLog,
+   |                        
+               
+^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+20 |     DeploymentStats, 
+InteractionTimeSeriesPoint,
+   |     ^^^^^^^^^^^^^^^
+21 |     InteractionTimeSeri
+esResponse, 
+InteractionsListResponse, 
+InteractionsQueryParams,
+22 |     InteractorStats, 
+Network, NetworkConfig, 
+NetworkEndpoints, 
+NetworkInfo, 
+NetworkListResponse,
+   |     ^^^^^^^^^^^^^^^
+23 |     NetworkStatus, 
+PaginatedResponse, 
+PublishRequest, Publisher, 
+SearchSuggestion, 
+24 |     
+SearchSuggestionsResponse, 
+SemVer, TimelineEntry, 
+TopUser, TrendingParams, 
+   |                        
+                
+^^^^^^^^^^^^^  ^^^^^^^
+
+warning: unused import: 
+`sqlx::QueryBuilder`
+   --> 
+api\src\handlers.rs:115:5
+    |
+115 | use 
+sqlx::QueryBuilder;
+    |     ^^^^^^^^^^^^^^^^^^
+
+warning: unused import: 
+`serde_json::Value`
+ --> api\src\openapi.rs:7:5
+  |
+7 | use serde_json::Value;
+  |     ^^^^^^^^^^^^^^^^^
+
+warning: unused import: 
+`RealtimeEvent`
+ --> 
+api\src\websocket.rs:1:30
+  |
+1 | use 
+crate::state::{AppState, 
+RealtimeEvent};
+  |                         
+     ^^^^^^^^^^^^^
+
+warning: unused import: 
+`tokio::sync::broadcast`
+ --> 
+api\src\websocket.rs:7:5
+  |
+7 | use 
+tokio::sync::broadcast;
+  |     
+^^^^^^^^^^^^^^^^^^^^^^
+
+error[E0308]: mismatched 
+types
+   --> 
+api\src\handlers.rs:227:32
+    |
+227 |           let _: 
+Result<(), _> = 
+sqlx::query("UPDATE 
+contracts SET 
+last_accessed_at = NOW() 
+WHERE id = $1")
+    |  _____________________
+___________^
+228 | |             
+.bind(contract_id)
+229 | |             
+.execute(&db)
+230 | |             .await;
+    | |__________________^ 
+expected `Result<(), _>`, 
+found 
+`Result<PgQueryResult, 
+Error>`
+    |
+    = note: expected enum 
+`std::result::Result<(), _>`
+               found enum `s
+td::result::Result<PgQueryRe
+sult, sqlx::Error>`
+
+error[E0609]: no field 
+`pool` on type `AppState`
+    --> 
+api\src\handlers.rs:1627:28
+     |
+1627 |                     
+&state.pool,
+     |                      
+      ^^^^ unknown field
+     |
+     = note: available 
+fields are: `db`, 
+`started_at`, `cache`, 
+`registry`, `job_engine` 
+... and 6 others
+
+error[E0061]: this function 
+takes 1 argument but 2 
+arguments were supplied
+    --> 
+api\src\handlers.rs:1642:24
+     |
+1642 |             return 
+Err(ApiError::forbidden(
+     |                      
+  ^^^^^^^^^^^^^^^^^^^
+1643 |                 
+"AccessDenied",
+1644 |                 
+"This contract is private 
+and you do not have access 
+to it",
+     |                 -----
+----------------------------
+-------------------------- 
+unexpected argument #2 of 
+type `&'static str`
+     |
+note: associated function 
+defined here
+    --> 
+api\src\error.rs:99:12
+     |
+  99 |     pub fn 
+forbidden(message: impl 
+Into<String>) -> Self {
+     |            ^^^^^^^^^
+help: remove the extra 
+argument
+     |
+1643 -                 
+"AccessDenied",
+1644 -                 
+"This contract is private 
+and you do not have access 
+to it",
+1643 +                 
+"AccessDenied",
+     |
+
+error[E0609]: no field 
+`source_storage` on type 
+`AppState`
+    --> 
+api\src\handlers.rs:1894:10
+     |
+1894 |         
+.source_storage
+     |          
+^^^^^^^^^^^^^^ unknown field
+     |
+     = note: available 
+fields are: `db`, 
+`started_at`, `cache`, 
+`registry`, `job_engine` 
+... and 6 others
+
+error[E0282]: type 
+annotations needed
+    --> 
+api\src\handlers.rs:1893:47
+     |
+1893 |       let (backend, 
+storage_key, source_hash) = 
+state
+     |  ____________________
+___________________________^
+1894 | |         
+.source_storage
+1895 | |         
+.store_source(&contract_id, 
+&version, 
+source_format.clone(), 
+&source_bytes)
+1896 | |         .await
+     | |______________^ 
+cannot infer type
+
+error[E0609]: no field 
+`source_storage` on type 
+`AppState`
+    --> 
+api\src\handlers.rs:1999:10
+     |
+1999 |         
+.source_storage
+     |          
+^^^^^^^^^^^^^^ unknown field
+     |
+     = note: available 
+fields are: `db`, 
+`started_at`, `cache`, 
+`registry`, `job_engine` 
+... and 6 others
+
+error[E0282]: type 
+annotations needed
+    --> 
+api\src\handlers.rs:1998:24
+     |
+1998 |       let 
+source_bytes = state
+     |  
+________________________^
+1999 | |         
+.source_storage
+2000 | |         .retrieve_s
+ource(&source_row.storage_ba
+ckend, 
+&source_row.storage_key)
+2001 | |         .await
+     | |______________^ 
+cannot infer type
+
+error[E0609]: no field 
+`source_storage` on type 
+`&AppState`
+    --> 
+api\src\handlers.rs:2100:14
+     |
+2100 |             
+.source_storage
+     |              
+^^^^^^^^^^^^^^ unknown field
+     |
+     = note: available 
+fields are: `db`, 
+`started_at`, `cache`, 
+`registry`, `job_engine` 
+... and 6 others
+
+error[E0282]: type 
+annotations needed
+    --> 
+api\src\handlers.rs:2099:21
+     |
+2099 |           let bytes 
+= state
+     |  
+_____________________^
+2100 | |             
+.source_storage
+2101 | |             .retrie
+ve_source(&source_row.storag
+e_backend, 
+&source_row.storage_key)
+2102 | |             .await
+     | |__________________^ 
+cannot infer type
+
+error[E0061]: this function 
+takes 3 arguments but 2 
+arguments were supplied
+    --> 
+api\src\handlers.rs:3344:20
+     |
+3344 |     let abi_json = 
+resolve_abi(&state, &contrac
+t.contract_id).await.ok();
+     |                    ^^
+^^^^^^^^^-------------------
+------------ argument #3 of 
+type `bool` is missing
+     |
+note: function defined here
+    --> api\src\breaking_cha
+nges.rs:381:21
+     |
+ 381 | pub(crate) async fn 
+resolve_abi(
+     |                     
+^^^^^^^^^^^
+...
+ 384 |     bypass_cache: 
+bool,
+     |     
+------------------
+help: provide the argument
+     |
+3344 |     let abi_json = 
+resolve_abi(&state, 
+&contract.contract_id, /* 
+bool */).await.ok();
+     |                      
+                            
+           ++++++++++++
+
+error[E0609]: no field 
+`pool` on type `AppState`
+  --> api\src\org_handlers.r
+s:21:10
+   |
+21 |         .pool
+   |          ^^^^ unknown 
+field
+   |
+   = note: available fields 
+are: `db`, `started_at`, 
+`cache`, `registry`, 
+`job_engine` ... and 6 
+others
+
+error[E0282]: type 
+annotations needed
+  --> api\src\org_handlers.r
+s:20:18
+   |
+20 |       let mut tx = 
+state
+   |  __________________^
+21 | |         .pool
+22 | |         .begin()
+23 | |         .await
+   | |______________^ 
+cannot infer type
+
+error[E0282]: type 
+annotations needed
+  --> api\src\org_handlers.r
+s:27:30
+   |
+27 |       let 
+publisher_id: Uuid = 
+sqlx::query_scalar!(
+   |  ______________________
+________^
+28 | |         "SELECT id 
+FROM publishers WHERE 
+stellar_address = $1",
+29 | |         claims.sub
+...  |
+32 | |     .await
+   | |__________^ cannot 
+infer type
+
+error[E0277]: the trait 
+bound `ApiError: 
+From<reqwest::StatusCode>` 
+is not satisfied
+   --> api\src\org_handlers.
+rs:35:38
+    |
+ 35 |             StatusCode
+::UNAUTHORIZED.into()
+    |                       
+               ^^^^ 
+unsatisfied trait bound
+    |
+help: the trait 
+`From<reqwest::StatusCode>` 
+is not implemented for 
+`ApiError`
+      but trait 
+`From<sqlx::Error>` is 
+implemented for it
+   --> 
+api\src\error.rs:140:1
+    |
+140 | impl 
+From<sqlx::Error> for 
+ApiError {
+    | ^^^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^
+    = help: for that trait 
+implementation, expected 
+`sqlx::Error`, found 
+`reqwest::StatusCode`
+    = note: required for 
+`reqwest::StatusCode` to 
+implement `Into<ApiError>`
+
+error[E0282]: type 
+annotations needed
+  --> api\src\org_handlers.r
+s:42:29
+   |
+42 |       let org: 
+Organization = 
+sqlx::query_as(
+   |  ______________________
+_______^
+43 | |         r#"
+44 | |         INSERT INTO 
+organizations (name, slug, 
+description, is_private)
+45 | |         VALUES ($1, 
+$2, $3, $4)
+...  |
+53 | |     .fetch_one(&mut 
+*tx)
+54 | |     .await
+   | |__________^ cannot 
+infer type
+
+error[E0282]: type 
+annotations needed
+  --> 
+api\src\org_handlers.rs:58:5
+   |
+58 | /     sqlx::query(
+59 | |         r#"
+60 | |         INSERT INTO 
+organization_members 
+(organization_id, 
+publisher_id, role)
+61 | |         VALUES ($1, 
+$2, $3)
+...  |
+67 | |     .execute(&mut 
+*tx)
+68 | |     .await
+   | |__________^ cannot 
+infer type
+
+error[E0282]: type 
+annotations needed
+  --> 
+api\src\org_handlers.rs:71:5
+   |
+71 | /     tx.commit()
+72 | |         .await
+   | |______________^ 
+cannot infer type
+
+error[E0609]: no field 
+`pool` on type `AppState`
+  --> api\src\org_handlers.r
+s:91:32
+   |
+91 |         
+.fetch_optional(&state.pool)
+   |                        
+        ^^^^ unknown field
+   |
+   = note: available fields 
+are: `db`, `started_at`, 
+`cache`, `registry`, 
+`job_engine` ... and 6 
+others
+
+error[E0609]: no field 
+`pool` on type `AppState`
+  --> api\src\org_handlers.r
+s:98:32
+   |
+98 |         
+.fetch_optional(&state.pool)
+   |                        
+        ^^^^ unknown field
+   |
+   = note: available fields 
+are: `db`, `started_at`, 
+`cache`, `registry`, 
+`job_engine` ... and 6 
+others
+
+error[E0282]: type 
+annotations needed
+   --> api\src\org_handlers.
+rs:86:15
+    |
+ 86 |       let org = if 
+let Some(id) = org_id {
+    |  _______________^
+ 87 | |         
+sqlx::query_as::<_, 
+Organization>(
+ 88 | |             "SELECT 
+* FROM organizations WHERE 
+id = $1",
+...   |
+ 99 | |         .await
+100 | |     }
+    | |_____^ cannot infer 
+type
+
+error[E0609]: no field 
+`pool` on type `AppState`
+   --> api\src\org_handlers.
+rs:107:35
+    |
+107 |             
+check_org_role(&state.pool, 
+org.id, &claims.sub, 
+OrganizationRole::Viewer)
+    |                       
+            ^^^^ unknown 
+field
+    |
+    = note: available 
+fields are: `db`, 
+`started_at`, `cache`, 
+`registry`, `job_engine` 
+... and 6 others
+
+error[E0277]: the trait 
+bound `ApiError: 
+From<reqwest::StatusCode>` 
+is not satisfied
+   --> api\src\org_handlers.
+rs:115:46
+    |
+115 |             return Err
+(StatusCode::FORBIDDEN.into(
+));
+    |                       
+                       ^^^^ 
+unsatisfied trait bound
+    |
+help: the trait 
+`From<reqwest::StatusCode>` 
+is not implemented for 
+`ApiError`
+      but trait 
+`From<sqlx::Error>` is 
+implemented for it
+   --> 
+api\src\error.rs:140:1
+    |
+140 | impl 
+From<sqlx::Error> for 
+ApiError {
+    | ^^^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^
+    = help: for that trait 
+implementation, expected 
+`sqlx::Error`, found 
+`reqwest::StatusCode`
+    = note: required for 
+`reqwest::StatusCode` to 
+implement `Into<ApiError>`
+
+error[E0609]: no field 
+`pool` on type `AppState`
+   --> api\src\org_handlers.
+rs:130:27
+    |
+130 |     
+check_org_role(&state.pool, 
+id, &claims.sub, Organizatio
+nRole::Admin).await?;
+    |                       
+    ^^^^ unknown field
+    |
+    = note: available 
+fields are: `db`, 
+`started_at`, `cache`, 
+`registry`, `job_engine` 
+... and 6 others
+
+error[E0609]: no field 
+`pool` on type `AppState`
+   --> api\src\org_handlers.
+rs:148:23
+    |
+148 |     
+.fetch_one(&state.pool)
+    |                       
+^^^^ unknown field
+    |
+    = note: available 
+fields are: `db`, 
+`started_at`, `cache`, 
+`registry`, `job_engine` 
+... and 6 others
+
+error[E0282]: type 
+annotations needed
+   --> api\src\org_handlers.
+rs:132:29
+    |
+132 |       let org: 
+Organization = 
+sqlx::query_as(
+    |  _____________________
+________^
+133 | |         r#"
+134 | |         UPDATE 
+organizations
+135 | |         SET 
+...   |
+148 | |     
+.fetch_one(&state.pool)
+149 | |     .await
+    | |__________^ cannot 
+infer type
+
+error[E0277]: `?` couldn't 
+convert the error to 
+`ApiError`
+   --> api\src\org_handlers.
+rs:176:55
+    |
+176 |     let role = member_
+row.ok_or(StatusCode::FORBID
+DEN)?.0;
+    |                       
+    ------------------------
+----^ the trait 
+`From<reqwest::StatusCode>` 
+is not implemented for 
+`ApiError`
+    |                       
+    |
+    |                       
+    this can't be annotated 
+with `?` because it has 
+type `Result<_, 
+reqwest::StatusCode>`
+    |
+note: `ApiError` needs to 
+implement 
+`From<reqwest::StatusCode>`
+   --> api\src\error.rs:42:1
+    |
+ 42 | pub struct ApiError {
+    | ^^^^^^^^^^^^^^^^^^^
+    = note: the question 
+mark operation (`?`) 
+implicitly performs a 
+conversion on the error 
+value using the `From` trait
+help: the trait 
+`From<reqwest::StatusCode>` 
+is not implemented for 
+`ApiError`
+      but trait 
+`From<sqlx::Error>` is 
+implemented for it
+   --> 
+api\src\error.rs:140:1
+    |
+140 | impl 
+From<sqlx::Error> for 
+ApiError {
+    | ^^^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^
+    = help: for that trait 
+implementation, expected 
+`sqlx::Error`, found 
+`reqwest::StatusCode`
+
+error[E0277]: the trait 
+bound `ApiError: 
+From<reqwest::StatusCode>` 
+is not satisfied
+   --> api\src\org_handlers.
+rs:188:35
+    |
+188 |         Err(StatusCode
+::FORBIDDEN.into())
+    |                       
+            ^^^^ 
+unsatisfied trait bound
+    |
+help: the trait 
+`From<reqwest::StatusCode>` 
+is not implemented for 
+`ApiError`
+      but trait 
+`From<sqlx::Error>` is 
+implemented for it
+   --> 
+api\src\error.rs:140:1
+    |
+140 | impl 
+From<sqlx::Error> for 
+ApiError {
+    | ^^^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^
+    = help: for that trait 
+implementation, expected 
+`sqlx::Error`, found 
+`reqwest::StatusCode`
+    = note: required for 
+`reqwest::StatusCode` to 
+implement `Into<ApiError>`
+
+error[E0609]: no field 
+`pool` on type `AppState`
+   --> api\src\org_handlers.
+rs:199:27
+    |
+199 |     
+check_org_role(&state.pool, 
+id, &claims.sub, Organizatio
+nRole::Viewer).await?;
+    |                       
+    ^^^^ unknown field
+    |
+    = note: available 
+fields are: `db`, 
+`started_at`, `cache`, 
+`registry`, `job_engine` 
+... and 6 others
+
+error[E0609]: no field 
+`pool` on type `AppState`
+   --> api\src\org_handlers.
+rs:209:23
+    |
+209 |     
+.fetch_all(&state.pool)
+    |                       
+^^^^ unknown field
+    |
+    = note: available 
+fields are: `db`, 
+`started_at`, `cache`, 
+`registry`, `job_engine` 
+... and 6 others
+
+error[E0282]: type 
+annotations needed
+   --> api\src\org_handlers.
+rs:201:19
+    |
+201 |       let members = 
+sqlx::query_as::<_, 
+OrganizationMember>(
+    |  ___________________^
+202 | |         r#"
+203 | |         SELECT 
+organization_id, 
+publisher_id, role, 
+joined_at
+204 | |         FROM 
+organization_members
+...   |
+209 | |     
+.fetch_all(&state.pool)
+210 | |     .await
+    | |__________^ cannot 
+infer type
+
+error[E0609]: no field 
+`pool` on type `AppState`
+   --> api\src\org_handlers.
+rs:224:27
+    |
+224 |     
+check_org_role(&state.pool, 
+id, &claims.sub, Organizatio
+nRole::Admin).await?;
+    |                       
+    ^^^^ unknown field
+    |
+    = note: available 
+fields are: `db`, 
+`started_at`, `cache`, 
+`registry`, `job_engine` 
+... and 6 others
+
+error[E0609]: no field 
+`pool` on type `AppState`
+   --> api\src\org_handlers.
+rs:231:23
+    |
+231 |     
+.fetch_one(&state.pool)
+    |                       
+^^^^ unknown field
+    |
+    = note: available 
+fields are: `db`, 
+`started_at`, `cache`, 
+`registry`, `job_engine` 
+... and 6 others
+
+error[E0282]: type 
+annotations needed
+   --> api\src\org_handlers.
+rs:227:28
+    |
+227 |       let inviter_id: 
+Uuid = sqlx::query_scalar(
+    |  _____________________
+_______^
+228 | |         "SELECT id 
+FROM publishers WHERE 
+stellar_address = $1",
+229 | |     )
+230 | |     
+.bind(&claims.sub)
+231 | |     
+.fetch_one(&state.pool)
+232 | |     .await
+    | |__________^ cannot 
+infer type
+
+error[E0609]: no field 
+`pool` on type `AppState`
+   --> api\src\org_handlers.
+rs:250:21
+    |
+250 |     
+.execute(&state.pool)
+    |                     
+^^^^ unknown field
+    |
+    = note: available 
+fields are: `db`, 
+`started_at`, `cache`, 
+`registry`, `job_engine` 
+... and 6 others
+
+error[E0282]: type 
+annotations needed
+   --> api\src\org_handlers.
+rs:238:5
+    |
+238 | /     sqlx::query(
+239 | |         r#"
+240 | |         INSERT INTO 
+organization_invitations 
+(organization_id, email, 
+role, token, inviter_id, 
+expires_at)
+241 | |         VALUES ($1, 
+$2, $3, $4, $5, $6)
+...   |
+250 | |     
+.execute(&state.pool)
+251 | |     .await
+    | |__________^ cannot 
+infer type
+
+error[E0609]: no field 
+`pool` on type `AppState`
+   --> api\src\org_handlers.
+rs:267:10
+    |
+267 |         .pool
+    |          ^^^^ unknown 
+field
+    |
+    = note: available 
+fields are: `db`, 
+`started_at`, `cache`, 
+`registry`, `job_engine` 
+... and 6 others
+
+error[E0282]: type 
+annotations needed
+   --> api\src\org_handlers.
+rs:266:18
+    |
+266 |       let mut tx = 
+state
+    |  __________________^
+267 | |         .pool
+268 | |         .begin()
+269 | |         .await
+    | |______________^ 
+cannot infer type
+
+error[E0282]: type 
+annotations needed
+   --> api\src\org_handlers.
+rs:273:18
+    |
+273 |       let invite = 
+sqlx::query_as::<_, shared::
+OrganizationInvitation>(
+    |  __________________^
+274 | |         r#"
+275 | |         SELECT * 
+FROM 
+organization_invitations
+276 | |         WHERE token 
+= $1 AND accepted_at IS 
+NULL AND expires_at > NOW()
+...   |
+280 | |     
+.fetch_optional(&mut *tx)
+281 | |     .await
+    | |__________^ cannot 
+infer type
+
+error[E0282]: type 
+annotations needed
+   --> api\src\org_handlers.
+rs:286:30
+    |
+286 |       let 
+publisher_id: Uuid = 
+sqlx::query_scalar(
+    |  _____________________
+_________^
+287 | |         "SELECT id 
+FROM publishers WHERE 
+stellar_address = $1",
+288 | |     )
+289 | |     
+.bind(&claims.sub)
+290 | |     .fetch_one(&mut 
+*tx)
+291 | |     .await
+    | |__________^ cannot 
+infer type
+
+error[E0282]: type 
+annotations needed
+   --> api\src\org_handlers.
+rs:295:5
+    |
+295 | /     sqlx::query(
+296 | |         r#"
+297 | |         INSERT INTO 
+organization_members 
+(organization_id, 
+publisher_id, role)
+298 | |         VALUES ($1, 
+$2, $3)
+...   |
+305 | |     .execute(&mut 
+*tx)
+306 | |     .await
+    | |__________^ cannot 
+infer type
+
+error[E0282]: type 
+annotations needed
+   --> api\src\org_handlers.
+rs:310:5
+    |
+310 | /     sqlx::query(
+311 | |         "UPDATE 
+organization_invitations 
+SET accepted_at = NOW() 
+WHERE id = $1",
+312 | |     )
+313 | |     .bind(invite.id)
+314 | |     .execute(&mut 
+*tx)
+315 | |     .await
+    | |__________^ cannot 
+infer type
+
+error[E0282]: type 
+annotations needed
+   --> api\src\org_handlers.
+rs:318:5
+    |
+318 | /     tx.commit()
+319 | |         .await
+    | |______________^ 
+cannot infer type
+
+error: this function 
+depends on never type 
+fallback being `()`
+   --> api\src\performance_h
+andlers.rs:625:1
+    |
+625 | / pub async fn 
+get_performance_comparison(
+626 | |     State(state): 
+State<AppState>,
+627 | |     
+Path(contract_id): 
+Path<String>,
+628 | |     Query(params): Q
+uery<PerformanceComparisonQu
+ery>,
+629 | | ) -> 
+ApiResult<Json<Value>> {
+    | |_____________________
+______^
+    |
+    = warning: this was 
+previously accepted by the 
+compiler but is being 
+phased out; it will become 
+a hard error in Rust 2024 
+and in a future release in 
+all editions!
+    = note: for more 
+information, see <https://do
+c.rust-lang.org/edition-guid
+e/rust-2024/never-type-fallb
+ack.html>
+    = help: specify the 
+types explicitly
+note: in edition 2024, the 
+requirement `!: ab_test_hand
+lers::_::_serde::Serialize` 
+will fail
+   --> api\src\performance_h
+andlers.rs:640:13
+    |
+640 |       Ok(Json(json!({
+    |  _____________^
+641 | |         
+"contract_id": 
+contract_uuid,
+642 | |         "items": 
+items,
+643 | |         "limit": 
+limit,
+644 | |     })))
+    | |______^
+    = note: `#[deny(dependen
+cy_on_unit_never_type_fallba
+ck)]` (part of `#[deny(rust_
+2024_compatibility)]`) on 
+by default
+    = note: this error 
+originates in the macro 
+`$crate::json_internal` 
+which comes from the 
+expansion of the macro 
+`json` (in Nightly builds, 
+run with -Z macro-backtrace 
+for more info)
+help: use `()` annotations 
+to avoid fallback changes
+    |
+632 |     let items: () = 
+fetch_comparisons(
+    |              ++++
+
+error[E0599]: no method 
+named `get_mut` found for 
+struct `SplitStream<S>` in 
+the current scope
+  --> 
+api\src\websocket.rs:38:26
+   |
+37 |                       
+let _ = receiver
+   |  ______________________
+_______-
+38 | |                      
+   .get_mut()
+   | |                      
+   -^^^^^^^ method not 
+found in `SplitStream<axum::
+extract::ws::WebSocket>`
+   | 
+|_________________________|
+   |
+
+error[E0277]: the trait 
+bound `QueryCondition: 
+serde::Serialize` is not 
+satisfied
+   --> 
+api\src\handlers.rs:42:17
+    |
+ 42 | #[derive(Debug, 
+serde::Serialize, 
+serde::Deserialize, 
+utoipa::ToSchema)]
+    |                 
+^^^^^^^^^^^^^^^^ 
+unsatisfied trait bound
+...
+ 45 |     
+Condition(QueryCondition),
+    |               
+-------------- required by 
+a bound introduced by this 
+call
+    |
+help: the trait `ab_test_han
+dlers::_::_serde::Serialize`
+ is not implemented for 
+`QueryCondition`
+   --> 
+api\src\handlers.rs:60:1
+    |
+ 60 | pub struct 
+QueryCondition {
+    | 
+^^^^^^^^^^^^^^^^^^^^^^^^^
+    = note: for local types 
+consider adding `#[derive(se
+rde::Serialize)]` to your 
+`QueryCondition` type
+    = note: for types from 
+other crates check whether 
+the crate offers a `serde` 
+feature flag
+    = help: the following 
+other types implement trait 
+`ab_test_handlers::_::_serde
+::Serialize`:
+              &'a T
+              &'a mut T
+              ()
+              (T,)
+              (T0, T1)
+              (T0, T1, T2)
+              (T0, T1, T2, 
+T3)
+              (T0, T1, T2, 
+T3, T4)
+            and 727 others
+note: required by a bound 
+in 
+`serialize_newtype_variant`
+   --> C:\Users\ADMIN\.cargo
+\registry\src\index.crates.i
+o-1949cf8c6b5b557f\serde_cor
+e-1.0.228\src\ser\mod.rs:958
+:21
+    |
+950 |     fn serialize_newty
+pe_variant<T>(
+    |        
+------------------------- 
+required by a bound in this 
+associated function
+...
+958 |         T: ?Sized + 
+Serialize;
+    |                     
+^^^^^^^^^ required by this 
+bound in `Serializer::serial
+ize_newtype_variant`
+    = note: this error 
+originates in the derive 
+macro `serde::Serialize` 
+(in Nightly builds, run 
+with -Z macro-backtrace for 
+more info)
+
+error[E0277]: the trait 
+bound `QueryOperator: 
+serde::Serialize` is not 
+satisfied
+    --> 
+api\src\handlers.rs:47:9
+     |
+  47 |         operator: 
+QueryOperator,
+     |         ^^^^^^^^ 
+unsatisfied trait bound
+     |
+help: the trait `ab_test_han
+dlers::_::_serde::Serialize`
+ is not implemented for 
+`QueryOperator`
+    --> 
+api\src\handlers.rs:54:1
+     |
+  54 | pub enum 
+QueryOperator {
+     | 
+^^^^^^^^^^^^^^^^^^^^^^
+     = note: for local 
+types consider adding `#[der
+ive(serde::Serialize)]` to 
+your `QueryOperator` type
+     = note: for types from 
+other crates check whether 
+the crate offers a `serde` 
+feature flag
+     = help: the following 
+other types implement trait 
+`ab_test_handlers::_::_serde
+::Serialize`:
+               &'a T
+               &'a mut T
+               ()
+               (T,)
+               (T0, T1)
+               (T0, T1, T2)
+               (T0, T1, T2, 
+T3)
+               (T0, T1, T2, 
+T3, T4)
+             and 727 others
+note: required by a bound 
+in `ab_test_handlers::_::_se
+rde::ser::SerializeStructVar
+iant::serialize_field`
+    --> C:\Users\ADMIN\.carg
+o\registry\src\index.crates.
+io-1949cf8c6b5b557f\serde_co
+re-1.0.228\src\ser\mod.rs:19
+87:21
+     |
+1985 |     fn 
+serialize_field<T>(&mut 
+self, key: &'static str, 
+value: &T) -> Result<(), 
+Self::Error>
+     |        
+--------------- required by 
+a bound in this associated 
+function
+1986 |     where
+1987 |         T: ?Sized + 
+Serialize;
+     |                     
+^^^^^^^^^ required by this 
+bound in `SerializeStructVar
+iant::serialize_field`
+
+error[E0277]: the trait 
+bound `fn(State<...>, ...) 
+-> ... 
+{save_favorite_search}: 
+Handler<_, ...>` is not 
+satisfied
+    --> 
+api\src\routes.rs:275:56
+     |
+ 275 |             get(handl
+ers::list_favorite_searches)
+.post(handlers::save_favorit
+e_search),
+     |                      
+                            
+ ---- ^^^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^ the trait 
+`Handler<_, AppState>` is 
+not implemented for fn item 
+`fn(State<AppState>, 
+ValidatedJson<...>) -> ... 
+{save_favorite_search}`
+     |                      
+                            
+ |
+     |                      
+                            
+ required by a bound 
+introduced by this call
+     |
+     = note: Consider using 
+`#[axum::debug_handler]` to 
+improve the error message
+note: there are multiple 
+different versions of crate 
+`axum` in the dependency 
+graph
+    --> C:\Users\ADMIN\.carg
+o\registry\src\index.crates.
+io-1949cf8c6b5b557f\axum-0.7
+.9\src\handler\mod.rs:134:1
+     |
+ 134 | pub trait Handler<T, 
+S>: Clone + Send + Sized + 
+'static {
+     | ^^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+^^^^^^ this is the expected 
+trait
+     |
+    ::: C:\Users\ADMIN\.carg
+o\registry\src\index.crates.
+io-1949cf8c6b5b557f\axum-0.6
+.20\src\handler\mod.rs:137:1
+     |
+ 137 | pub trait Handler<T, 
+S, B = Body>: Clone + Send 
++ Sized + 'static {
+     | ---------------------
+----------------------------
+----------------
+     | |
+     | this is the found 
+trait
+     | this is the found 
+trait
+     | this is the found 
+trait
+     | this is the found 
+trait
+     | this is the found 
+trait
+     | this is the found 
+trait
+     | this is the found 
+trait
+     | this is the found 
+trait
+     | this is the found 
+trait
+     | this is the found 
+trait
+     | this is the found 
+trait
+     | this is the found 
+trait
+     | this is the found 
+trait
+     | this is the found 
+trait
+     | this is the found 
+trait
+     | this is the found 
+trait
+     | this is the found 
+trait
+     | this is the found 
+trait
+     |
+    ::: C:\Users\ADMIN\.carg
+o\registry\src\index.crates.
+io-1949cf8c6b5b557f\axum-0.8
+.8\src\handler\mod.rs:148:1
+     |
+ 148 | pub trait Handler<T, 
+S>: Clone + Send + Sync + 
+Sized + 'static {
+     | ---------------------
+----------------------------
+-------------
+     | |
+     | this is the found 
+trait
+     | this is the found 
+trait
+     | this is the found 
+trait
+     | this is the found 
+trait
+     | this is the found 
+trait
+     | this is the found 
+trait
+     | this is the found 
+trait
+     | this is the found 
+trait
+     | this is the found 
+trait
+     | this is the found 
+trait
+     | this is the found 
+trait
+     | this is the found 
+trait
+     | this is the found 
+trait
+     | this is the found 
+trait
+     | this is the found 
+trait
+     | this is the found 
+trait
+     | this is the found 
+trait
+     | this is the found 
+trait
+     = help: you can use 
+`cargo tree` to explore 
+your dependency tree
+help: the following other 
+types implement trait 
+`Handler<T, S>`
+    --> C:\Users\ADMIN\.carg
+o\registry\src\index.crates.
+io-1949cf8c6b5b557f\axum-0.7
+.9\src\routing\method_routin
+g.rs:1309:1
+     |
+1309 | / impl<S> 
+Handler<(), S> for 
+MethodRouter<S>
+1310 | | where
+1311 | |     S: Clone + 
+'static,
+     | 
+|_______________________^ 
+`MethodRouter<S>` 
+implements `Handler<(), S>`
+     |
+    ::: C:\Users\ADMIN\.carg
+o\registry\src\index.crates.
+io-1949cf8c6b5b557f\axum-0.7
+.9\src\handler\mod.rs:303:1
+     |
+ 303 | / impl<H, S, T, L> 
+Handler<T, S> for 
+Layered<L, H, T, S>
+ 304 | | where
+ 305 | |     L: 
+Layer<HandlerService<H, T, 
+S>> + Clone + Send + 
+'static,
+ 306 | |     H: Handler<T, 
+S>,
+...    |
+ 310 | |     T: 'static,
+ 311 | |     S: 'static,
+     | |_______________^ 
+`axum::handler::Layered<L, 
+H, T, S>` implements 
+`Handler<T, S>`
+note: required by a bound 
+in `MethodRouter::<S>::post`
+    --> C:\Users\ADMIN\.carg
+o\registry\src\index.crates.
+io-1949cf8c6b5b557f\axum-0.7
+.9\src\routing\method_routin
+g.rs:647:5
+     |
+ 647 |     
+chained_handler_fn!(post, 
+POST);
+     |     ^^^^^^^^^^^^^^^^^
+^^^----^^^^^^^
+     |     |                
+   |
+     |     |                
+   required by a bound in 
+this associated function
+     |     required by this 
+bound in 
+`MethodRouter::<S>::post`
+     = note: the full name 
+for the type has been 
+written to 'C:\Users\ADMIN\D
+esktop\innovative-drips\Soro
+ban-Registry\backend\target\
+debug\deps\api-d13da7223618d
+952.long-type-60365495621004
+34883.txt'
+     = note: consider using 
+`--verbose` to print the 
+full type name to the 
+console
+     = note: this error 
+originates in the macro 
+`chained_handler_fn` (in 
+Nightly builds, run with -Z 
+macro-backtrace for more 
+info)
+
+error[E0277]: the trait 
+bound `fn(State<...>, ...) 
+-> ... {graphql_handler}: 
+Handler<_, _>` is not 
+satisfied
+    --> 
+api\src\main.rs:262:52
+     |
+ 262 |         
+.route("/api/graphql", axum:
+:routing::post(graphql::grap
+hql_handler).with_state(sche
+ma))
+     |                      
+          
+------------------- 
+^^^^^^^^^^^^^^^^^^^^^^^^ 
+the trait `Handler<_, _>` 
+is not implemented for fn 
+item 
+`fn(State<Schema<Query, 
+..., ...>>, ...) -> ... 
+{graphql_handler}`
+     |                      
+          |
+     |                      
+          required by a 
+bound introduced by this 
+call
+     |
+     = note: Consider using 
+`#[axum::debug_handler]` to 
+improve the error message
+note: there are multiple 
+different versions of crate 
+`axum` in the dependency 
+graph
+    --> C:\Users\ADMIN\.carg
+o\registry\src\index.crates.
+io-1949cf8c6b5b557f\axum-0.7
+.9\src\handler\mod.rs:134:1
+     |
+ 134 | pub trait Handler<T, 
+S>: Clone + Send + Sized + 
+'static {
+     | ^^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+^^^^^^ this is the expected 
+trait
+     |
+    ::: C:\Users\ADMIN\.carg
+o\registry\src\index.crates.
+io-1949cf8c6b5b557f\axum-0.6
+.20\src\handler\mod.rs:137:1
+     |
+ 137 | pub trait Handler<T, 
+S, B = Body>: Clone + Send 
++ Sized + 'static {
+     | ---------------------
+----------------------------
+----------------
+     | |
+     | this is the found 
+trait
+     | this is the found 
+trait
+     | this is the found 
+trait
+     | this is the found 
+trait
+     | this is the found 
+trait
+     | this is the found 
+trait
+     | this is the found 
+trait
+     | this is the found 
+trait
+     | this is the found 
+trait
+     | this is the found 
+trait
+     | this is the found 
+trait
+     | this is the found 
+trait
+     | this is the found 
+trait
+     | this is the found 
+trait
+     | this is the found 
+trait
+     | this is the found 
+trait
+     | this is the found 
+trait
+     | this is the found 
+trait
+     |
+    ::: C:\Users\ADMIN\.carg
+o\registry\src\index.crates.
+io-1949cf8c6b5b557f\axum-0.8
+.8\src\handler\mod.rs:148:1
+     |
+ 148 | pub trait Handler<T, 
+S>: Clone + Send + Sync + 
+Sized + 'static {
+     | ---------------------
+----------------------------
+-------------
+     | |
+     | this is the found 
+trait
+     | this is the found 
+trait
+     | this is the found 
+trait
+     | this is the found 
+trait
+     | this is the found 
+trait
+     | this is the found 
+trait
+     | this is the found 
+trait
+     | this is the found 
+trait
+     | this is the found 
+trait
+     | this is the found 
+trait
+     | this is the found 
+trait
+     | this is the found 
+trait
+     | this is the found 
+trait
+     | this is the found 
+trait
+     | this is the found 
+trait
+     | this is the found 
+trait
+     | this is the found 
+trait
+     | this is the found 
+trait
+     = help: you can use 
+`cargo tree` to explore 
+your dependency tree
+help: the following other 
+types implement trait 
+`Handler<T, S>`
+    --> C:\Users\ADMIN\.carg
+o\registry\src\index.crates.
+io-1949cf8c6b5b557f\axum-0.7
+.9\src\routing\method_routin
+g.rs:1309:1
+     |
+1309 | / impl<S> 
+Handler<(), S> for 
+MethodRouter<S>
+1310 | | where
+1311 | |     S: Clone + 
+'static,
+     | 
+|_______________________^ 
+`MethodRouter<S>` 
+implements `Handler<(), S>`
+     |
+    ::: C:\Users\ADMIN\.carg
+o\registry\src\index.crates.
+io-1949cf8c6b5b557f\axum-0.7
+.9\src\handler\mod.rs:303:1
+     |
+ 303 | / impl<H, S, T, L> 
+Handler<T, S> for 
+Layered<L, H, T, S>
+ 304 | | where
+ 305 | |     L: 
+Layer<HandlerService<H, T, 
+S>> + Clone + Send + 
+'static,
+ 306 | |     H: Handler<T, 
+S>,
+...    |
+ 310 | |     T: 'static,
+ 311 | |     S: 'static,
+     | |_______________^ 
+`axum::handler::Layered<L, 
+H, T, S>` implements 
+`Handler<T, S>`
+note: required by a bound 
+in `post`
+    --> C:\Users\ADMIN\.carg
+o\registry\src\index.crates.
+io-1949cf8c6b5b557f\axum-0.7
+.9\src\routing\method_routin
+g.rs:443:1
+     |
+ 443 | 
+top_level_handler_fn!(post, 
+POST);
+     | ^^^^^^^^^^^^^^^^^^^^^
+^----^^^^^^^
+     | |                    
+ |
+     | |                    
+ required by a bound in 
+this function
+     | required by this 
+bound in `post`
+     = note: the full name 
+for the type has been 
+written to 'C:\Users\ADMIN\D
+esktop\innovative-drips\Soro
+ban-Registry\backend\target\
+debug\deps\api-d13da7223618d
+952.long-type-14354684142713
+616085.txt'
+     = note: consider using 
+`--verbose` to print the 
+full type name to the 
+console
+     = note: this error 
+originates in the macro 
+`top_level_handler_fn` (in 
+Nightly builds, run with -Z 
+macro-backtrace for more 
+info)
+
+warning: unused variable: 
+`contract_id`
+    --> 
+api\src\handlers.rs:2055:25
+     |
+2055 |     let 
+(contract_uuid, 
+contract_id) = fetch_contrac
+t_identity(&state, 
+&id).await?;
+     |                      
+   ^^^^^^^^^^^ help: if 
+this is intentional, prefix 
+it with an underscore: 
+`_contract_id`
+     |
+     = note: 
+`#[warn(unused_variables)]` 
+(part of `#[warn(unused)]`) 
+on by default
+
+warning: unused variable: 
+`compare_source_id`
+    --> 
+api\src\handlers.rs:2123:26
+     |
+2123 |     let 
+(compare_source, 
+compare_source_id) =
+     |                      
+    ^^^^^^^^^^^^^^^^^ help: 
+if this is intentional, 
+prefix it with an 
+underscore: 
+`_compare_source_id`
+
+Some errors have detailed 
+explanations: E0061, E0277, 
+E0282, E0308, E0425, E0432, 
+E0433, E0599, E0609.
+For more information about 
+an error, try `rustc 
+--explain E0061`.
+warning: `api` (bin "api") 
+generated 10 warnings
+error: could not compile 
+`api` (bin "api") due to 60 
+previous errors; 10 
+warnings emitted

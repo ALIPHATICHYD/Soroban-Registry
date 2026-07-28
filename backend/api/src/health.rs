@@ -135,3 +135,4 @@ pub async fn update_all_health_scores(pool: &PgPool) -> ApiResult<()> {
     tracing::info!("Completed health score update");
     Ok(())
 }
+// TODO: implement readiness health checks

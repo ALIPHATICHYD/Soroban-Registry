@@ -1,0 +1,11 @@
+{
+  "algorithm": "tfidf_naive_bayes",
+  "version": 1,
+  "labels": [],
+  "idf": {},
+  "labelDocCount": {},
+  "tokenLabelCounts": {},
+  "vocabularySize": 0,
+  "trainedAt": null,
+  "validationAccuracy": 0
+}

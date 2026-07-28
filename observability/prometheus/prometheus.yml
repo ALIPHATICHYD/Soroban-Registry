@@ -1,51 +1,23 @@
 global:
   scrape_interval: 15s
   evaluation_interval: 15s
-  external_labels:
-    app: soroban-registry
 
 rule_files:
   - /etc/prometheus/alert_rules.yml
 
-rule_files:
-  - "alerts.yml"
-
 alerting:
   alertmanagers:
     - static_configs:
-        - targets: [alertmanager:9093]
+        - targets:
+            - alertmanager:9093
 
 scrape_configs:
   - job_name: prometheus
     static_configs:
-      - targets: [localhost:9090]
+      - targets: ["prometheus:9090"]
 
-  - job_name: soroban-api
-    static_configs:
-      - targets: [api:3001]
+  - job_name: soroban-registry-api
     metrics_path: /metrics
-    scrape_interval: 10s
-
-  - job_name: node-exporter
-    static_configs:
-      - targets: [node-exporter:9100]
-        - targets: ["alertmanager:9093"]
-
-scrape_configs:
-  - job_name: "soroban-registry-api"
-    metrics_path: "/metrics"
     static_configs:
       - targets: ["api:3001"]
-        labels:
-          service: "soroban-registry"
-          environment: "production"
 
-  - job_name: "prometheus"
-    static_configs:
-      - targets: ["localhost:9090"]
-
-  # Istio / Linkerd envoy sidecar (when running in service mesh)
-  - job_name: "envoy-stats"
-    metrics_path: "/stats/prometheus"
-    static_configs:
-      - targets: ["localhost:15090"]

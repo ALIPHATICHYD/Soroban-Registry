@@ -28,12 +28,12 @@
 }
 
 .dark {
-  --background: #0B0D17;
+  --background: #0b0d17;
   --foreground: #e2e8f0;
   --primary: #22d3ee;
-  --primary-foreground: #0B0D17;
+  --primary-foreground: #0b0d17;
   --secondary: #a78bfa;
-  --secondary-foreground: #0B0D17;
+  --secondary-foreground: #0b0d17;
   --accent: #141627;
   --accent-foreground: #e2e8f0;
   --muted: #10122a;
@@ -71,13 +71,32 @@
 
 * {
   border-color: var(--border);
+  transition:
+    background-color 0.3s ease,
+    color 0.3s ease,
+    border-color 0.3s ease,
+    box-shadow 0.3s ease;
 }
 
 body {
   background-color: var(--background);
   color: var(--foreground);
-  font-family: "Inter", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif;
-  transition: background-color 0.3s ease, color 0.3s ease, border-color 0.3s ease;
+  font-family:
+    "Inter",
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    Roboto,
+    "Helvetica Neue",
+    Arial,
+    "Noto Sans",
+    sans-serif;
+  transition:
+    background-color 0.3s ease,
+    color 0.3s ease,
+    border-color 0.3s ease;
 }
 
 /* ── Base layouts ─────────────────────────────────────────────── */
@@ -96,36 +115,73 @@ body {
 }
 
 .hero-gradient {
-  background: linear-gradient(135deg, #0B0D17 0%, #0d1a3a 30%, #0a2540 50%, #0B0D17 100%);
+  background: linear-gradient(
+    135deg,
+    #0b0d17 0%,
+    #0d1a3a 30%,
+    #0a2540 50%,
+    #0b0d17 100%
+  );
   position: relative;
   overflow: hidden;
 }
 
 .hero-gradient::before {
-  content: '';
+  content: "";
   position: absolute;
   inset: 0;
   background:
-    radial-gradient(ellipse 80% 50% at 20% 40%, rgba(6, 182, 212, 0.12) 0%, transparent 70%),
-    radial-gradient(ellipse 60% 40% at 80% 60%, rgba(139, 92, 246, 0.08) 0%, transparent 70%);
+    radial-gradient(
+      ellipse 80% 50% at 20% 40%,
+      rgba(6, 182, 212, 0.12) 0%,
+      transparent 70%
+    ),
+    radial-gradient(
+      ellipse 60% 40% at 80% 60%,
+      rgba(139, 92, 246, 0.08) 0%,
+      transparent 70%
+    );
   animation: aurora-shift 12s ease-in-out infinite alternate;
   pointer-events: none;
 }
 
 @keyframes aurora-shift {
-  0% { opacity: 0.6; transform: scale(1) translateY(0); }
-  50% { opacity: 1; transform: scale(1.05) translateY(-8px); }
-  100% { opacity: 0.6; transform: scale(1) translateY(0); }
+  0% {
+    opacity: 0.6;
+    transform: scale(1) translateY(0);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.05) translateY(-8px);
+  }
+  100% {
+    opacity: 0.6;
+    transform: scale(1) translateY(0);
+  }
 }
 
 :root .hero-gradient {
-  background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 30%, #f0f4ff 50%, #f8fafc 100%);
+  background: linear-gradient(
+    135deg,
+    #f0f9ff 0%,
+    #e0f2fe 30%,
+    #f0f4ff 50%,
+    #f8fafc 100%
+  );
 }
 
 :root .hero-gradient::before {
   background:
-    radial-gradient(ellipse 80% 50% at 20% 40%, rgba(6, 182, 212, 0.06) 0%, transparent 70%),
-    radial-gradient(ellipse 60% 40% at 80% 60%, rgba(139, 92, 246, 0.04) 0%, transparent 70%);
+    radial-gradient(
+      ellipse 80% 50% at 20% 40%,
+      rgba(6, 182, 212, 0.06) 0%,
+      transparent 70%
+    ),
+    radial-gradient(
+      ellipse 60% 40% at 80% 60%,
+      rgba(139, 92, 246, 0.04) 0%,
+      transparent 70%
+    );
 }
 
 /* ── Glassmorphism ────────────────────────────────────────────── */
@@ -145,7 +201,9 @@ body {
 /* ── Glow utilities ───────────────────────────────────────────── */
 
 .glow-primary {
-  box-shadow: 0 0 20px var(--glow-primary), 0 0 40px var(--glow-primary);
+  box-shadow:
+    0 0 20px var(--glow-primary),
+    0 0 40px var(--glow-primary);
 }
 
 .glow-sm {
@@ -157,13 +215,15 @@ body {
 }
 
 .glow-border::after {
-  content: '';
+  content: "";
   position: absolute;
   inset: -1px;
   border-radius: inherit;
   padding: 1px;
   background: linear-gradient(135deg, var(--primary), var(--secondary));
-  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask:
+    linear-gradient(#fff 0 0) content-box,
+    linear-gradient(#fff 0 0);
   -webkit-mask-composite: xor;
   mask-composite: exclude;
   opacity: 0;
@@ -178,7 +238,9 @@ body {
 /* ── Card hover lift ──────────────────────────────────────────── */
 
 .card-hover {
-  transition: transform 0.25s ease, box-shadow 0.25s ease;
+  transition:
+    transform 0.25s ease,
+    box-shadow 0.25s ease;
 }
 
 .card-hover:hover {
@@ -230,8 +292,13 @@ body {
 /* ── Skeleton loading animation ───────────────────────────────── */
 
 @keyframes skeleton-pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.4; }
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.4;
+  }
 }
 
 .animate-pulse {
@@ -245,23 +312,31 @@ body {
   background: var(--card);
   border-radius: var(--radius);
   border: 1px solid var(--border);
-  transition: border-color 0.3s ease, box-shadow 0.3s ease;
+  transition:
+    border-color 0.3s ease,
+    box-shadow 0.3s ease;
 }
 
 .gradient-border-card:hover {
   border-color: transparent;
-  box-shadow: 0 0 0 1px var(--primary), 0 8px 30px -8px var(--glow-primary);
+  box-shadow:
+    0 0 0 1px var(--primary),
+    0 8px 30px -8px var(--glow-primary);
 }
 
 /* ── Stellar button glow ──────────────────────────────────────── */
 
 .btn-glow {
   position: relative;
-  transition: box-shadow 0.3s ease, transform 0.2s ease;
+  transition:
+    box-shadow 0.3s ease,
+    transform 0.2s ease;
 }
 
 .btn-glow:hover {
-  box-shadow: 0 0 20px var(--glow-primary), 0 0 40px var(--glow-primary);
+  box-shadow:
+    0 0 20px var(--glow-primary),
+    0 0 40px var(--glow-primary);
   transform: translateY(-1px);
 }
 
@@ -294,4 +369,98 @@ body {
 
 ::-webkit-scrollbar-thumb:hover {
   background: var(--primary);
+}
+
+/* ── Mobile nav drawer ────────────────────────────────────── */
+
+.drawer-overlay {
+  background: rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+}
+
+/* ── Active nav indicator dot ─────────────────────────────── */
+
+@keyframes ping-sm {
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  50% {
+    transform: scale(1.4);
+    opacity: 0.5;
+  }
+}
+
+.nav-active-dot {
+  animation: ping-sm 2.5s ease-in-out infinite;
+}
+
+/* ── Search modal entrance ────────────────────────────────── */
+
+@keyframes modal-in {
+  from {
+    opacity: 0;
+    transform: scale(0.97) translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+.animate-modal-in {
+  animation: modal-in 0.18s ease-out forwards;
+}
+
+/* ── Animated hamburger icon ──────────────────────────────── */
+
+@keyframes spin-in {
+  from {
+    transform: rotate(-90deg) scale(0.75);
+    opacity: 0;
+  }
+  to {
+    transform: rotate(0deg) scale(1);
+    opacity: 1;
+  }
+}
+
+.hamburger-enter {
+  animation: spin-in 0.2s ease-out forwards;
+}
+
+/* ── Sticky nav shadow transition ─────────────────────────── */
+
+.nav-scrolled {
+  box-shadow:
+    0 4px 24px rgba(0, 0, 0, 0.1),
+    0 1px 0 var(--border);
+}
+
+/* ── Breadcrumb bar ───────────────────────────────────────── */
+
+.breadcrumb-bar {
+  border-bottom: 1px solid var(--border);
+  background: var(--background);
+}
+
+/* ── Mobile utility helpers ──────────────────────────────── */
+
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+.pt-safe-top {
+  padding-top: env(safe-area-inset-top, 0px);
+}
+
+.pb-safe-bottom {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
 }

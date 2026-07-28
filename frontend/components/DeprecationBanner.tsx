@@ -1,8 +1,7 @@
 'use client';
 
-import React from 'react';
 import Link from 'next/link';
-import { DeprecationInfo } from '@/lib/api';
+import type { DeprecationInfo } from '@/types';
 import { AlertTriangle, ArrowUpRight } from 'lucide-react';
 
 function formatDate(value?: string | null) {
@@ -24,10 +23,13 @@ export default function DeprecationBanner({ info }: Props) {
   if (info.status === 'active') return null;
 
   const isRetired = info.status === 'retired';
-  const badge = isRetired ? 'Retired' : 'Deprecated';
+  const isSuperseded = info.status === 'superseded';
+  const badge = isRetired ? 'Retired' : isSuperseded ? 'Superseded' : 'Deprecated';
   const headline = isRetired
     ? 'This contract has been retired.'
-    : 'This contract is deprecated and scheduled for retirement.';
+    : isSuperseded
+      ? 'This contract is superseded; use the replacement successor.'
+      : 'This contract is deprecated and scheduled for retirement.';
 
   return (
     <div className="rounded-xl border border-amber-200 bg-amber-50 text-amber-900 px-5 py-4">

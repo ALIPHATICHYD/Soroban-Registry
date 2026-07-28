@@ -1,4 +1,3 @@
-import React from 'react';
 import FormField from './FormField';
 
 type Option = { value: string | number; label: string };

@@ -1,3 +1,4 @@
+use crate::validation::extractors::ValidatedJson;
 use axum::{
     extract::{Path, State},
     http::StatusCode,
@@ -16,7 +17,7 @@ use crate::{
 
 pub async fn create_post_incident_report(
     State(state): State<AppState>,
-    Json(req): Json<CreatePostIncidentReportRequest>,
+    ValidatedJson(req): ValidatedJson<CreatePostIncidentReportRequest>,
 ) -> ApiResult<Json<PostIncidentReport>> {
     let report_row = sqlx::query_as::<_, PostIncidentReportRow>(
         r#"
@@ -162,7 +163,7 @@ pub async fn get_action_items_for_report(
 pub async fn create_action_item(
     State(state): State<AppState>,
     Path(report_id): Path<Uuid>,
-    Json(req): Json<CreateActionItemRequest>,
+    ValidatedJson(req): ValidatedJson<CreateActionItemRequest>,
 ) -> ApiResult<Json<ActionItem>> {
     let action_item = sqlx::query_as::<_, ActionItem>(
         r#"

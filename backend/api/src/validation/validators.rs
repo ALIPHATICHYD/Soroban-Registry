@@ -284,6 +284,126 @@ pub fn validate_json_depth(value: &serde_json::Value, max_depth: usize) -> Resul
     check_depth(value, 0, max_depth)
 }
 
+/// Validate that a value is one of the allowed strings.
+pub fn validate_one_of(value: &str, allowed: &[&str]) -> Result<(), String> {
+    if allowed.contains(&value) {
+        Ok(())
+    } else {
+        Err(format!("must be one of: {}", allowed.join(", ")))
+    }
+}
+
+/// Validate optional string against allowed values when present and non-empty.
+pub fn validate_one_of_optional(value: &Option<String>, allowed: &[&str]) -> Result<(), String> {
+    match value {
+        Some(v) if !v.trim().is_empty() => validate_one_of(v.trim(), allowed),
+        _ => Ok(()),
+    }
+}
+
+/// Validate a slug: lowercase alphanumeric and hyphens.
+pub fn validate_slug(slug: &str) -> Result<(), String> {
+    lazy_static! {
+        static ref SLUG_REGEX: Regex = Regex::new(r"^[a-z0-9]+(?:-[a-z0-9]+)*$").unwrap();
+    }
+    if slug.is_empty() {
+        return Err("slug is required".to_string());
+    }
+    if slug.len() > 100 {
+        return Err("slug must be at most 100 characters".to_string());
+    }
+    if !SLUG_REGEX.is_match(slug) {
+        return Err("slug must contain only lowercase letters, numbers, and hyphens".to_string());
+    }
+    Ok(())
+}
+
+/// Validate a basic email format.
+pub fn validate_email(email: &str) -> Result<(), String> {
+    lazy_static! {
+        static ref EMAIL_REGEX: Regex = Regex::new(r"^[^\s@]+@[^\s@]+\.[^\s@]+$").unwrap();
+    }
+    let trimmed = email.trim();
+    if trimmed.is_empty() {
+        return Err("email is required".to_string());
+    }
+    if trimmed.len() > 320 {
+        return Err("email must be at most 320 characters".to_string());
+    }
+    if !EMAIL_REGEX.is_match(trimmed) {
+        return Err("must be a valid email address".to_string());
+    }
+    Ok(())
+}
+
+/// Validate collection size is within bounds.
+pub fn validate_collection_size(count: usize, min: usize, max: usize) -> Result<(), String> {
+    if count < min {
+        return Err(format!("at least {} items are required", min));
+    }
+    if count > max {
+        return Err(format!("at most {} items are allowed", max));
+    }
+    Ok(())
+}
+
+/// Validate a numeric rating (e.g. 0.0–5.0).
+pub fn validate_rating(value: f64, min: f64, max: f64) -> Result<(), String> {
+    if !value.is_finite() {
+        return Err("rating must be a finite number".to_string());
+    }
+    if value < min || value > max {
+        return Err(format!("rating must be between {} and {}", min, max));
+    }
+    Ok(())
+}
+
+/// Validate a percentage value (0.0–100.0).
+pub fn validate_percentage(value: f64) -> Result<(), String> {
+    validate_rating(value, 0.0, 100.0)
+        .map_err(|_| "percentage must be between 0 and 100".to_string())
+}
+
+/// Validate hex string of exact length.
+pub fn validate_hex_length(value: &str, len: usize) -> Result<(), String> {
+    lazy_static! {
+        static ref HEX_REGEX: Regex = Regex::new(r"^[a-fA-F0-9]+$").unwrap();
+    }
+    let trimmed = value.trim();
+    if trimmed.len() != len {
+        return Err(format!("must be exactly {} hexadecimal characters", len));
+    }
+    if !HEX_REGEX.is_match(trimmed) {
+        return Err("must contain only hexadecimal characters".to_string());
+    }
+    Ok(())
+}
+
+/// Validate base64-encoded content size.
+pub fn validate_base64_size(value: &str, max_decoded_bytes: usize) -> Result<(), String> {
+    use base64::{engine::general_purpose::STANDARD, Engine as _};
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return Err("base64 content is required".to_string());
+    }
+    if trimmed.len() > max_decoded_bytes * 4 / 3 + 4 {
+        return Err(format!(
+            "base64 payload exceeds maximum allowed size ({} bytes decoded)",
+            max_decoded_bytes
+        ));
+    }
+    let decoded = STANDARD
+        .decode(trimmed)
+        .map_err(|_| "must be valid base64-encoded data".to_string())?;
+    if decoded.len() > max_decoded_bytes {
+        return Err(format!(
+            "decoded content exceeds maximum allowed size ({} bytes)",
+            max_decoded_bytes
+        ));
+    }
+    Ok(())
+}
+
 /// Validate per-network config version range (Issue #43).
 /// Ensures min_version and max_version are valid semver and min <= max when both present.
 pub fn validate_network_config_versions(

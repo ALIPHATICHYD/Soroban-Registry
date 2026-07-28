@@ -72,6 +72,12 @@ pub struct Profiler {
     overhead_total: Duration,
 }
 
+impl Default for Profiler {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Profiler {
     pub fn new() -> Self {
         Self {
@@ -94,7 +100,7 @@ impl Profiler {
         if let Some(parent) = self.call_stack.get(self.call_stack.len().saturating_sub(2)) {
             self.call_graph
                 .entry(parent.0.clone())
-                .or_insert_with(Vec::new)
+                .or_default()
                 .push(name.to_string());
         }
     }
@@ -107,7 +113,7 @@ impl Profiler {
         self.call_stack.pop();
         self.function_stats
             .entry(name.to_string())
-            .or_insert_with(Vec::new)
+            .or_default()
             .push(duration);
     }
 
@@ -178,7 +184,7 @@ pub fn profile_contract(contract_path: &str, method: Option<&str>) -> Result<Pro
         let func_start = Instant::now();
         // Simulate function execution
         let mut dummy_profiler = Profiler::new();
-        let _ = simulate_execution(path, Some(func), &mut dummy_profiler)?;
+        simulate_execution(path, Some(func), &mut dummy_profiler)?;
         let func_duration = func_start.elapsed();
 
         function_profiles.insert(
@@ -221,7 +227,7 @@ pub fn parse_contract_functions(contract_path: &Path) -> Result<Vec<String>> {
     let mut functions = Vec::new();
     let lines: Vec<&str> = content.lines().collect();
 
-    for (i, line) in lines.iter().enumerate() {
+    for line in lines.iter() {
         if line.trim().starts_with("pub fn ") || line.trim().starts_with("fn ") {
             if let Some(name_start) = line.find("fn ") {
                 let after_fn = &line[name_start + 3..];
@@ -276,7 +282,7 @@ pub fn simulate_execution(
 }
 
 // original/formatting-heavy implementation (kept for benchmarking)
-pub(crate) fn generate_flame_graph_old(profile: &ProfileData, output_path: &Path) -> Result<()> {
+pub fn generate_flame_graph_old(profile: &ProfileData, output_path: &Path) -> Result<()> {
     let mut svg = String::from(
         r#"<svg xmlns="http://www.w3.org/2000/svg" version="1.1" width="1200" height="800">
 <style>
@@ -370,7 +376,13 @@ pub fn generate_flame_graph(profile: &ProfileData, output_path: &Path) -> Result
         let time_ratio = func.total_time.as_nanos() as f64 / max_time;
         let bar_width = width * time_ratio.min(1.0);
 
-        let color_class = if time_ratio > 0.7 { "hot" } else if time_ratio > 0.3 { "warm" } else { "cool" };
+        let color_class = if time_ratio > 0.7 {
+            "hot"
+        } else if time_ratio > 0.3 {
+            "warm"
+        } else {
+            "cool"
+        };
 
         svg.push_str("<g class=\"frame\">\n");
         svg.push_str("<rect x=\"0\" y=\"");

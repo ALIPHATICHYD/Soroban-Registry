@@ -158,28 +158,28 @@ paths = ["tests/", "examples/", "target/"]
 
 ## Available Lint Rules
 
-| Rule ID | Severity | Description |
-|---------|----------|-------------|
-| `missing_error_handling` | Error | `.unwrap()` or `.expect()` in non-test code |
-| `unused_variables` | Warning | Variables declared but never read |
-| `unsafe_unwrap` | Error | `unwrap()` on `Option`/`Result` in public functions |
-| `integer_overflow` | Error | Unchecked arithmetic (`+`, `-`, `*`) on integers |
-| `reentrancy` | Error | Cross-contract calls before state writes |
-| `storage_key_collision` | Error | Duplicate storage key string literals |
-| `missing_auth_check` | Error | Public functions without authorization checks |
-| `unbounded_loops` | Warning | `loop` or `while true` without explicit break |
-| `hardcoded_addresses` | Warning | Hardcoded contract addresses or identifiers |
-| `deprecated_api_usage` | Warning | Use of deprecated Soroban SDK functions |
-| `large_data_in_storage` | Info | Storing unbounded `Vec` or `Map` in storage |
-| `missing_events` | Info | State-changing functions that never emit events |
-| `inefficient_clones` | Warning | Redundant `.clone()` calls |
-| `public_fn_no_doc` | Info | Public contract functions missing documentation |
-| `unchecked_arithmetic` | Error | Missing `checked_add`, `checked_sub`, etc. |
-| `direct_storage_clear` | Warning | Clearing storage without validation |
-| `panic_in_contract` | Error | Use of `panic!` macro inside contract code |
-| `missing_access_control` | Error | Admin functions missing access control |
-| `type_confusion` | Error | Unsafe type casts between Soroban types |
-| `improper_token_handling` | Error | Token transfers without validation |
+| Rule ID                   | Severity | Description                                         |
+| ------------------------- | -------- | --------------------------------------------------- |
+| `missing_error_handling`  | Error    | `.unwrap()` or `.expect()` in non-test code         |
+| `unused_variables`        | Warning  | Variables declared but never read                   |
+| `unsafe_unwrap`           | Error    | `unwrap()` on `Option`/`Result` in public functions |
+| `integer_overflow`        | Error    | Unchecked arithmetic (`+`, `-`, `*`) on integers    |
+| `reentrancy`              | Error    | Cross-contract calls before state writes            |
+| `storage_key_collision`   | Error    | Duplicate storage key string literals               |
+| `missing_auth_check`      | Error    | Public functions without authorization checks       |
+| `unbounded_loops`         | Warning  | `loop` or `while true` without explicit break       |
+| `hardcoded_addresses`     | Warning  | Hardcoded contract addresses or identifiers         |
+| `deprecated_api_usage`    | Warning  | Use of deprecated Soroban SDK functions             |
+| `large_data_in_storage`   | Info     | Storing unbounded `Vec` or `Map` in storage         |
+| `missing_events`          | Info     | State-changing functions that never emit events     |
+| `inefficient_clones`      | Warning  | Redundant `.clone()` calls                          |
+| `public_fn_no_doc`        | Info     | Public contract functions missing documentation     |
+| `unchecked_arithmetic`    | Error    | Missing `checked_add`, `checked_sub`, etc.          |
+| `direct_storage_clear`    | Warning  | Clearing storage without validation                 |
+| `panic_in_contract`       | Error    | Use of `panic!` macro inside contract code          |
+| `missing_access_control`  | Error    | Admin functions missing access control              |
+| `type_confusion`          | Error    | Unsafe type casts between Soroban types             |
+| `improper_token_handling` | Error    | Token transfers without validation                  |
 
 ## Integration with Git
 
@@ -407,6 +407,7 @@ Box::new(crate::rules::my_rule::MyRule),
 ## Security Disclaimer
 
 This tool provides best-effort detection of common issues but is not a substitute for:
+
 - Professional security audits
 - Formal verification tools
 - Comprehensive test coverage
