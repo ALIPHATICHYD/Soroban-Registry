@@ -35,18 +35,18 @@ pub async fn doctor(api_url: &str, json: bool) -> Result<()> {
         if path.exists() {
             report.config_file_exists = true;
             if !json {
-                println!("  {} Config file found: {}", "✓".green(), path.display());
+                println!("  {} Config file found: {}", "[OK]".green(), path.display());
             }
         } else {
             report.errors.push("Config file not found. Run 'soroban-registry config set' or 'soroban-registry wizard'".into());
             if !json {
-                println!("  {} Config file missing: {}", "✗".red(), path.display());
+                println!("  {} Config file missing: {}", "[ERR]".red(), path.display());
             }
         }
     } else {
         report.errors.push("Could not determine config path".into());
         if !json {
-            println!("  {} Could not determine config path", "✗".red());
+            println!("  {} Could not determine config path", "[ERR]".red());
         }
     }
 
@@ -56,22 +56,18 @@ pub async fn doctor(api_url: &str, json: bool) -> Result<()> {
         if !token.trim().is_empty() {
             report.session_valid = true;
             if !json {
-                println!("  {} Session token is present", "✓".green());
+                println!("  {} Session token is present", "[OK]".green());
             }
         } else {
-            report
-                .errors
-                .push("Session token is empty. Try logging in again.".into());
+            report.errors.push("Session token is empty. Try logging in again.".into());
             if !json {
-                println!("  {} Session token is empty", "✗".red());
+                println!("  {} Session token is empty", "[ERR]".red());
             }
         }
     } else {
-        report
-            .errors
-            .push("No session token found. Publisher may not be able to authenticate.".into());
+        report.errors.push("No session token found. Publisher may not be able to authenticate.".into());
         if !json {
-            println!("  {} No session token found", "✗".red());
+            println!("  {} No session token found", "[ERR]".red());
         }
     }
 
@@ -80,22 +76,18 @@ pub async fn doctor(api_url: &str, json: bool) -> Result<()> {
         if Path::new(key_path).exists() {
             report.signing_key_present = true;
             if !json {
-                println!("  {} Signing key found at: {}", "✓".green(), key_path);
+                println!("  {} Signing key found at: {}", "[OK]".green(), key_path);
             }
         } else {
-            report
-                .errors
-                .push(format!("Signing key file not found at: {}", key_path));
+            report.errors.push(format!("Signing key file not found at: {}", key_path));
             if !json {
-                println!("  {} Signing key file missing at: {}", "✗".red(), key_path);
+                println!("  {} Signing key file missing at: {}", "[ERR]".red(), key_path);
             }
         }
     } else {
-        report.errors.push(
-            "No signing key configured. Please set 'signing_key_path' in your config.".into(),
-        );
+        report.errors.push("No signing key configured. Please set 'signing_key_path' in your config.".into());
         if !json {
-            println!("  {} No signing key configured", "✗".red());
+            println!("  {} No signing key configured", "[ERR]".red());
         }
     }
 
@@ -103,21 +95,18 @@ pub async fn doctor(api_url: &str, json: bool) -> Result<()> {
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(5))
         .build()?;
-
+        
     // We check /health if available, else /api/health-monitor/status or fallback to /api/contracts
     let url = format!("{}/health", api_url);
     if !json {
-        print!(
-            "  {} Checking registry connectivity... ",
-            "○".bright_black()
-        );
+        print!("  {} Checking registry connectivity... ", "[~]".bright_black());
     }
-
+    
     match client.get(&url).send().await {
         Ok(res) if res.status().is_success() => {
             report.registry_reachable = true;
             if !json {
-                println!("\r  {} Registry reachable at {}", "✓".green(), api_url);
+                println!("\r  {} Registry reachable at {}", "[OK]".green(), api_url);
             }
         }
         Ok(res) => {
@@ -127,30 +116,21 @@ pub async fn doctor(api_url: &str, json: bool) -> Result<()> {
                     // even if not 200, if we can connect, it's reachable
                     report.registry_reachable = true;
                     if !json {
-                        println!(
-                            "\r  {} Registry reachable at {} (health endpoint returned {})",
-                            "✓".green(),
-                            api_url,
-                            res.status()
-                        );
+                        println!("\r  {} Registry reachable at {} (health endpoint returned {})", "[OK]".green(), api_url, res.status());
                     }
                 }
                 Err(e) => {
-                    report
-                        .errors
-                        .push(format!("Registry connection failed: {}", e));
+                    report.errors.push(format!("Registry connection failed: {}", e));
                     if !json {
-                        println!("\r  {} Registry connection failed: {}", "✗".red(), e);
+                        println!("\r  {} Registry connection failed: {}", "[ERR]".red(), e);
                     }
                 }
             }
         }
         Err(e) => {
-            report
-                .errors
-                .push(format!("Registry connection failed: {}", e));
+            report.errors.push(format!("Registry connection failed: {}", e));
             if !json {
-                println!("\r  {} Registry connection failed: {}", "✗".red(), e);
+                println!("\r  {} Registry connection failed: {}", "[ERR]".red(), e);
             }
         }
     }
@@ -167,19 +147,13 @@ pub async fn doctor(api_url: &str, json: bool) -> Result<()> {
     }
 
     println!("\n{}", "=".repeat(80).cyan());
-
+    
     if report.overall_status {
-        println!(
-            "\n{} All checks passed! The publisher environment is healthy.",
-            "✓".green().bold()
-        );
+        println!("\n{} All checks passed! The publisher environment is healthy.", "[OK]".green().bold());
     } else {
-        println!(
-            "\n{} Environment has issues. See remediation steps below:\n",
-            "✗".red().bold()
-        );
+        println!("\n{} Environment has issues. See remediation steps below:\n", "[ERR]".red().bold());
         for err in &report.errors {
-            println!("  {} {}", "•".yellow(), err);
+            println!("  {} {}", "-".yellow(), err);
         }
     }
 
