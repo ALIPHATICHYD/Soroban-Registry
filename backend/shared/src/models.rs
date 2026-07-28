@@ -5029,12 +5029,17 @@ pub struct ZkCircuitSummary {
 }
 
 // ═══════════════════════════════════════════════════════════
-// Issue #1058 — Ownership Transfer types
+// Issue #1058 / #1094 — Ownership Transfer types
 // ═══════════════════════════════════════════════════════════
 
 /// Status of an ownership transfer request.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, sqlx::Type, utoipa::ToSchema)]
-#[sqlx(type_name = "transfer_status", rename_all = "snake_case")]
+///
+/// `pending` means the outgoing publisher's signature has been verified; `completed`
+/// means the recipient's has been verified too and ownership has moved. `confirmed` is
+/// retained for the #1058 wire contract but is unreachable under the current flow, since
+/// a verified acceptance completes the transfer in the same transaction.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, utoipa::ToSchema)]
+#[serde(rename_all = "snake_case")]
 pub enum OwnershipTransferStatus {
     Pending,
     Confirmed,
@@ -5044,21 +5049,72 @@ pub enum OwnershipTransferStatus {
     Duplicate,
 }
 
-impl std::fmt::Display for OwnershipTransferStatus {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let s = match self {
+impl OwnershipTransferStatus {
+    pub fn as_str(&self) -> &'static str {
+        match self {
             Self::Pending => "pending",
             Self::Confirmed => "confirmed",
             Self::Completed => "completed",
             Self::Expired => "expired",
             Self::Rejected => "rejected",
             Self::Duplicate => "duplicate",
-        };
-        write!(f, "{}", s)
+        }
+    }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "pending" => Some(Self::Pending),
+            "confirmed" => Some(Self::Confirmed),
+            "completed" => Some(Self::Completed),
+            "expired" => Some(Self::Expired),
+            "rejected" => Some(Self::Rejected),
+            "duplicate" => Some(Self::Duplicate),
+            _ => None,
+        }
+    }
+
+    /// Whether a transfer in this state can still be acted on.
+    pub fn is_live(&self) -> bool {
+        matches!(self, Self::Pending | Self::Confirmed)
+    }
+}
+
+impl std::fmt::Display for OwnershipTransferStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
+
+// `ownership_transfers.status` is VARCHAR(20) constrained by `chk_status`; there is no
+// `transfer_status` Postgres enum. #1058 declared `#[sqlx(type_name = "transfer_status")]`
+// against that column, so decoding any row into `OwnershipTransfer` failed at runtime.
+// Delegate to `String` instead, mirroring `DeprecationStatus` above.
+impl<'r> sqlx::Decode<'r, sqlx::Postgres> for OwnershipTransferStatus {
+    fn decode(
+        value: sqlx::postgres::PgValueRef<'r>,
+    ) -> Result<Self, Box<dyn std::error::Error + 'static + Send + Sync>> {
+        let s = <String as sqlx::Decode<sqlx::Postgres>>::decode(value)?;
+        // Deliberately an error rather than a silent default: this field gates an
+        // authorization-relevant state machine, so an unrecognised value must be loud.
+        Self::parse(&s).ok_or_else(|| format!("unknown ownership transfer status: {}", s).into())
+    }
+}
+
+impl sqlx::Type<sqlx::Postgres> for OwnershipTransferStatus {
+    fn type_info() -> sqlx::postgres::PgTypeInfo {
+        <String as sqlx::Type<sqlx::Postgres>>::type_info()
+    }
+
+    fn compatible(ty: &sqlx::postgres::PgTypeInfo) -> bool {
+        <String as sqlx::Type<sqlx::Postgres>>::compatible(ty)
     }
 }
 
 /// A transfer request for contract ownership.
+///
+/// The `*_signature` / `*_signed_payload` pairs are what make a completed transfer
+/// independently auditable: the payload is the exact byte string the party signed, so a
+/// third party can re-verify it against the signer address without trusting this API.
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow, utoipa::ToSchema)]
 pub struct OwnershipTransfer {
     pub id: Uuid,
@@ -5073,31 +5129,65 @@ pub struct OwnershipTransfer {
     pub confirmed_at: Option<DateTime<Utc>>,
     pub completed_at: Option<DateTime<Utc>>,
     pub created_by: Uuid,
+    pub signature_algorithm: String,
+    pub request_nonce: Option<String>,
+    pub from_signature: Option<String>,
+    pub from_signer_address: Option<String>,
+    pub from_signed_at: Option<DateTime<Utc>>,
+    pub from_signed_payload: Option<String>,
+    pub decision_nonce: Option<String>,
+    pub decision_signature: Option<String>,
+    pub decision_signer_address: Option<String>,
+    pub decision_signed_at: Option<DateTime<Utc>>,
+    pub decision_signed_payload: Option<String>,
+    pub decision_by: Option<Uuid>,
 }
 
-/// Request to create a new ownership transfer.
+/// Request to create a new ownership transfer, signed by the current owner.
+///
+/// The acting identity comes from the bearer token, never from the body — #1058 carried a
+/// `user_id` field here, which let any caller transfer any contract.
 #[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct CreateOwnershipTransferRequest {
-    pub contract_id: Uuid,
-    pub to_publisher_id: Uuid,
-    pub expires_at: DateTime<Utc>,
-    pub user_id: Uuid,
+    /// Stellar address (`G...`) of the publisher that will receive ownership.
+    pub to_publisher_address: String,
+    /// Expiry as unix seconds. Unix seconds rather than RFC3339 so the value the client
+    /// signs and the value the server verifies cannot diverge through timezone offset,
+    /// sub-second precision, or trailing-zero formatting.
+    pub expires_at_unix: i64,
+    /// Single-use random token binding this signature to one request. The sender must
+    /// sign before the transfer row exists, so the nonce is what makes the signature
+    /// non-replayable.
+    pub nonce: String,
+    /// When the client produced the signature, unix seconds. Must be within the server's
+    /// freshness window.
+    pub signed_at_unix: i64,
+    /// Base64 (standard alphabet) ed25519 signature over the canonical initiate payload.
+    pub signature: String,
+    /// Only `ed25519` is accepted. Defaults to `ed25519` when omitted.
+    pub signature_algorithm: Option<String>,
 }
 
-/// Request to confirm (accept or reject) an ownership transfer.
+/// Request to confirm (accept or reject) an ownership transfer, signed by the acting party.
 #[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct ConfirmOwnershipTransferRequest {
-    pub transfer_id: Uuid,
     pub accept: bool,
-    pub user_id: Uuid,
+    /// Single-use random token binding this decision signature.
+    pub nonce: String,
+    pub signed_at_unix: i64,
+    /// Base64 (standard alphabet) ed25519 signature over the canonical accept/reject payload.
+    pub signature: String,
+    /// Only `ed25519` is accepted. Defaults to `ed25519` when omitted.
+    pub signature_algorithm: Option<String>,
 }
 
-/// An event log entry for an ownership transfer.
+/// An event log entry for an ownership transfer. Append-only.
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow, utoipa::ToSchema)]
 pub struct OwnershipTransferLog {
     pub id: Uuid,
     pub transfer_id: Uuid,
-    pub actor_id: Uuid,
+    /// `None` for system-authored rows, such as the expiry sweeper.
+    pub actor_id: Option<Uuid>,
     pub actor_type: String,
     pub action: String,
     pub details: Option<serde_json::Value>,

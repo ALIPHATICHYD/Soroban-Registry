@@ -61,6 +61,7 @@ pub mod notification_routes;
 pub mod onchain_verification;
 pub mod openapi;
 pub mod org_handlers;
+pub mod ownership_transfer;
 pub mod pagination;
 pub mod patch_handlers;
 pub mod performance_handlers;
