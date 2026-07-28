@@ -2300,19 +2300,96 @@ impl Validatable for RunMutationTestRequest {
     }
 }
 
+// ── Ownership transfer (issues #1058, #1094) ─────────────────────────────────
+
+/// A transfer nonce must not contain `:`.
+///
+/// The signing payloads are colon-joined ASCII, so a nonce carrying a colon could shift
+/// the segment boundaries and make two different requests produce the same signed bytes.
+/// Restricting to an unreserved URL-safe alphabet keeps the encoding injective.
+fn validate_transfer_nonce(nonce: &str) -> Result<(), String> {
+    validate_length(
+        nonce,
+        crate::ownership_transfer::MIN_NONCE_LEN,
+        crate::ownership_transfer::MAX_NONCE_LEN,
+    )?;
+
+    if !nonce
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+    {
+        return Err("must contain only letters, digits, '-' and '_'".to_string());
+    }
+
+    Ok(())
+}
+
+/// A unix-second timestamp must be positive; the handler applies the freshness window.
+fn validate_unix_timestamp(value: i64) -> Result<(), String> {
+    if value <= 0 {
+        return Err("must be a positive unix timestamp in seconds".to_string());
+    }
+    Ok(())
+}
+
+/// `validate_base64_size` is a decodability plus maximum-size guard, so this only rejects
+/// obvious junk. The exact 64-byte length is enforced in
+/// `ownership_transfer::verify_transfer_signature`, which is the single place that decides
+/// whether a signature is acceptable.
+const MAX_SIGNATURE_DECODED_BYTES: usize = 64;
+
 impl Validatable for shared::CreateOwnershipTransferRequest {
-    fn sanitize(&mut self) {}
+    fn sanitize(&mut self) {
+        self.to_publisher_address = normalize_stellar_address(&self.to_publisher_address);
+        self.nonce = trim(&self.nonce);
+        self.signature = trim(&self.signature);
+        trim_optional(&mut self.signature_algorithm);
+    }
 
     fn validate(&self) -> Result<(), Vec<FieldError>> {
-        Ok(())
+        let mut builder = ValidationBuilder::new();
+        builder
+            .check("to_publisher_address", || {
+                validate_stellar_address(&self.to_publisher_address)
+            })
+            .check("nonce", || validate_transfer_nonce(&self.nonce))
+            .check("expires_at_unix", || {
+                validate_unix_timestamp(self.expires_at_unix)
+            })
+            .check("signed_at_unix", || {
+                validate_unix_timestamp(self.signed_at_unix)
+            })
+            .check("signature", || {
+                validate_base64_size(&self.signature, MAX_SIGNATURE_DECODED_BYTES)
+            })
+            .check("signature_algorithm", || {
+                validate_one_of_optional(&self.signature_algorithm, &["ed25519"])
+            });
+        builder.build()
     }
 }
 
 impl Validatable for shared::ConfirmOwnershipTransferRequest {
-    fn sanitize(&mut self) {}
+    fn sanitize(&mut self) {
+        self.nonce = trim(&self.nonce);
+        self.signature = trim(&self.signature);
+        trim_optional(&mut self.signature_algorithm);
+    }
 
     fn validate(&self) -> Result<(), Vec<FieldError>> {
-        Ok(())
+        let mut builder = ValidationBuilder::new();
+        builder
+            .check("nonce", || validate_transfer_nonce(&self.nonce))
+            .check("signed_at_unix", || {
+                validate_unix_timestamp(self.signed_at_unix)
+            })
+            .check("signature", || {
+                validate_base64_size(&self.signature, MAX_SIGNATURE_DECODED_BYTES)
+            })
+            .check("signature_algorithm", || {
+                validate_one_of_optional(&self.signature_algorithm, &["ed25519"])
+            });
+        builder.build()
     }
 }
 

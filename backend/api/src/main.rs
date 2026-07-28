@@ -198,6 +198,11 @@ async fn main() -> Result<()> {
     // Spawn the query-analysis flush + N+1 persistence task (Issue #887)
     api::query_analysis::spawn_query_analysis_task(pool.clone());
 
+    // Spawn the ownership-transfer expiry sweeper (Issue #1094). Expiry is also applied
+    // lazily on every read and write path; this is the backstop for transfers nobody
+    // looks at again.
+    api::ownership_transfer::spawn_ownership_transfer_expiry_task(pool.clone());
+
     // Create prometheus registry for metrics
     let registry = Registry::new();
     if let Err(e) = api::metrics::register_all(&registry) {
