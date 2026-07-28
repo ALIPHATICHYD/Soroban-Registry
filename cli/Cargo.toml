@@ -41,6 +41,7 @@ ed25519-dalek = { version = "2.1", features = ["rand_core"] }
 base64 = "0.22"
 bs58 = "0.5"
 ripemd = "0.1"
+sysinfo = "0.28"
 
 [dev-dependencies]
 criterion = "0.5"

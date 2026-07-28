@@ -54,6 +54,13 @@ impl FromStr for Network {
 #[derive(Debug, Clone, Deserialize, Default)]
 struct ConfigFile {
     defaults: Option<DefaultsSection>,
+    auth: Option<AuthSection>,
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct AuthSection {
+    pub session_token: Option<String>,
+    pub signing_key_path: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
@@ -160,6 +167,21 @@ fn load_defaults_section() -> Result<DefaultsSection> {
 
     let config = load_config_file(&path)?;
     Ok(config.defaults.unwrap_or_default())
+}
+
+pub fn load_auth_section() -> Result<AuthSection> {
+    migrate_legacy_config()?;
+    let path = match config_file_path() {
+        Some(p) => p,
+        None => return Ok(AuthSection::default()),
+    };
+
+    if !path.exists() {
+        return Ok(AuthSection::default());
+    }
+
+    let config = load_config_file(&path)?;
+    Ok(config.auth.unwrap_or_default())
 }
 
 fn load_config_file(path: &Path) -> Result<ConfigFile> {
@@ -277,10 +299,7 @@ timeout = 55
     #[test]
     fn test_config_file_path_for_base() {
         let dir = tempdir().unwrap();
-        let expected = dir
-            .path()
-            .join(CONFIG_DIR_NAME)
-            .join(CONFIG_FILE_NAME);
+        let expected = dir.path().join(CONFIG_DIR_NAME).join(CONFIG_FILE_NAME);
         assert_eq!(config_file_path_for(dir.path()), expected);
     }
 
