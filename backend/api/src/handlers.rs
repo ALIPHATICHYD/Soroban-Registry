@@ -7038,6 +7038,28 @@ pub async fn confirm_ownership_transfer(
             "ownership transfer completed: both signatures verified, ownership moved"
         );
 
+        // ── Emit ownership.transferred webhook (best-effort, issue #1110) ──────
+        // Notify the new owner, who now holds the contract.
+        //
+        // Emitted after the commit, not before it as in the pre-#1094 flow. The transfer
+        // is now transactional, and this handler can still fail after the ownership write
+        // (the compare-and-swap above returns a conflict and rolls everything back), so
+        // emitting inside the transaction would announce transfers that never happened.
+        // A webhook is not rollback-able once sent.
+        crate::webhook_events::emit_webhook_event(
+            &state.db,
+            recipient.id,
+            crate::webhook_events::EVENT_OWNERSHIP_TRANSFERRED,
+            json!({
+                "contract_id": transfer_row.contract_id,
+                "transfer_id": transfer_uuid,
+                "from_publisher_id": transfer_row.from_publisher_id,
+                "to_publisher_id": recipient.id,
+                "completed_at": completed.completed_at,
+            }),
+        )
+        .await;
+
         state.cache.invalidate_contracts().await;
         return Ok(Json(completed));
     }

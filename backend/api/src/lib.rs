@@ -130,3 +130,4 @@ pub mod v1_search_handlers;
 pub mod v1_similar_handlers;
 pub mod v1_trending_handlers;
 pub mod webhook_delivery;
+pub mod webhook_events;
