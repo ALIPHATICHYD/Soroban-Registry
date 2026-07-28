@@ -19,6 +19,31 @@ use tracing::instrument;
 const DEFAULT_SOROBAN_SDK_VERSION: &str = "21.7.7";
 const BUILD_TIMEOUT: Duration = Duration::from_secs(120);
 
+// ── Well-known Soroban network passphrases ────────────────────────────────────
+//
+// These are the canonical passphrases used by Stellar's public networks.
+// They are embedded in every transaction envelope and uniquely identify a
+// network at the protocol level.  Storing them alongside verification records
+// allows the registry to detect mismatches for custom / private networks that
+// happen to share the same enum label.
+
+/// Stellar Mainnet passphrase.
+pub const PASSPHRASE_MAINNET: &str = "Public Global Stellar Network ; September 2015";
+/// Stellar Testnet passphrase.
+pub const PASSPHRASE_TESTNET: &str = "Test SDF Network ; September 2015";
+/// Stellar Futurenet passphrase.
+pub const PASSPHRASE_FUTURENET: &str = "Test SDF Future Network ; October 2022";
+
+/// Return the canonical passphrase for one of the three well-known networks,
+/// or `None` for any custom / private network that has no fixed passphrase.
+pub fn known_passphrase_for_network(network: &shared::Network) -> Option<&'static str> {
+    match network {
+        shared::Network::Mainnet => Some(PASSPHRASE_MAINNET),
+        shared::Network::Testnet => Some(PASSPHRASE_TESTNET),
+        shared::Network::Futurenet => Some(PASSPHRASE_FUTURENET),
+    }
+}
+
 /// Precise reason a source-level verification step failed.
 ///
 /// Returned alongside the boolean `verified` flag so callers can present
@@ -40,6 +65,19 @@ pub enum VerificationFailureKind {
     NetworkMismatch { network: String },
     /// No on-chain wasm artifact was found to verify against.
     MissingArtifact,
+    /// The passphrase supplied (or recorded at publish time) does not match
+    /// the passphrase used during this verification attempt.
+    ///
+    /// This catches the case where two contracts share the same enum label
+    /// (mainnet / testnet / futurenet) but belong to different physical
+    /// networks (e.g. a private fork that recycles the "testnet" label).
+    PassphraseMismatch {
+        /// Passphrase that was recorded at publish / first verification time.
+        recorded: String,
+        /// Passphrase supplied in the current verification request.
+        provided: String,
+        hint: String,
+    },
 }
 
 impl std::fmt::Display for VerificationFailureKind {
@@ -51,6 +89,15 @@ impl std::fmt::Display for VerificationFailureKind {
                 write!(f, "network_mismatch: contract not found on {network}")
             }
             Self::MissingArtifact => write!(f, "missing_artifact: no on-chain artifact found"),
+            Self::PassphraseMismatch {
+                recorded, provided, ..
+            } => {
+                write!(
+                    f,
+                    "passphrase_mismatch: recorded passphrase '{recorded}' does not match \
+                     provided passphrase '{provided}'"
+                )
+            }
         }
     }
 }
@@ -63,6 +110,46 @@ pub struct VerificationResult {
     pub message: Option<String>,
     /// Structured failure reason; `None` when `verified` is `true`.
     pub failure_kind: Option<VerificationFailureKind>,
+}
+
+/// Outcome of a passphrase compatibility check.
+#[derive(Debug, Clone, PartialEq)]
+pub enum PassphraseCheckOutcome {
+    /// Passphrases match (or one / both were absent – treated as a soft pass
+    /// for backward compatibility).
+    Pass,
+    /// The provided passphrase conflicts with the passphrase that was recorded
+    /// for this contract at publish / first-verification time.
+    Mismatch {
+        recorded: String,
+        provided: String,
+    },
+}
+
+/// Compare a `provided` passphrase against the `recorded` one stored in the
+/// registry.
+///
+/// # Rules
+/// 1. If `recorded` is `None` the contract predates passphrase tracking; we
+///    cannot reject it, so the check passes with a soft warning (the caller is
+///    responsible for logging the warning).
+/// 2. If `provided` is `None` the submitter did not supply a passphrase.  This
+///    is also treated as a soft pass so existing tooling keeps working.
+/// 3. Only when *both* sides are `Some` and they disagree do we return
+///    `Mismatch`.
+///
+/// Comparisons are case-sensitive because Stellar passphrases are case-sensitive.
+pub fn check_passphrase(
+    recorded: Option<&str>,
+    provided: Option<&str>,
+) -> PassphraseCheckOutcome {
+    match (recorded, provided) {
+        (Some(rec), Some(prov)) if rec != prov => PassphraseCheckOutcome::Mismatch {
+            recorded: rec.to_owned(),
+            provided: prov.to_owned(),
+        },
+        _ => PassphraseCheckOutcome::Pass,
+    }
 }
 
 #[instrument(skip(source_code, build_params), fields(component = "verifier", deployed_wasm_hash = %deployed_wasm_hash))]
@@ -118,6 +205,63 @@ pub async fn verify_contract(
         compiled_wasm_hash: compiled_hash,
         deployed_wasm_hash: deployed_normalized,
     })
+}
+
+/// Passphrase-aware entry-point for contract verification.
+///
+/// Performs the same bytecode check as [`verify_contract`] **and** validates
+/// the network passphrase before compiling anything.  A passphrase mismatch
+/// is returned as a hard failure (`verified = false`) with a structured
+/// [`VerificationFailureKind::PassphraseMismatch`] reason.
+///
+/// # Arguments
+/// * `source_code`          – Rust source or `wasm_base64:…` payload.
+/// * `deployed_wasm_hash`   – 64-char hex SHA-256 of the deployed WASM.
+/// * `compiler_version`     – Optional Soroban SDK version string.
+/// * `build_params`         – Optional extra cargo build flags.
+/// * `recorded_passphrase`  – Passphrase stored in the registry for this
+///                            contract (may be `None` for pre-1117 records).
+/// * `provided_passphrase`  – Passphrase supplied by the verification caller
+///                            (may be `None` for tooling that hasn't been
+///                            updated yet).
+#[instrument(
+    skip(source_code, build_params),
+    fields(component = "verifier", deployed_wasm_hash = %deployed_wasm_hash)
+)]
+pub async fn verify_contract_with_passphrase(
+    source_code: &str,
+    deployed_wasm_hash: &str,
+    compiler_version: Option<&str>,
+    build_params: Option<&Value>,
+    recorded_passphrase: Option<&str>,
+    provided_passphrase: Option<&str>,
+) -> Result<VerificationResult, RegistryError> {
+    // ── Passphrase guard ──────────────────────────────────────────────────────
+    match check_passphrase(recorded_passphrase, provided_passphrase) {
+        PassphraseCheckOutcome::Mismatch { recorded, provided } => {
+            let hint = format!(
+                "The network passphrase recorded at publish time ('{}') does not match \
+                 the passphrase supplied in this verification request ('{}').  \
+                 Ensure you are verifying against the correct network.",
+                recorded, provided
+            );
+            return Ok(VerificationResult {
+                verified: false,
+                compiled_wasm_hash: String::new(),
+                deployed_wasm_hash: deployed_wasm_hash.to_owned(),
+                message: Some(hint.clone()),
+                failure_kind: Some(VerificationFailureKind::PassphraseMismatch {
+                    recorded: recorded.clone(),
+                    provided: provided.clone(),
+                    hint,
+                }),
+            });
+        }
+        PassphraseCheckOutcome::Pass => {}
+    }
+
+    // ── Bytecode check (delegates to existing logic) ──────────────────────────
+    verify_contract(source_code, deployed_wasm_hash, compiler_version, build_params).await
 }
 
 /// Compile Rust source code to WASM.
@@ -346,5 +490,189 @@ mod tests {
         let source = format!("wasm_base64:{}", BASE64.encode(b"wasm"));
         let result = verify_contract(&source, "not-a-hex-hash", None, None).await;
         assert!(result.is_err(), "invalid hash should be rejected");
+    }
+
+    // ── Passphrase check unit tests ───────────────────────────────────────────
+
+    #[test]
+    fn check_passphrase_both_match_returns_pass() {
+        let outcome = check_passphrase(Some(PASSPHRASE_MAINNET), Some(PASSPHRASE_MAINNET));
+        assert_eq!(outcome, PassphraseCheckOutcome::Pass);
+    }
+
+    #[test]
+    fn check_passphrase_mismatch_returns_mismatch() {
+        let outcome = check_passphrase(Some(PASSPHRASE_MAINNET), Some(PASSPHRASE_TESTNET));
+        assert!(
+            matches!(outcome, PassphraseCheckOutcome::Mismatch { .. }),
+            "expected Mismatch, got {outcome:?}"
+        );
+    }
+
+    #[test]
+    fn check_passphrase_recorded_none_returns_pass() {
+        // No recorded passphrase means the contract predates passphrase tracking –
+        // treat as soft pass so existing records remain verifiable.
+        let outcome = check_passphrase(None, Some(PASSPHRASE_TESTNET));
+        assert_eq!(outcome, PassphraseCheckOutcome::Pass);
+    }
+
+    #[test]
+    fn check_passphrase_provided_none_returns_pass() {
+        // Caller didn't supply a passphrase – backward-compatible soft pass.
+        let outcome = check_passphrase(Some(PASSPHRASE_MAINNET), None);
+        assert_eq!(outcome, PassphraseCheckOutcome::Pass);
+    }
+
+    #[test]
+    fn check_passphrase_both_none_returns_pass() {
+        let outcome = check_passphrase(None, None);
+        assert_eq!(outcome, PassphraseCheckOutcome::Pass);
+    }
+
+    #[test]
+    fn known_passphrases_differ_across_networks() {
+        assert_ne!(PASSPHRASE_MAINNET, PASSPHRASE_TESTNET);
+        assert_ne!(PASSPHRASE_MAINNET, PASSPHRASE_FUTURENET);
+        assert_ne!(PASSPHRASE_TESTNET, PASSPHRASE_FUTURENET);
+    }
+
+    #[test]
+    fn known_passphrase_for_network_returns_correct_values() {
+        assert_eq!(
+            known_passphrase_for_network(&shared::Network::Mainnet),
+            Some(PASSPHRASE_MAINNET)
+        );
+        assert_eq!(
+            known_passphrase_for_network(&shared::Network::Testnet),
+            Some(PASSPHRASE_TESTNET)
+        );
+        assert_eq!(
+            known_passphrase_for_network(&shared::Network::Futurenet),
+            Some(PASSPHRASE_FUTURENET)
+        );
+    }
+
+    // ── Passphrase-aware verify_contract_with_passphrase tests ───────────────
+
+    #[tokio::test]
+    async fn passphrase_aware_verify_passes_when_passphrases_match() {
+        let wasm = b"passphrase-good-wasm";
+        let hash = hash_wasm(wasm);
+        let source = format!("wasm_base64:{}", BASE64.encode(wasm));
+
+        let result = verify_contract_with_passphrase(
+            &source,
+            &hash,
+            None,
+            None,
+            Some(PASSPHRASE_TESTNET),
+            Some(PASSPHRASE_TESTNET),
+        )
+        .await
+        .expect("verify_contract_with_passphrase should not return Err");
+
+        assert!(result.verified, "matching passphrases + matching wasm should pass");
+        assert!(result.failure_kind.is_none());
+    }
+
+    #[tokio::test]
+    async fn passphrase_aware_verify_fails_on_mismatch() {
+        let wasm = b"passphrase-mismatch-wasm";
+        let hash = hash_wasm(wasm);
+        let source = format!("wasm_base64:{}", BASE64.encode(wasm));
+
+        let result = verify_contract_with_passphrase(
+            &source,
+            &hash,
+            None,
+            None,
+            Some(PASSPHRASE_MAINNET),  // recorded: mainnet
+            Some(PASSPHRASE_TESTNET),  // provided: testnet  ← mismatch
+        )
+        .await
+        .expect("verify_contract_with_passphrase should not return Err");
+
+        assert!(!result.verified, "passphrase mismatch must reject verification");
+        match &result.failure_kind {
+            Some(VerificationFailureKind::PassphraseMismatch { recorded, provided, .. }) => {
+                assert_eq!(recorded, PASSPHRASE_MAINNET);
+                assert_eq!(provided, PASSPHRASE_TESTNET);
+            }
+            other => panic!("expected PassphraseMismatch, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn passphrase_aware_verify_passes_when_recorded_is_none() {
+        // Pre-existing contracts that lack a recorded passphrase must still
+        // be verifiable (backward compatibility requirement).
+        let wasm = b"legacy-wasm-no-passphrase";
+        let hash = hash_wasm(wasm);
+        let source = format!("wasm_base64:{}", BASE64.encode(wasm));
+
+        let result = verify_contract_with_passphrase(
+            &source,
+            &hash,
+            None,
+            None,
+            None,                      // recorded: none (legacy record)
+            Some(PASSPHRASE_TESTNET),  // provided: testnet
+        )
+        .await
+        .expect("verify_contract_with_passphrase should not return Err");
+
+        assert!(
+            result.verified,
+            "missing recorded passphrase should not block verification"
+        );
+    }
+
+    #[tokio::test]
+    async fn passphrase_aware_verify_passes_when_provided_is_none() {
+        // Legacy tooling that doesn't supply a passphrase must keep working.
+        let wasm = b"legacy-client-wasm";
+        let hash = hash_wasm(wasm);
+        let source = format!("wasm_base64:{}", BASE64.encode(wasm));
+
+        let result = verify_contract_with_passphrase(
+            &source,
+            &hash,
+            None,
+            None,
+            Some(PASSPHRASE_MAINNET), // recorded: mainnet
+            None,                     // provided: none (old client)
+        )
+        .await
+        .expect("verify_contract_with_passphrase should not return Err");
+
+        assert!(
+            result.verified,
+            "missing provided passphrase should not block verification (backward compat)"
+        );
+    }
+
+    #[tokio::test]
+    async fn passphrase_mismatch_takes_priority_over_bytecode_mismatch() {
+        // Even if the bytecode would also mismatch, passphrase guard fires first.
+        let source = format!("wasm_base64:{}", BASE64.encode(b"some-wasm"));
+        let wrong_hash = hash_wasm(b"different-wasm");
+
+        let result = verify_contract_with_passphrase(
+            &source,
+            &wrong_hash,
+            None,
+            None,
+            Some(PASSPHRASE_MAINNET),
+            Some(PASSPHRASE_FUTURENET),
+        )
+        .await
+        .expect("should not error");
+
+        assert!(!result.verified);
+        assert!(
+            matches!(result.failure_kind, Some(VerificationFailureKind::PassphraseMismatch { .. })),
+            "PassphraseMismatch must take priority over SourceMismatch"
+        );
     }
 }
