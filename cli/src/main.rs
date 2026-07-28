@@ -4899,6 +4899,12 @@ pub async fn dispatch_command(
                 env::switch_env(&environment)?;
             }
         },
+        Commands::Publisher { action } => match action {
+            PublisherCommands::Doctor { json } => {
+                log::debug!("Command: publisher doctor | json={}", json);
+                publisher::doctor(&cli.api_url, json).await?;
+            }
+        },
     }
 
     Ok(())
