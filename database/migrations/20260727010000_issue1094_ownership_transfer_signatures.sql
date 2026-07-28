@@ -113,10 +113,15 @@ EXCEPTION
     WHEN duplicate_object THEN NULL;
 END $$;
 
+-- NOT VALID for the same reason as the constraints above, and this one is the likeliest to
+-- have a non-compliant legacy row: #1058 validated the caller's expiry against the Rust
+-- clock, while created_at defaults to the SQL transaction timestamp a moment later, so a
+-- transfer created with a near-instant expiry could have expires_at <= created_at. A
+-- validated constraint would abort the boot-time migration run over such a row.
 DO $$ BEGIN
     ALTER TABLE ownership_transfers
         ADD CONSTRAINT chk_ownership_transfers_expiry_after_creation
-        CHECK (expires_at > created_at);
+        CHECK (expires_at > created_at) NOT VALID;
 EXCEPTION
     WHEN duplicate_object THEN NULL;
 END $$;
