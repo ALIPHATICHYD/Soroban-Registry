@@ -1,6 +1,6 @@
 -- Governance framework
 CREATE TYPE governance_model AS ENUM ('token_weighted', 'quadratic', 'multisig', 'timelock');
-CREATE TYPE proposal_status AS ENUM ('pending', 'active', 'passed', 'rejected', 'executed', 'cancelled');
+CREATE TYPE governance_proposal_status AS ENUM ('pending', 'active', 'passed', 'rejected', 'executed', 'cancelled');
 CREATE TYPE vote_choice AS ENUM ('for', 'against', 'abstain');
 
 -- Governance proposals
@@ -11,7 +11,7 @@ CREATE TABLE governance_proposals (
     description TEXT NOT NULL,
     governance_model governance_model NOT NULL,
     proposer UUID NOT NULL REFERENCES publishers(id),
-    status proposal_status NOT NULL DEFAULT 'pending',
+    status governance_proposal_status NOT NULL DEFAULT 'pending',
     voting_starts_at TIMESTAMPTZ NOT NULL,
     voting_ends_at TIMESTAMPTZ NOT NULL,
     execution_delay_hours INTEGER DEFAULT 0,

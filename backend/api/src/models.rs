@@ -365,7 +365,7 @@ pub struct NetworkCriteria {
 // ─────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, sqlx::Type)]
-#[sqlx(type_name = "verification_status", rename_all = "PascalCase")]
+#[sqlx(type_name = "formal_verification_status", rename_all = "PascalCase")]
 pub enum VerificationStatus {
     Proved,
     Violated,

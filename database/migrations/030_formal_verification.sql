@@ -1,6 +1,6 @@
 -- Add tables for formal verification runs
 
-CREATE TYPE verification_status AS ENUM ('Proved', 'Violated', 'Unknown', 'Skipped');
+CREATE TYPE formal_verification_status AS ENUM ('Proved', 'Violated', 'Unknown', 'Skipped');
 
 CREATE TABLE formal_verification_sessions (
     id UUID PRIMARY KEY,
@@ -23,7 +23,7 @@ CREATE TABLE formal_verification_properties (
 CREATE TABLE formal_verification_results (
     id UUID PRIMARY KEY,
     property_id UUID NOT NULL REFERENCES formal_verification_properties(id) ON DELETE CASCADE UNIQUE,
-    status verification_status NOT NULL,
+    status formal_verification_status NOT NULL,
     counterexample TEXT,
     details TEXT
 );

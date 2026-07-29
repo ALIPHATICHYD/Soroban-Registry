@@ -47,7 +47,7 @@ jobs:
           test -f backend/api/src/maintenance_middleware.rs && echo "✓ Middleware present"
           test -f backend/api/src/maintenance_routes.rs && echo "✓ Routes present"
           test -f backend/api/src/maintenance_scheduler.rs && echo "✓ Scheduler present"
-          test -f database/migrations/004_maintenance_mode.sql && echo "✓ Migration present"
+          test -f database/migrations/017_maintenance_mode.sql && echo "✓ Migration present"
           test -f frontend/components/MaintenanceBanner.tsx && echo "✓ Frontend component present"
           test -f docs/MAINTENANCE_MODE.md && echo "✓ Documentation present"
           echo "✓ All maintenance mode files present"

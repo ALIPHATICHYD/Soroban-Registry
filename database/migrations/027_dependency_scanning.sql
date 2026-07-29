@@ -14,7 +14,7 @@ CREATE TABLE cve_vulnerabilities (
 CREATE INDEX idx_cve_package_name ON cve_vulnerabilities(package_name);
 CREATE INDEX idx_cve_severity ON cve_vulnerabilities(severity);
 
-CREATE TABLE contract_dependencies (
+CREATE TABLE contract_package_dependencies (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     contract_id UUID NOT NULL REFERENCES contracts(id) ON DELETE CASCADE,
     package_name VARCHAR(255) NOT NULL,
@@ -23,8 +23,8 @@ CREATE TABLE contract_dependencies (
     UNIQUE(contract_id, package_name)
 );
 
-CREATE INDEX idx_contract_dependencies_contract_id ON contract_dependencies(contract_id);
-CREATE INDEX idx_contract_dependencies_package_name ON contract_dependencies(package_name);
+CREATE INDEX idx_contract_package_dependencies_contract_id ON contract_package_dependencies(contract_id);
+CREATE INDEX idx_contract_package_dependencies_package_name ON contract_package_dependencies(package_name);
 
 CREATE TABLE contract_scan_results (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

@@ -12,7 +12,7 @@ echo "✓ Check 1: Migration Files"
 if [ -d "database/migrations" ]; then
     COUNT=$(ls -1 database/migrations/*.sql 2>/dev/null | wc -l)
     echo "  Found $COUNT migration files"
-    if [ -f "database/migrations/004_maintenance_mode.sql" ]; then
+    if [ -f "database/migrations/017_maintenance_mode.sql" ]; then
         echo "  ✅ Maintenance mode migration present"
     else
         echo "  ❌ Maintenance mode migration missing"

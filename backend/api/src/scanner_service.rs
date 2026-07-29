@@ -74,7 +74,7 @@ pub async fn perform_scan(pool: &PgPool, contract_id: Uuid, request: ScanRequest
     for dep in &request.dependencies {
         sqlx::query!(
             r#"
-            INSERT INTO contract_dependencies (contract_id, package_name, version)
+            INSERT INTO contract_package_dependencies (contract_id, package_name, version)
             VALUES ($1, $2, $3)
             ON CONFLICT (contract_id, package_name) DO UPDATE SET
                 version = EXCLUDED.version
@@ -158,7 +158,7 @@ pub async fn get_history(pool: &PgPool, contract_id: Uuid) -> Result<ScanReport,
     .await?;
 
     let dep_count = sqlx::query_scalar!(
-        r#"SELECT COUNT(*) FROM contract_dependencies WHERE contract_id = $1"#,
+        r#"SELECT COUNT(*) FROM contract_package_dependencies WHERE contract_id = $1"#,
         contract_id
     )
     .fetch_one(pool)

@@ -17,9 +17,14 @@ CREATE TABLE ab_tests (
     started_at TIMESTAMPTZ,
     ended_at TIMESTAMPTZ,
     created_by VARCHAR(255),
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    UNIQUE(contract_id, status) WHERE status = 'running'
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+-- Postgres has no WHERE clause on inline table constraints; a partial unique
+-- constraint must be expressed as a partial unique index.
+CREATE UNIQUE INDEX idx_ab_tests_unique_running
+    ON ab_tests(contract_id, status)
+    WHERE status = 'running';
 
 CREATE INDEX idx_ab_tests_contract_id ON ab_tests(contract_id);
 CREATE INDEX idx_ab_tests_status ON ab_tests(status);

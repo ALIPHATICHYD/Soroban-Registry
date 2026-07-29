@@ -78,7 +78,7 @@ pub async fn run_formal_verification(
         sqlx::query!(
             r#"
             INSERT INTO formal_verification_results (id, property_id, status, counterexample, details)
-            VALUES ($1, $2, $3::verification_status, $4, $5)
+            VALUES ($1, $2, $3::formal_verification_status, $4, $5)
             "#,
             res.id,
             prop.id,
