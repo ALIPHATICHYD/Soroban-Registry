@@ -508,10 +508,6 @@ pub fn contract_routes() -> Router<AppState> {
             post(deprecation_handlers::deprecate_contract)
                 .delete(deprecation_handlers::undeprecate_contract),
         )
-        .route(
-            "/api/admin/deprecation/purge-expired",
-            post(deprecation_handlers::purge_expired_deprecated_contracts),
-        )
         // AI-Powered Contract Code Assistant
         .route(
             "/api/contracts/:id/ai/chat",
@@ -1129,6 +1125,10 @@ pub fn performance_routes() -> Router<AppState> {
 
 pub fn admin_routes() -> Router<AppState> {
     Router::new()
+        .route(
+            "/api/admin/deprecation/purge-expired",
+            post(deprecation_handlers::purge_expired_deprecated_contracts),
+        )
         .route("/api/admin/audit-logs", get(handlers::get_all_audit_logs))
         .route(
             "/api/admin/audit-logs/export",

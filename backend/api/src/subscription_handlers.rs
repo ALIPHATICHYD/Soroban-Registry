@@ -14,6 +14,7 @@ use crate::{
     auth,
     error::{ApiError, ApiResult},
     pagination::PagedJson,
+    policy::{self, PolicyActor},
     state::AppState,
 };
 use shared::{
@@ -634,9 +635,10 @@ pub async fn list_webhooks(
     State(state): State<AppState>,
     headers: HeaderMap,
     OriginalUri(uri): OriginalUri,
-    auth_user: auth::AuthenticatedUser,
+    actor: PolicyActor,
     Query(query): Query<ListWebhooksQuery>,
 ) -> ApiResult<PagedJson<WebhookConfiguration>> {
+    let publisher_id = actor.publisher_id()?;
     let per_page = query.limit.unwrap_or(20).clamp(1, 100);
     let page = query.page.unwrap_or(1).max(1);
     let offset = (page - 1) * per_page;
@@ -649,7 +651,7 @@ pub async fn list_webhooks(
         LIMIT $2 OFFSET $3
         "#,
     )
-    .bind(auth_user.publisher_id)
+    .bind(publisher_id)
     .bind(per_page)
     .bind(offset)
     .fetch_all(&state.db)
@@ -658,7 +660,7 @@ pub async fn list_webhooks(
 
     let total: i64 =
         sqlx::query_scalar("SELECT COUNT(*) FROM webhook_configurations WHERE user_id = $1")
-            .bind(auth_user.publisher_id)
+            .bind(publisher_id)
             .fetch_one(&state.db)
             .await
             .map_err(|e| ApiError::internal(format!("Database error: {}", e)))?;
@@ -673,9 +675,10 @@ pub async fn list_webhooks(
 /// POST /api/webhooks
 pub async fn create_webhook(
     State(state): State<AppState>,
-    auth_user: auth::AuthenticatedUser,
+    actor: PolicyActor,
     ValidatedJson(req): ValidatedJson<CreateWebhookRequest>,
 ) -> ApiResult<Json<WebhookConfiguration>> {
+    let publisher_id = actor.publisher_id()?;
     // Validate URL scheme — only https allowed in production.
     if !req.url.starts_with("https://") && !req.url.starts_with("http://localhost") {
         return Err(ApiError::bad_request_with(
@@ -703,7 +706,7 @@ pub async fn create_webhook(
         RETURNING *
         "#,
     )
-    .bind(auth_user.publisher_id)
+    .bind(publisher_id)
     .bind(&req.name)
     .bind(&req.url)
     .bind(&secret)
@@ -723,12 +726,14 @@ pub async fn create_webhook(
 pub async fn delete_webhook(
     State(state): State<AppState>,
     Path(webhook_id): Path<Uuid>,
-    auth_user: auth::AuthenticatedUser,
+    actor: PolicyActor,
 ) -> ApiResult<StatusCode> {
+    let publisher_id = actor.publisher_id()?;
+    policy::require_webhook_owner(&state, &actor, webhook_id).await?;
     let rows_affected =
         sqlx::query("DELETE FROM webhook_configurations WHERE id = $1 AND user_id = $2")
             .bind(webhook_id)
-            .bind(auth_user.publisher_id)
+            .bind(publisher_id)
             .execute(&state.db)
             .await
             .map_err(|e| ApiError::internal(format!("Database error: {}", e)))?
@@ -748,21 +753,11 @@ pub async fn get_webhook_deliveries(
     headers: HeaderMap,
     OriginalUri(uri): OriginalUri,
     Path(webhook_id): Path<Uuid>,
-    auth_user: auth::AuthenticatedUser,
+    actor: PolicyActor,
     Query(query): Query<DeliveriesQuery>,
 ) -> ApiResult<PagedJson<WebhookDeliveryLog>> {
-    let owned: bool = sqlx::query_scalar(
-        "SELECT EXISTS(SELECT 1 FROM webhook_configurations WHERE id = $1 AND user_id = $2)",
-    )
-    .bind(webhook_id)
-    .bind(auth_user.publisher_id)
-    .fetch_one(&state.db)
-    .await
-    .map_err(|e| ApiError::internal(format!("Database error: {}", e)))?;
-
-    if !owned {
-        return Err(ApiError::not_found("webhook", "Webhook not found"));
-    }
+    actor.publisher_id()?;
+    policy::require_webhook_owner(&state, &actor, webhook_id).await?;
 
     let per_page = query.limit.unwrap_or(50).clamp(1, 200);
     let page = query.page.unwrap_or(1).max(1);
@@ -803,13 +798,15 @@ pub async fn get_webhook_deliveries(
 pub async fn test_webhook(
     State(state): State<AppState>,
     Path(webhook_id): Path<Uuid>,
-    auth_user: auth::AuthenticatedUser,
+    actor: PolicyActor,
 ) -> ApiResult<StatusCode> {
+    let publisher_id = actor.publisher_id()?;
+    policy::require_webhook_owner(&state, &actor, webhook_id).await?;
     let webhook = sqlx::query_as::<_, WebhookConfiguration>(
         "SELECT * FROM webhook_configurations WHERE id = $1 AND user_id = $2",
     )
     .bind(webhook_id)
-    .bind(auth_user.publisher_id)
+    .bind(publisher_id)
     .fetch_optional(&state.db)
     .await
     .map_err(|e| ApiError::internal(format!("Database error: {}", e)))?
@@ -835,28 +832,10 @@ pub async fn test_webhook(
 pub async fn retry_webhook_delivery(
     State(state): State<AppState>,
     Path(delivery_id): Path<Uuid>,
-    auth_user: auth::AuthenticatedUser,
+    actor: PolicyActor,
 ) -> ApiResult<StatusCode> {
-    // Verify the delivery belongs to a webhook owned by this user.
-    let owned: bool = sqlx::query_scalar(
-        r#"
-        SELECT EXISTS(
-            SELECT 1
-            FROM notification_delivery_logs ndl
-            JOIN webhook_configurations wc ON wc.id = ndl.webhook_id
-            WHERE ndl.id = $1 AND wc.user_id = $2
-        )
-        "#,
-    )
-    .bind(delivery_id)
-    .bind(auth_user.publisher_id)
-    .fetch_one(&state.db)
-    .await
-    .map_err(|e| ApiError::internal(format!("Database error: {}", e)))?;
-
-    if !owned {
-        return Err(ApiError::not_found("delivery", "Delivery log not found"));
-    }
+    actor.publisher_id()?;
+    policy::require_webhook_delivery_owner(&state, &actor, delivery_id).await?;
 
     // Reset the delivery so the background worker picks it up again.
     let rows = sqlx::query(
