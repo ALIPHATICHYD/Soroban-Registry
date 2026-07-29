@@ -4,6 +4,7 @@ import fetchMock from "jest-fetch-mock";
 describe("api", () => {
   beforeEach(() => {
     fetchMock.resetMocks();
+    window.localStorage.clear();
   });
 
   describe("getContracts", () => {
@@ -53,6 +54,35 @@ describe("api", () => {
         expect.stringContaining("/api/v1/contracts/test-id"),
         expect.any(Object),
       );
+    });
+  });
+
+  describe("authenticated mutations", () => {
+    it("attaches the canonical stored bearer token", async () => {
+      window.localStorage.setItem("soroban_registry_token", "publisher-token");
+      fetchMock.mockResponseOnce(JSON.stringify({ id: "contract-id" }));
+
+      await api.publishContract({
+        contract_id: "CTEST",
+        name: "Test",
+        network: "testnet",
+        publisher_address: "GTEST",
+        tags: [],
+      });
+
+      const headers = new Headers(fetchMock.mock.calls[0][1]?.headers);
+      expect(headers.get("Authorization")).toBe("Bearer publisher-token");
+      expect(headers.get("Content-Type")).toBe("application/json");
+    });
+
+    it("does not overwrite an explicit authorization header", async () => {
+      window.localStorage.setItem("soroban_registry_token", "stored-token");
+      fetchMock.mockResponseOnce(JSON.stringify({ favorites: [] }));
+
+      await api.getPreferences("explicit-token");
+
+      const headers = new Headers(fetchMock.mock.calls[0][1]?.headers);
+      expect(headers.get("Authorization")).toBe("Bearer explicit-token");
     });
   });
 });

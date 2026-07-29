@@ -1148,16 +1148,33 @@ pub struct DeprecationInfo {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct DeprecationSignaturePayload {
+    pub contract_id: String,
+    pub action: String,
+    pub timestamp: String,
+    pub nonce: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct DeprecateContractRequest {
     pub retirement_at: DateTime<Utc>,
     pub replacement_contract_id: Option<String>,
     pub migration_guide_url: Option<String>,
     pub notes: Option<String>,
     /// Human-readable reason for the deprecation, shown in API deprecation warnings.
+    #[serde(default, alias = "reason")]
     pub deprecated_reason: Option<String>,
     /// Number of days after deprecation before the contract is hard-deleted.
     /// If `None`, the contract is soft-deleted but never automatically removed.
     pub grace_period_days: Option<i32>,
+    /// Optional signed action envelope used by clients that require additional wallet proof.
+    /// When any envelope field is supplied, all fields are required and verified.
+    #[serde(default)]
+    pub payload: Option<DeprecationSignaturePayload>,
+    #[serde(default)]
+    pub signature: Option<String>,
+    #[serde(default)]
+    pub signing_address: Option<String>,
 }
 
 /// Query parameters for clearing deprecation. Reactivating a deprecated contract

@@ -66,6 +66,7 @@ pub mod pagination;
 pub mod patch_handlers;
 pub mod performance_handlers;
 pub mod plugin_marketplace_handlers;
+pub mod policy;
 pub mod post_incident_handlers;
 pub mod post_incident_routes;
 pub mod publisher_verification_handlers;

@@ -33,7 +33,7 @@
 // Fixture note: the random_strkey helper used elsewhere in this suite produces
 // format-valid addresses with no private key behind them, so it cannot sign anything. Here
 // each actor is a real ed25519 keypair whose Stellar address is derived from its public
-// key, registered as a publisher through the public publish endpoint, and issued a real JWT
+// key, registered through the publisher endpoint, and issued a real JWT
 // through the challenge/verify flow. Payloads are built with the same functions the server
 // uses, so test and server agree byte for byte by construction rather than by copy.
 // ═══════════════════════════════════════════════════════════════════════════
@@ -372,9 +372,36 @@ fn unique_wasm_module() -> Vec<u8> {
     wasm
 }
 
-/// Publish a contract owned by `address`. `publish_contract` upserts `publishers`, which is
-/// how an actor comes to exist at all; returns the contract JSON.
-async fn publish_contract(client: &reqwest::Client, base: &str, address: &str) -> Value {
+/// Register the publisher identity used by the auth challenge.
+async fn register_publisher(client: &reqwest::Client, base: &str, address: &str) {
+    let res = client
+        .post(format!("{}/api/publishers", base))
+        .json(&json!({
+            "id": Uuid::nil(),
+            "stellar_address": address,
+            "username": null,
+            "email": null,
+            "github_url": null,
+            "website": null,
+            "created_at": chrono::Utc::now(),
+        }))
+        .send()
+        .await
+        .expect("publisher registration failed");
+    assert!(
+        res.status().is_success(),
+        "publisher registration failed: {}",
+        res.text().await.unwrap_or_default()
+    );
+}
+
+/// Publish a contract as an authenticated, registered publisher.
+async fn publish_contract(
+    client: &reqwest::Client,
+    base: &str,
+    address: &str,
+    token: &str,
+) -> Value {
     use sha2::{Digest, Sha256};
 
     let wasm = unique_wasm_module();
@@ -382,6 +409,7 @@ async fn publish_contract(client: &reqwest::Client, base: &str, address: &str) -
 
     let res = client
         .post(format!("{}/api/contracts", base))
+        .bearer_auth(token)
         .json(&json!({
             "contract_id": random_contract_strkey(),
             "wasm_hash": wasm_hash,
@@ -459,10 +487,11 @@ async fn mint_token(
 /// A registered, authenticated actor plus the uuid of a contract it owns.
 async fn new_actor_with_contract(client: &reqwest::Client, base: &str) -> (Actor, Uuid) {
     let (signing, address) = new_keypair();
-    let contract = publish_contract(client, base, &address).await;
+    register_publisher(client, base, &address).await;
+    let token = mint_token(client, base, &signing, &address).await;
+    let contract = publish_contract(client, base, &address, &token).await;
     let contract_id = Uuid::parse_str(contract["id"].as_str().expect("contract id"))
         .expect("contract id was not a uuid");
-    let token = mint_token(client, base, &signing, &address).await;
     (
         Actor {
             signing,
