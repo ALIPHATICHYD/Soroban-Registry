@@ -9,6 +9,7 @@ mod aggregation;
 mod cache;
 mod metrics_handler;
 mod metrics;
+mod retention;
 // mod resource_handlers;
 // mod resource_tracking;
 mod analytics;
@@ -57,6 +58,9 @@ async fn main() -> Result<()> {
 
     // Spawn the hourly analytics aggregation background task
     aggregation::spawn_aggregation_task(pool.clone());
+
+    // Spawn the history table retention task
+    retention::spawn_retention_task(pool.clone(), retention::RetentionConfig::from_env());
 
     // Create prometheus registry for metrics
     let registry = Registry::new();
