@@ -2153,6 +2153,30 @@ pub enum ContractCommands {
         output_dir: String,
     },
 
+    /// Rollback a deprecated contract to active state (#1091)
+    ///
+    /// Usage: soroban-registry contract rollback <ADDRESS> --reason <REASON> --private-key <KEY>
+    Rollback {
+        /// Contract address or registry UUID to rollback
+        address: String,
+
+        /// Human-readable reason for rollback
+        #[arg(long)]
+        reason: String,
+
+        /// Publisher's Ed25519 private key (base64-encoded)
+        #[arg(long)]
+        private_key: String,
+
+        /// Skip interactive confirmation
+        #[arg(long, short = 'y')]
+        yes: bool,
+
+        /// Output results as machine-readable JSON
+        #[arg(long)]
+        json: bool,
+    },
+
     /// Detect drift between local lockfile and registry state (#1060)
     ///
     /// Compares a local `soroban-registry.lock.json` against the live registry
@@ -4422,6 +4446,28 @@ pub async fn dispatch_command(
                     &private_key,
                     migration_guide.as_deref(),
                     grace_period_days,
+                    yes,
+                    json,
+                )
+                .await?;
+            }
+            ContractCommands::Rollback {
+                address,
+                reason,
+                private_key,
+                yes,
+                json,
+            } => {
+                log::debug!(
+                    "Command: contract rollback | address={} reason={}",
+                    address,
+                    reason
+                );
+                contract_deprecate::rollback(
+                    &cli.api_url,
+                    &address,
+                    &reason,
+                    &private_key,
                     yes,
                     json,
                 )
