@@ -127,6 +127,7 @@ pub mod signature_verification;
 pub mod state_monitor;
 pub mod stats;
 pub mod system_health;
+pub mod transaction;
 pub mod v1_contract_handlers;
 pub mod v1_search_handlers;
 pub mod v1_similar_handlers;

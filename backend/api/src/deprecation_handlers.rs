@@ -577,38 +577,42 @@ pub async fn purge_expired_deprecated_contracts(
 ) -> ApiResult<Json<serde_json::Value>> {
     actor.require_admin()?;
 
-    // Find contracts whose grace period has fully elapsed:
-    //   deprecated_at + grace_period_days < NOW()
-    let expired: Vec<(Uuid, String)> = sqlx::query_as(
-        "SELECT c.id, c.contract_id \
-         FROM contracts c \
-         JOIN contract_deprecations cd ON cd.contract_id = c.id \
-         WHERE cd.grace_period_days IS NOT NULL \
-           AND (cd.deprecated_at + (cd.grace_period_days || ' days')::INTERVAL) < NOW()",
-    )
-    .fetch_all(&state.db)
-    .await
-    .map_err(|err| db_internal_error("fetch expired deprecations", err))?;
+    let (count, deleted_ids) = crate::transaction::with_transaction(&state.db, "purge_expired", |mut tx| async move {
+        // Find contracts whose grace period has fully elapsed:
+        //   deprecated_at + grace_period_days < NOW()
+        let expired: Vec<(Uuid, String)> = sqlx::query_as(
+            "SELECT c.id, c.contract_id \
+             FROM contracts c \
+             JOIN contract_deprecations cd ON cd.contract_id = c.id \
+             WHERE cd.grace_period_days IS NOT NULL \
+               AND (cd.deprecated_at + (cd.grace_period_days || ' days')::INTERVAL) < NOW()",
+        )
+        .fetch_all(&mut *tx)
+        .await
+        .map_err(|err| db_internal_error("fetch expired deprecations", err))?;
 
-    let count = expired.len();
-    let mut deleted_ids: Vec<String> = Vec::with_capacity(count);
+        let count = expired.len();
+        let mut deleted_ids: Vec<String> = Vec::with_capacity(count);
 
-    for (uuid, cid) in expired {
-        // ON DELETE CASCADE on contract_deprecations and related tables will clean
-        // up deprecation records and notifications automatically.
-        sqlx::query("DELETE FROM contracts WHERE id = $1")
-            .bind(uuid)
-            .execute(&state.db)
-            .await
-            .map_err(|err| db_internal_error("hard-delete contract", err))?;
+        for (uuid, cid) in expired {
+            // ON DELETE CASCADE on contract_deprecations and related tables will clean
+            // up deprecation records and notifications automatically.
+            sqlx::query("DELETE FROM contracts WHERE id = $1")
+                .bind(uuid)
+                .execute(&mut *tx)
+                .await
+                .map_err(|err| db_internal_error("hard-delete contract", err))?;
 
-        tracing::info!(
-            contract_id = %cid,
-            uuid = %uuid,
-            "Hard-deleted contract: grace period expired"
-        );
-        deleted_ids.push(cid);
-    }
+            tracing::info!(
+                contract_id = %cid,
+                uuid = %uuid,
+                "Hard-deleted contract: grace period expired"
+            );
+            deleted_ids.push(cid);
+        }
+
+        Ok(((count, deleted_ids), tx))
+    }).await?;
 
     Ok(Json(serde_json::json!({
         "purged": count,
