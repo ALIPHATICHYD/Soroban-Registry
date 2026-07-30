@@ -84,6 +84,7 @@ pub mod security;
 pub mod security_scan_handlers;
 pub mod service_health;
 pub mod signing_handlers;
+pub mod snapshot_handlers;
 pub mod similarity_handlers;
 pub mod simulation;
 pub mod simulation_handlers;

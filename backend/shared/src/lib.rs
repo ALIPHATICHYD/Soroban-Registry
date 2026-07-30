@@ -5,6 +5,7 @@ pub mod models;
 pub mod pagination;
 pub mod semver;
 pub mod slug;
+pub mod snapshot;
 pub mod source_storage;
 pub mod upgrade;
 pub mod wasm;

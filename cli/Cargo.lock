@@ -3277,6 +3277,7 @@ dependencies = [
  "anyhow",
  "base64",
  "chrono",
+ "ed25519-dalek",
  "hex",
  "once_cell",
  "opentelemetry",
