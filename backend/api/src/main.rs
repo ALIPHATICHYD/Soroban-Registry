@@ -203,6 +203,11 @@ async fn main() -> Result<()> {
     // looks at again.
     api::ownership_transfer::spawn_ownership_transfer_expiry_task(pool.clone());
 
+    // Spawn the archival/retention sweeper (Issues #881, #1118). Applies every
+    // enabled archival policy on a daily cycle; previously only the admin
+    // trigger endpoint ran them.
+    api::archival::spawn_archival_task(pool.clone());
+
     // Create prometheus registry for metrics
     let registry = Registry::new();
     if let Err(e) = api::metrics::register_all(&registry) {
