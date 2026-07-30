@@ -402,6 +402,7 @@ export interface Contract {
   review_count?: number;
   deployment_count?: number;
   interaction_count?: number;
+  favorites_count?: number;
   relevance_score?: number;
   // Image fields for contract logo/icon
   logo_url?: string;
@@ -414,6 +415,8 @@ export interface Contract {
   logical_id?: string;
   /** Per-network configs: { mainnet: {...}, testnet: {...} } */
   network_configs?: Record<Network, NetworkConfig>;
+  artifact_scan_status?: "pending" | "passed" | "quarantined";
+  artifact_scan_findings?: string[];
 }
 
 /** GET /contracts/:id response when ?network= is used (Issue #43) */
