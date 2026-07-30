@@ -77,6 +77,48 @@ pub struct ContractStatsResponse {
     pub last_accessed_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
+#[derive(Debug, Clone, serde::Serialize, utoipa::ToSchema)]
+pub struct PublisherNetworkBreakdown {
+    pub network: String,
+    pub contract_count: i64,
+    pub version_count: i64,
+    pub verified_contract_count: i64,
+}
+
+#[derive(Debug, Clone, serde::Serialize, utoipa::ToSchema)]
+pub struct PublisherCategoryBreakdown {
+    pub category: Option<String>,
+    pub contract_count: i64,
+    pub version_count: i64,
+    pub verified_contract_count: i64,
+}
+
+#[derive(Debug, Clone, serde::Serialize, utoipa::ToSchema)]
+pub struct PublisherVerificationStatusBreakdown {
+    pub verification_status: String,
+    pub contract_count: i64,
+}
+
+#[derive(Debug, Clone, serde::Serialize, utoipa::ToSchema)]
+pub struct PublisherProfileSummaryResponse {
+    pub publisher: Publisher,
+    pub contract_count: i64,
+    pub version_count: i64,
+    pub verified_contract_count: i64,
+    pub network_breakdown: Vec<PublisherNetworkBreakdown>,
+    pub category_breakdown: Vec<PublisherCategoryBreakdown>,
+    pub verification_status_breakdown: Vec<PublisherVerificationStatusBreakdown>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, utoipa::ToSchema)]
+pub struct PublisherContractsResponse {
+    pub items: Vec<Contract>,
+    pub total: i64,
+    pub has_more: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub next_cursor: Option<String>,
+}
+
 use crate::{
     analytics,
     breaking_changes::{diff_abi, has_breaking_changes, resolve_abi},
@@ -971,12 +1013,11 @@ fn default_audit_limit() -> i64 {
     100
 }
 
-#[derive(Debug, serde::Deserialize)]
+#[derive(Debug, serde::Deserialize, utoipa::IntoParams)]
 pub struct PublisherContractsQuery {
     #[serde(default = "default_contracts_limit")]
     pub limit: i64,
-    #[serde(default)]
-    pub offset: i64,
+    pub cursor: Option<String>,
     /// Filter by network (mainnet, testnet, futurenet)
     pub network: Option<Network>,
     /// Filter by category (e.g., DeFi, NFT)
@@ -2246,7 +2287,7 @@ pub async fn list_contracts(
         Err(err) => return db_internal_error("count contracts", err).into_response(),
     };
 
-    let mut has_more = contracts.len() > limit as usize;
+    let has_more = contracts.len() > limit as usize;
     if has_more {
         contracts.truncate(limit as usize);
     }
@@ -4966,25 +5007,207 @@ pub async fn get_publisher(
     Ok(Json(publisher))
 }
 
+#[derive(sqlx::FromRow)]
+struct PublisherNetworkBreakdownRow {
+    network: String,
+    contract_count: i64,
+    version_count: i64,
+    verified_contract_count: i64,
+}
+
+#[derive(sqlx::FromRow)]
+struct PublisherCategoryBreakdownRow {
+    category: Option<String>,
+    contract_count: i64,
+    version_count: i64,
+    verified_contract_count: i64,
+}
+
+#[derive(sqlx::FromRow)]
+struct PublisherVerificationStatusBreakdownRow {
+    verification_status: String,
+    contract_count: i64,
+}
+
 #[utoipa::path(
     get,
-    path = "/api/publishers/{id}/contracts",
+    path = "/api/publishers/{id}/summary",
     params(
         ("id" = String, Path, description = "Publisher UUID")
     ),
     responses(
-        (status = 200, description = "List of contracts by publisher", body = [Contract]),
+        (status = 200, description = "Publisher profile summary", body = PublisherProfileSummaryResponse),
+        (status = 404, description = "Publisher not found")
+    ),
+    tag = "Publishers"
+)]
+pub async fn get_publisher_summary(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> ApiResult<Json<PublisherProfileSummaryResponse>> {
+    let publisher_uuid = Uuid::parse_str(&id).map_err(|_| {
+        ApiError::bad_request(
+            "InvalidPublisherId",
+            format!("Invalid publisher ID format: {}", id),
+        )
+    })?;
+
+    let publisher: Publisher = sqlx::query_as("SELECT * FROM publishers WHERE id = $1")
+        .bind(publisher_uuid)
+        .fetch_one(&state.db)
+        .await
+        .map_err(|err| match err {
+            sqlx::Error::RowNotFound => ApiError::not_found(
+                "PublisherNotFound",
+                format!("No publisher found with ID: {}", id),
+            ),
+            _ => db_internal_error("get publisher by id for summary", err),
+        })?;
+
+    let contract_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM contracts WHERE publisher_id = $1",
+    )
+    .bind(publisher_uuid)
+    .fetch_one(&state.db)
+    .await
+    .map_err(|err| db_internal_error("count publisher contracts", err))?;
+
+    let version_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM contract_versions cv JOIN contracts c ON c.id = cv.contract_id WHERE c.publisher_id = $1",
+    )
+    .bind(publisher_uuid)
+    .fetch_one(&state.db)
+    .await
+    .map_err(|err| db_internal_error("count publisher contract versions", err))?;
+
+    let verified_contract_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM contracts WHERE publisher_id = $1 AND is_verified = true",
+    )
+    .bind(publisher_uuid)
+    .fetch_one(&state.db)
+    .await
+    .map_err(|err| db_internal_error("count verified publisher contracts", err))?;
+
+    let network_breakdown_rows: Vec<PublisherNetworkBreakdownRow> = sqlx::query_as(
+        r#"
+        SELECT
+            c.network::TEXT AS network,
+            COUNT(*)::BIGINT AS contract_count,
+            COALESCE(SUM(COALESCE(cv.version_count, 0)), 0)::BIGINT AS version_count,
+            COUNT(*) FILTER (WHERE c.is_verified)::BIGINT AS verified_contract_count
+        FROM contracts c
+        LEFT JOIN (
+            SELECT contract_id, COUNT(*)::BIGINT AS version_count
+            FROM contract_versions
+            GROUP BY contract_id
+        ) cv ON cv.contract_id = c.id
+        WHERE c.publisher_id = $1
+        GROUP BY c.network
+        ORDER BY contract_count DESC, c.network ASC
+        "#,
+    )
+    .bind(publisher_uuid)
+    .fetch_all(&state.db)
+    .await
+    .map_err(|err| db_internal_error("fetch publisher network breakdown", err))?;
+
+    let category_breakdown_rows: Vec<PublisherCategoryBreakdownRow> = sqlx::query_as(
+        r#"
+        SELECT
+            c.category,
+            COUNT(*)::BIGINT AS contract_count,
+            COALESCE(SUM(COALESCE(cv.version_count, 0)), 0)::BIGINT AS version_count,
+            COUNT(*) FILTER (WHERE c.is_verified)::BIGINT AS verified_contract_count
+        FROM contracts c
+        LEFT JOIN (
+            SELECT contract_id, COUNT(*)::BIGINT AS version_count
+            FROM contract_versions
+            GROUP BY contract_id
+        ) cv ON cv.contract_id = c.id
+        WHERE c.publisher_id = $1
+        GROUP BY c.category
+        ORDER BY contract_count DESC, c.category ASC NULLS LAST
+        "#,
+    )
+    .bind(publisher_uuid)
+    .fetch_all(&state.db)
+    .await
+    .map_err(|err| db_internal_error("fetch publisher category breakdown", err))?;
+
+    let verification_status_breakdown_rows: Vec<PublisherVerificationStatusBreakdownRow> =
+        sqlx::query_as(
+            r#"
+            SELECT
+                c.verification_status::TEXT AS verification_status,
+                COUNT(*)::BIGINT AS contract_count
+            FROM contracts c
+            WHERE c.publisher_id = $1
+            GROUP BY c.verification_status
+            ORDER BY contract_count DESC, c.verification_status ASC
+            "#,
+        )
+        .bind(publisher_uuid)
+        .fetch_all(&state.db)
+        .await
+        .map_err(|err| db_internal_error("fetch publisher verification breakdown", err))?;
+
+    let network_breakdown = network_breakdown_rows
+        .into_iter()
+        .map(|row| PublisherNetworkBreakdown {
+            network: row.network,
+            contract_count: row.contract_count,
+            version_count: row.version_count,
+            verified_contract_count: row.verified_contract_count,
+        })
+        .collect();
+
+    let category_breakdown = category_breakdown_rows
+        .into_iter()
+        .map(|row| PublisherCategoryBreakdown {
+            category: row.category,
+            contract_count: row.contract_count,
+            version_count: row.version_count,
+            verified_contract_count: row.verified_contract_count,
+        })
+        .collect();
+
+    let verification_status_breakdown = verification_status_breakdown_rows
+        .into_iter()
+        .map(|row| PublisherVerificationStatusBreakdown {
+            verification_status: row.verification_status,
+            contract_count: row.contract_count,
+        })
+        .collect();
+
+    Ok(Json(PublisherProfileSummaryResponse {
+        publisher,
+        contract_count,
+        version_count,
+        verified_contract_count,
+        network_breakdown,
+        category_breakdown,
+        verification_status_breakdown,
+    }))
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/publishers/{id}/contracts",
+    params(
+        ("id" = String, Path, description = "Publisher UUID"),
+        PublisherContractsQuery
+    ),
+    responses(
+        (status = 200, description = "Stable cursor-paginated list of contracts by publisher", body = PublisherContractsResponse),
         (status = 404, description = "Publisher not found")
     ),
     tag = "Publishers"
 )]
 pub async fn get_publisher_contracts(
     State(state): State<AppState>,
-    headers: axum::http::HeaderMap,
-    axum::extract::OriginalUri(uri): axum::extract::OriginalUri,
     Path(id): Path<String>,
     Query(query): Query<PublisherContractsQuery>,
-) -> ApiResult<crate::pagination::PagedJson<Contract>> {
+) -> ApiResult<Json<PublisherContractsResponse>> {
     let publisher_uuid = Uuid::parse_str(&id).map_err(|_| {
         ApiError::bad_request(
             "InvalidPublisherId",
@@ -4993,7 +5216,15 @@ pub async fn get_publisher_contracts(
     })?;
 
     let limit = query.limit.clamp(1, 100);
-    let offset = query.offset.max(0);
+    let cursor = match query.cursor.as_deref().filter(|cursor| !cursor.trim().is_empty()) {
+        Some(raw) => Some(Cursor::decode(raw).map_err(|err| {
+            ApiError::bad_request(
+                "InvalidPaginationCursor",
+                format!("The provided pagination cursor is invalid: {}", err),
+            )
+        })?),
+        None => None,
+    };
 
     let mut count_qb: QueryBuilder<'_, sqlx::Postgres> =
         QueryBuilder::new("SELECT COUNT(*) FROM contracts WHERE publisher_id = ");
@@ -5033,10 +5264,18 @@ pub async fn get_publisher_contracts(
         }
     }
 
-    qb.push(" ORDER BY created_at DESC LIMIT ");
-    qb.push_bind(limit);
-    qb.push(" OFFSET ");
-    qb.push_bind(offset);
+    if let Some(cursor) = cursor {
+        qb.push(" AND (created_at < ");
+        qb.push_bind(cursor.timestamp);
+        qb.push(" OR (created_at = ");
+        qb.push_bind(cursor.timestamp);
+        qb.push(" AND id < ");
+        qb.push_bind(cursor.id);
+        qb.push("))");
+    }
+
+    qb.push(" ORDER BY created_at DESC, id DESC LIMIT ");
+    qb.push_bind(limit + 1);
 
     let contracts: Vec<Contract> = qb
         .build_query_as()
@@ -5044,10 +5283,24 @@ pub async fn get_publisher_contracts(
         .await
         .map_err(|err| db_internal_error("get publisher contracts", err))?;
 
-    let page = (offset / limit) + 1;
-    let body = PaginatedResponse::new(contracts, total, page, limit);
+    let has_more = contracts.len() > limit as usize;
+    let mut items = contracts;
+    if has_more {
+        items.truncate(limit as usize);
+    }
 
-    Ok(crate::pagination::PagedJson::new(body, &headers, &uri))
+    let next_cursor = if has_more {
+        items.last().map(|last| Cursor::new(last.created_at, last.id).encode())
+    } else {
+        None
+    };
+
+    Ok(Json(PublisherContractsResponse {
+        items,
+        total,
+        has_more,
+        next_cursor,
+    }))
 }
 
 /// Query for contract ABI and OpenAPI (optional version)

@@ -6,10 +6,10 @@ use crate::{
     analytics_handlers, archival, auth, auth_handlers, batch_verify_handlers, breaking_changes,
     bulk_operations_handlers, canary_handlers, category_handlers, client_observability_handlers,
     clone_federation_handlers, collaborative_reviews, compatibility_testing_handlers,
-    contract_events, contract_stats_handlers, contributor_handlers, custom_metrics_handlers,
+    contract_stats_handlers, contributor_handlers, custom_metrics_handlers,
     db_pool, dependency_handlers, dependency_vulnerability_handlers,
     deprecated_contracts_handlers, deprecation_handlers,
-    elasticsearch_handlers, error_logging, feature_flags, formal_verification_handlers,
+    elasticsearch_handlers, error_logging, formal_verification_handlers,
     formal_verification_integration, gas_estimation_handlers, governance_handlers,
     graph_analysis_handlers, handlers, integrity, interoperability_handlers,
     marketplace::{
@@ -25,7 +25,7 @@ use crate::{
     state::AppState,
     state_monitor::handlers as state_monitor_handlers,
     stats, subscription_handlers, v1_contract_handlers, v1_search_handlers, v1_similar_handlers,
-    v1_trending_handlers, verification_handlers, websocket, zk_proof_handlers,
+    v1_trending_handlers, verification_handlers, zk_proof_handlers,
 };
 
 use axum::{
@@ -856,6 +856,10 @@ pub fn publisher_routes() -> Router<AppState> {
     Router::new()
         .route("/api/publishers", post(handlers::create_publisher))
         .route("/api/publishers/:id", get(handlers::get_publisher))
+        .route(
+            "/api/publishers/:id/summary",
+            get(handlers::get_publisher_summary),
+        )
         .route(
             "/api/publishers/:id/contracts",
             get(handlers::get_publisher_contracts),
