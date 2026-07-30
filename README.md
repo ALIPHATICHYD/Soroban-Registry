@@ -31,8 +31,7 @@ soroban-registry/
 ├── backend/        # Rust backend services (Axum API, indexer, verifier)
 ├── frontend/       # Next.js web application
 ├── cli/            # Rust CLI tool
-├── database/       # PostgreSQL migrations
-└── examples/       # Example contracts
+└── database/       # PostgreSQL migrations
 ```
 
 ---

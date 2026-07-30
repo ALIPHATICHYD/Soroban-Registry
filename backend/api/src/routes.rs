@@ -20,6 +20,7 @@ use crate::{
     partition_manager, patch_handlers, performance_handlers, plugin_marketplace_handlers,
     publisher_verification_handlers, query_analysis, query_monitor, recommendation_handlers,
     report_handlers, resource_handlers, search_postgres, security_scan_handlers,
+    snapshot_handlers,
     signature_verification, similarity_handlers, simulation_handlers,
     state::AppState,
     state_monitor::handlers as state_monitor_handlers,
@@ -503,14 +504,19 @@ pub fn contract_routes() -> Router<AppState> {
             "/api/contracts/:id/deprecation-info",
             get(deprecation_handlers::get_deprecation_info),
         )
+        // Signed offline contract snapshot (Issue #1116)
+        .route(
+            "/api/contracts/:id/snapshot",
+            get(snapshot_handlers::get_contract_snapshot),
+        )
+        .route(
+            "/api/registry/signing-key",
+            get(snapshot_handlers::get_registry_signing_key),
+        )
         .route(
             "/api/contracts/:id/deprecate",
             post(deprecation_handlers::deprecate_contract)
                 .delete(deprecation_handlers::undeprecate_contract),
-        )
-        .route(
-            "/api/admin/deprecation/purge-expired",
-            post(deprecation_handlers::purge_expired_deprecated_contracts),
         )
         // AI-Powered Contract Code Assistant
         .route(
@@ -1129,6 +1135,10 @@ pub fn performance_routes() -> Router<AppState> {
 
 pub fn admin_routes() -> Router<AppState> {
     Router::new()
+        .route(
+            "/api/admin/deprecation/purge-expired",
+            post(deprecation_handlers::purge_expired_deprecated_contracts),
+        )
         .route("/api/admin/audit-logs", get(handlers::get_all_audit_logs))
         .route(
             "/api/admin/audit-logs/export",

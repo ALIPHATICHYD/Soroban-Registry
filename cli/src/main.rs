@@ -28,6 +28,7 @@ mod contract_audit;
 mod contract_dependency;
 mod contract_deploy;
 mod contract_deprecate;
+mod contract_snapshot;
 mod contract_highlight;
 mod contract_interaction;
 mod contract_register;
@@ -1810,6 +1811,55 @@ pub enum KeysCommands {
 #[derive(Debug, Subcommand)]
 pub enum ContractCommands {
 
+    /// Export a signed, offline-verifiable snapshot of a contract (#1116)
+    ///
+    /// Captures metadata, verification status, dependency scan findings,
+    /// deprecation state and successor lineage as of now, signed by the
+    /// registry so it can be audited without a live API.
+    ///
+    /// Usage: soroban-registry contract snapshot <ID> --output <FILE>
+    Snapshot {
+        /// Contract UUID to snapshot
+        id: String,
+
+        /// File to write the signed snapshot to
+        #[arg(long, short = 'o')]
+        output: String,
+
+        /// Emit machine-readable JSON
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// Verify a previously exported contract snapshot (#1116)
+    ///
+    /// Runs entirely offline unless --fetch-key is passed. Exits non-zero when
+    /// verification fails, so it can gate a compliance pipeline.
+    ///
+    /// Usage: soroban-registry contract verify-snapshot <FILE> [--expect-key <FP>]
+    VerifySnapshot {
+        /// Path to the snapshot file
+        file: String,
+
+        /// Registry key fingerprint to pin against. Without it, a valid result
+        /// proves only that the bundle is self-consistent.
+        #[arg(long)]
+        expect_key: Option<String>,
+
+        /// Fail if the snapshot is older than this many days
+        #[arg(long)]
+        max_age_days: Option<i64>,
+
+        /// Fetch the expected fingerprint from the registry instead of pinning
+        /// it locally. Requires network access.
+        #[arg(long)]
+        fetch_key: bool,
+
+        /// Emit machine-readable JSON
+        #[arg(long)]
+        json: bool,
+    },
+
     /// Assess security and operational risks for a contract (#837)
     ///
     /// Usage: soroban-registry contract risk <address> [--network <n>] [--threshold <level>] [--json]
@@ -1895,12 +1945,21 @@ pub enum ContractCommands {
         json: bool,
     },
 
-    /// Verify a deployed contract's authenticity against the on-chain registry
+    /// Verify a contract — a local WASM artifact before publishing, or a
+    /// deployed contract's authenticity against the on-chain registry.
     ///
-    /// Usage: soroban-registry contract verify <address> --network <network> [--json] [--strict] [--batch] [--no-cache]
+    /// Local:    soroban-registry contract verify --wasm <path> [--verbose] [--json]
+    /// On-chain: soroban-registry contract verify <address> --network <network> [--json] [--strict] [--batch] [--no-cache]
     Verify {
-        /// On-chain contract address to verify (or comma-separated list for batch verification)
-        address: String,
+        /// On-chain contract address to verify (or comma-separated list for batch
+        /// verification). Omit when using --wasm for local verification.
+        address: Option<String>,
+
+        /// Path to a local compiled WASM contract to verify before publishing.
+        /// Runs the same structural checks the backend uses, offline. In local
+        /// mode, pass the global -v/--verbose flag for detailed diagnostics.
+        #[arg(long)]
+        wasm: Option<String>,
 
         /// Stellar network (mainnet | testnet | futurenet)
         #[arg(long, default_value = "mainnet")]
@@ -2142,6 +2201,30 @@ pub enum ContractCommands {
         /// Directory for archive extraction (archive format only)
         #[arg(long, default_value = "./imported")]
         output_dir: String,
+    },
+
+    /// Rollback a deprecated contract to active state (#1091)
+    ///
+    /// Usage: soroban-registry contract rollback <ADDRESS> --reason <REASON> --private-key <KEY>
+    Rollback {
+        /// Contract address or registry UUID to rollback
+        address: String,
+
+        /// Human-readable reason for rollback
+        #[arg(long)]
+        reason: String,
+
+        /// Publisher's Ed25519 private key (base64-encoded)
+        #[arg(long)]
+        private_key: String,
+
+        /// Skip interactive confirmation
+        #[arg(long, short = 'y')]
+        yes: bool,
+
+        /// Output results as machine-readable JSON
+        #[arg(long)]
+        json: bool,
     },
 
     /// Detect drift between local lockfile and registry state (#1060)
@@ -4090,31 +4173,60 @@ pub async fn dispatch_command(
             }
             ContractCommands::Verify {
                 address,
+                wasm,
                 network,
                 json,
                 strict,
                 batch,
                 no_cache,
             } => {
-                log::debug!(
-                    "Command: contract verify | address={} network={} json={} strict={} batch={} no_cache={}",
-                    address,
-                    network,
-                    json,
-                    strict,
-                    batch,
-                    no_cache
-                );
-                contract_verify::run(
-                    &cli.api_url,
-                    &address,
-                    &network,
-                    json,
-                    strict,
-                    batch,
-                    no_cache,
-                )
-                .await?;
+                // Local verbosity is driven by the global -v/--verbose flag.
+                let verbose = cli.verbose > 0;
+                // Exactly one of --wasm (local) or <address> (on-chain) is required.
+                match (wasm, address) {
+                    (Some(_), Some(_)) => {
+                        anyhow::bail!(
+                            "Pass either a contract <address> (on-chain verification) or \
+                             --wasm <path> (local verification), not both."
+                        );
+                    }
+                    (Some(wasm_path), None) => {
+                        log::debug!(
+                            "Command: contract verify (local) | wasm={} verbose={} json={}",
+                            wasm_path,
+                            verbose,
+                            json
+                        );
+                        contract_verify::run_local(&wasm_path, verbose, json).await?;
+                    }
+                    (None, Some(address)) => {
+                        log::debug!(
+                            "Command: contract verify | address={} network={} json={} strict={} batch={} no_cache={}",
+                            address,
+                            network,
+                            json,
+                            strict,
+                            batch,
+                            no_cache
+                        );
+                        contract_verify::run(
+                            &cli.api_url,
+                            &address,
+                            &network,
+                            json,
+                            strict,
+                            batch,
+                            no_cache,
+                        )
+                        .await?;
+                    }
+                    (None, None) => {
+                        anyhow::bail!(
+                            "Provide a contract <address> to verify on-chain, or --wasm <path> \
+                             to verify a local artifact before publishing."
+                        );
+                    }
+                }
             }
             ContractCommands::Details {
                 address,
@@ -4360,6 +4472,30 @@ pub async fn dispatch_command(
                 let fmt = if json { "json" } else { &format };
                 contract_audit::run(&cli.api_url, &lockfile, fix, init, &contracts, fmt).await?;
             }
+            ContractCommands::Snapshot { id, output, json } => {
+                log::debug!("Command: contract snapshot | id={} output={}", id, output);
+                contract_snapshot::run_export(&cli.api_url, &id, &output, json).await?;
+            }
+
+            ContractCommands::VerifySnapshot {
+                file,
+                expect_key,
+                max_age_days,
+                fetch_key,
+                json,
+            } => {
+                log::debug!("Command: contract verify-snapshot | file={}", file);
+                contract_snapshot::run_verify(
+                    &cli.api_url,
+                    &file,
+                    expect_key.as_deref(),
+                    max_age_days,
+                    fetch_key,
+                    json,
+                )
+                .await?;
+            }
+
             ContractCommands::Deprecate {
                 address,
                 reason,
@@ -4384,6 +4520,28 @@ pub async fn dispatch_command(
                     &private_key,
                     migration_guide.as_deref(),
                     grace_period_days,
+                    yes,
+                    json,
+                )
+                .await?;
+            }
+            ContractCommands::Rollback {
+                address,
+                reason,
+                private_key,
+                yes,
+                json,
+            } => {
+                log::debug!(
+                    "Command: contract rollback | address={} reason={}",
+                    address,
+                    reason
+                );
+                contract_deprecate::rollback(
+                    &cli.api_url,
+                    &address,
+                    &reason,
+                    &private_key,
                     yes,
                     json,
                 )
@@ -4859,6 +5017,12 @@ pub async fn dispatch_command(
             EnvCommands::Switch { environment } => {
                 log::debug!("Command: env switch | environment={}", environment);
                 env::switch_env(&environment)?;
+            }
+        },
+        Commands::Publisher { action } => match action {
+            PublisherCommands::Doctor { json } => {
+                log::debug!("Command: publisher doctor | json={}", json);
+                publisher::doctor(&cli.api_url, json).await?;
             }
         },
     }

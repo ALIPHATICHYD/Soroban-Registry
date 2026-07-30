@@ -11,8 +11,10 @@ use axum::{
 };
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use shared::Network;
 use std::time::Duration;
 use uuid::Uuid;
+use verifier::{check_passphrase, known_passphrase_for_network, PassphraseCheckOutcome};
 
 use crate::{
     error::{ApiError, ApiResult},
@@ -30,6 +32,18 @@ pub struct ContractVerifyRequest {
     /// Optional free-text notes from the submitter
     #[serde(default)]
     pub notes: Option<String>,
+    /// The Soroban network passphrase used when the contract was deployed.
+    ///
+    /// For the three well-known networks (mainnet / testnet / futurenet) this
+    /// field is optional – the registry will infer the canonical passphrase
+    /// from the network enum.  For custom or private networks it should always
+    /// be supplied to prevent silent passphrase mismatches.
+    ///
+    /// If the registry already holds a passphrase for this contract (from a
+    /// previous verification attempt) and this field does not match, the
+    /// request is rejected with a 422 PassphraseMismatch error.
+    #[serde(default)]
+    pub network_passphrase: Option<String>,
 }
 
 /// Verification level filter for history queries
@@ -53,6 +67,12 @@ pub struct VerificationStatusResponse {
     pub report_url: Option<String>,
     pub verification_notes: Option<String>,
     pub cached: bool,
+    /// The network passphrase recorded for this contract, if any.
+    /// `null` for contracts that were published before issue-1117 support
+    /// was added (these are backward-compatible – passphrase validation is
+    /// skipped when this field is absent).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub network_passphrase: Option<String>,
 }
 
 /// One entry in the verification history
@@ -82,6 +102,11 @@ pub struct VerificationSubmitResponse {
     pub status: String,
     pub message: String,
     pub submitted_at: DateTime<Utc>,
+    /// Present when `provided_passphrase` was `None` and the registry already
+    /// holds a passphrase for this contract.  Callers should start supplying
+    /// the passphrase in future requests.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub passphrase_warning: Option<String>,
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -119,6 +144,10 @@ async fn resolve_contract_uuid(state: &AppState, id: &str) -> ApiResult<(Uuid, S
 /// Creates a `pending` verification record and queues the contract for
 /// source-code / on-chain verification.  Returns immediately with the new
 /// record ID and initial status.
+///
+/// If `network_passphrase` is supplied and the registry already holds a
+/// different passphrase for this contract, the request is rejected with a
+/// 422 status and a `PassphraseMismatch` error code.
 #[utoipa::path(
     post,
     path = "/api/contracts/{id}/verify",
@@ -127,7 +156,8 @@ async fn resolve_contract_uuid(state: &AppState, id: &str) -> ApiResult<(Uuid, S
     responses(
         (status = 201, description = "Verification submitted", body = VerificationSubmitResponse),
         (status = 404, description = "Contract not found"),
-        (status = 400, description = "Invalid request")
+        (status = 400, description = "Invalid request"),
+        (status = 422, description = "Passphrase mismatch")
     ),
     tag = "Verification"
 )]
@@ -138,6 +168,75 @@ pub async fn submit_contract_verification(
 ) -> ApiResult<Json<VerificationSubmitResponse>> {
     let (contract_uuid, contract_address) = resolve_contract_uuid(&state, &id).await?;
 
+    // ── Passphrase pre-check ──────────────────────────────────────────────────
+    //
+    // Fetch the contract's recorded passphrase and network enum so we can:
+    //  1. Validate the provided passphrase before any writes.
+    //  2. Infer the canonical passphrase for well-known networks if the caller
+    //     didn't supply one.
+    //  3. Persist the passphrase into the verifications record.
+    let (recorded_passphrase, contract_network): (Option<String>, Option<Network>) =
+        sqlx::query_as(
+            "SELECT network_passphrase, network FROM contracts WHERE id = $1",
+        )
+        .bind(contract_uuid)
+        .fetch_optional(&state.db)
+        .await
+        .map_err(|e| db_err("fetch contract passphrase for validation", e))?
+        .unwrap_or((None, None));
+
+    // For well-known networks, if the caller didn't provide a passphrase we
+    // can fill it in from the known constant.  This guarantees new records are
+    // always stored with the canonical passphrase.
+    let effective_provided: Option<String> = req.network_passphrase.clone().or_else(|| {
+        contract_network
+            .as_ref()
+            .and_then(known_passphrase_for_network)
+            .map(str::to_owned)
+    });
+
+    // Perform the passphrase check before opening a transaction.
+    let passphrase_to_store: Option<String>;
+    let passphrase_warning: Option<String>;
+
+    match check_passphrase(
+        recorded_passphrase.as_deref(),
+        effective_provided.as_deref(),
+    ) {
+        PassphraseCheckOutcome::Mismatch { recorded, provided } => {
+            return Err(ApiError::unprocessable(
+                "PassphraseMismatch",
+                format!(
+                    "The network passphrase supplied ('{}') does not match the passphrase \
+                     recorded for this contract ('{}').  Verify that you are targeting the \
+                     correct network.",
+                    provided, recorded
+                ),
+            ));
+        }
+        PassphraseCheckOutcome::Pass => {
+            passphrase_to_store = effective_provided.clone().or(recorded_passphrase.clone());
+            // Emit a soft warning when the caller didn't supply a passphrase and
+            // there is no recorded one either (fully opaque – could be a custom
+            // network).
+            passphrase_warning = if req.network_passphrase.is_none()
+                && recorded_passphrase.is_none()
+                && effective_provided.is_none()
+            {
+                Some(
+                    "No network passphrase was supplied or inferred.  For custom or private \
+                     networks, include `network_passphrase` in the request body to enable \
+                     passphrase mismatch detection."
+                        .to_owned(),
+                )
+            } else {
+                None
+            };
+        }
+    }
+
+    // ── Transactional write ───────────────────────────────────────────────────
+    //
     // Wrap the INSERT + conditional UPDATE in a transaction so that:
     //   • The verifications row and the contracts.verification_status change
     //     are committed atomically.
@@ -160,8 +259,8 @@ pub async fn submit_contract_verification(
         r#"
         INSERT INTO verifications
             (contract_id, status, source_code, build_params, compiler_version,
-             error_message, version)
-        VALUES ($1, 'pending', $2, $3, $4, NULL, 0)
+             error_message, version, network_passphrase)
+        VALUES ($1, 'pending', $2, $3, $4, NULL, 0, $5)
         RETURNING id
         "#,
     )
@@ -169,6 +268,7 @@ pub async fn submit_contract_verification(
     .bind(&req.source_code)
     .bind(&req.build_params)
     .bind(&req.compiler_version)
+    .bind(passphrase_to_store.as_deref())
     .fetch_one(&mut *tx)
     .await
     .map_err(|e| db_err("insert verification record", e))?;
@@ -176,17 +276,22 @@ pub async fn submit_contract_verification(
     // Transition contract status to 'pending' only if it is currently
     // 'unverified'.  The FOR UPDATE lock above ensures no other transaction
     // can race this conditional update.
+    //
+    // Also persist the passphrase on the contracts row when it wasn't already
+    // present so future verifications can detect mismatches.
     sqlx::query(
         r#"
         UPDATE contracts
         SET    verification_status  = 'pending',
                verification_version = verification_version + 1,
+               network_passphrase   = COALESCE(network_passphrase, $2),
                updated_at           = NOW()
         WHERE  id = $1
           AND  verification_status = 'unverified'
         "#,
     )
     .bind(contract_uuid)
+    .bind(passphrase_to_store.as_deref())
     .execute(&mut *tx)
     .await
     .map_err(|e| db_err("set contract verification_status to pending", e))?;
@@ -204,6 +309,7 @@ pub async fn submit_contract_verification(
         status: "pending".to_string(),
         message: "Verification request submitted and queued for processing".to_string(),
         submitted_at: Utc::now(),
+        passphrase_warning,
     }))
 }
 
@@ -245,6 +351,7 @@ pub async fn get_contract_verification_status(
         Option<Uuid>,          // verified_by
         Option<String>,        // verification_notes
         Option<String>,        // compiler_version (used as verification_method)
+        Option<String>,        // network_passphrase (issue #1117)
     )> = sqlx::query_as(
         r#"
         SELECT
@@ -253,7 +360,8 @@ pub async fn get_contract_verification_status(
             c.verified_at,
             c.verified_by,
             c.verification_notes,
-            v.compiler_version
+            v.compiler_version,
+            c.network_passphrase
         FROM   contracts c
         LEFT   JOIN verifications v
                ON  v.contract_id = c.id
@@ -271,7 +379,7 @@ pub async fn get_contract_verification_status(
     .await
     .map_err(|e| db_err("fetch verification status", e))?;
 
-    let (vs, is_verified, verified_at, verified_by, notes, method) =
+    let (vs, is_verified, verified_at, verified_by, notes, method, network_passphrase) =
         row.ok_or_else(|| ApiError::not_found("ContractNotFound", "Contract not found"))?;
 
     let resp = VerificationStatusResponse {
@@ -284,6 +392,7 @@ pub async fn get_contract_verification_status(
         report_url: None,
         verification_notes: notes,
         cached: false,
+        network_passphrase,
     };
 
     // Cache for 1 hour

@@ -1,0 +1,312 @@
+name: Smart Contract CI
+
+# Gates Soroban contract code on every pull request: formatting, compilation to
+# wasm32-unknown-unknown, and contract unit/integration tests.
+#
+# Two things are checked, because this repository holds contract code in two shapes:
+#
+#   1. Contract crates - discovered, not hardcoded. Any Cargo package that depends on
+#      soroban-sdk and builds a cdylib is picked up. Today that is cli/imported; a future
+#      top-level contracts/ directory is covered with no change to this file.
+#   2. Contract templates - cli/templates/*.rs are scaffolds the CLI stamps out for users,
+#      so they contain a {{CONTRACT_NAME}} placeholder and are not compilable in place.
+#      Each is substituted into a throwaway crate and built to wasm32. This is the check
+#      that matters most in practice: template code becomes user code, and a template that
+#      does not compile ships broken contracts to everyone who scaffolds one.
+#
+# Deliberately out of scope: soroban-registry/, which despite its name is a lint/state/batch
+# tool suite rather than contract code, and whose workspace does not currently build on the
+# nightly toolchain pinned by rust-toolchain.toml.
+
+on:
+  pull_request:
+    branches: [main, develop]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  # Must track the soroban-sdk version the CLI scaffolds into generated projects; the
+  # reference value lives in cli/imported/Cargo.toml.
+  SOROBAN_SDK_VERSION: "22.0.0"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: smart-contract-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  contracts:
+    name: Contract crates (fmt, wasm32, tests)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install pinned toolchain and wasm target
+        run: |
+          # rust-toolchain.toml pins the channel and requests rustfmt + clippy; `rustup show`
+          # installs it on demand. The wasm target has to be added for that same toolchain.
+          rustup show
+          rustup target add wasm32-unknown-unknown
+          rustc --version
+          cargo --version
+          cargo fmt --version
+
+      - name: Discover Soroban contract crates
+        id: discover
+        run: |
+          set -euo pipefail
+
+          # A contract crate depends on soroban-sdk and produces a cdylib. Scanning for that
+          # pair avoids hardcoding paths and avoids matching the API server or the tooling
+          # workspace, neither of which is a contract.
+          CRATES=""
+          while IFS= read -r manifest; do
+            if grep -q 'soroban-sdk' "$manifest" && grep -q 'cdylib' "$manifest"; then
+              CRATES="$CRATES $(dirname "$manifest")"
+            fi
+          done < <(find . -name Cargo.toml \
+                        -not -path "./target/*" \
+                        -not -path "*/target/*" \
+                        -not -path "*/node_modules/*" | sort)
+
+          CRATES=$(echo "$CRATES" | xargs || true)
+
+          if [ -z "$CRATES" ]; then
+            echo "No Soroban contract crates found (looked for soroban-sdk + crate-type cdylib)."
+            echo "Nothing to check. If you expected contracts here, confirm the crate declares"
+            echo "both a soroban-sdk dependency and crate-type = [\"cdylib\"]."
+          else
+            echo "Discovered contract crates:"
+            for c in $CRATES; do echo "  $c"; done
+          fi
+
+          echo "crates=$CRATES" >> "$GITHUB_OUTPUT"
+
+      # The target-dir entry names the one contract crate that exists today. Discovery above
+      # is dynamic, so a crate added elsewhere simply gets a cold build rather than a wrong
+      # cache; caching is an optimisation, never a correctness input.
+      - name: Cache cargo registry and build artifacts
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            cli/imported/target
+          key: contracts-${{ runner.os }}-${{ hashFiles('**/rust-toolchain.toml', 'cli/imported/Cargo.lock') }}
+          restore-keys: |
+            contracts-${{ runner.os }}-
+
+      - name: Check formatting
+        if: steps.discover.outputs.crates != ''
+        env:
+          CRATES: ${{ steps.discover.outputs.crates }}
+        run: |
+          set -euo pipefail
+          FAILED=""
+          for crate in $CRATES; do
+            echo "::group::cargo fmt --check ($crate)"
+            if ! (cd "$crate" && cargo fmt --all --check); then
+              FAILED="$FAILED $crate"
+            fi
+            echo "::endgroup::"
+          done
+          if [ -n "$FAILED" ]; then
+            echo "::error::Contract formatting check failed for:$FAILED. Run 'cargo fmt --all' in each."
+            exit 1
+          fi
+
+      - name: Build for wasm32-unknown-unknown
+        if: steps.discover.outputs.crates != ''
+        env:
+          CRATES: ${{ steps.discover.outputs.crates }}
+        run: |
+          set -euo pipefail
+          FAILED=""
+          for crate in $CRATES; do
+            echo "::group::cargo build --release --target wasm32-unknown-unknown ($crate)"
+            # --locked when a lock file is committed, so CI builds exactly what was reviewed.
+            # Without it cargo re-resolves on every run and can pick up a breaking transitive
+            # upgrade that nobody changed.
+            LOCKED=""
+            if [ -f "$crate/Cargo.lock" ]; then
+              LOCKED="--locked"
+            else
+              echo "::warning file=$crate/Cargo.toml::No Cargo.lock committed for $crate; dependency resolution is not reproducible. Commit its Cargo.lock."
+            fi
+            if ! (cd "$crate" && cargo build --release --target wasm32-unknown-unknown $LOCKED); then
+              FAILED="$FAILED $crate"
+            fi
+            echo "::endgroup::"
+          done
+          if [ -n "$FAILED" ]; then
+            echo "::error::wasm32 build failed for:$FAILED"
+            exit 1
+          fi
+
+      - name: Report built wasm artifacts
+        if: steps.discover.outputs.crates != ''
+        env:
+          CRATES: ${{ steps.discover.outputs.crates }}
+        run: |
+          set -euo pipefail
+          for crate in $CRATES; do
+            find "$crate/target/wasm32-unknown-unknown/release" -maxdepth 1 -name '*.wasm' \
+              -exec ls -l {} \; 2>/dev/null || true
+          done
+
+      - name: Run contract tests
+        if: steps.discover.outputs.crates != ''
+        env:
+          CRATES: ${{ steps.discover.outputs.crates }}
+        run: |
+          set -euo pipefail
+          FAILED=""
+          for crate in $CRATES; do
+            echo "::group::cargo test ($crate)"
+            LOCKED=""
+            if [ -f "$crate/Cargo.lock" ]; then
+              LOCKED="--locked"
+            fi
+            # Native target on purpose: contract tests run against soroban-sdk's testutils
+            # host, not inside wasm.
+            if ! (cd "$crate" && cargo test $LOCKED -- --nocapture); then
+              FAILED="$FAILED $crate"
+            fi
+            echo "::endgroup::"
+          done
+          if [ -n "$FAILED" ]; then
+            echo "::error::Contract tests failed for:$FAILED"
+            exit 1
+          fi
+
+  templates:
+    name: Contract templates compile to wasm32
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install pinned toolchain and wasm target
+        run: |
+          rustup show
+          rustup target add wasm32-unknown-unknown
+          rustc --version
+
+      - name: Cache cargo registry and build artifacts
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            ${{ runner.temp }}/template-check/target
+          key: templates-${{ runner.os }}-${{ env.SOROBAN_SDK_VERSION }}-${{ hashFiles('**/rust-toolchain.toml') }}
+          restore-keys: |
+            templates-${{ runner.os }}-${{ env.SOROBAN_SDK_VERSION }}-
+
+      - name: Create the harness crate
+        env:
+          HARNESS: ${{ runner.temp }}/template-check
+        run: |
+          set -euo pipefail
+          mkdir -p "$HARNESS/src"
+
+          # The harness lives outside the checkout, so copy the toolchain pin in: templates
+          # must be built with the same compiler as everything else in this repository.
+          cp rust-toolchain.toml "$HARNESS/rust-toolchain.toml"
+
+          # Release profile mirrors what the CLI scaffolds into generated projects, so this
+          # check exercises the same codegen settings a user would get.
+          cat > "$HARNESS/Cargo.toml" <<EOF
+          [package]
+          name = "template-check"
+          version = "0.0.0"
+          edition = "2021"
+          publish = false
+
+          [lib]
+          crate-type = ["cdylib"]
+          path = "src/lib.rs"
+
+          [dependencies]
+          soroban-sdk = "=${SOROBAN_SDK_VERSION}"
+
+          [profile.release]
+          opt-level = "z"
+          overflow-checks = true
+          debug = 0
+          strip = "symbols"
+          debug-assertions = false
+          panic = "abort"
+          codegen-units = 1
+          lto = true
+          EOF
+
+          echo "Harness at $HARNESS"
+          cat "$HARNESS/Cargo.toml"
+
+      - name: Compile every template to wasm32
+        env:
+          HARNESS: ${{ runner.temp }}/template-check
+        run: |
+          set -euo pipefail
+
+          shopt -s nullglob
+          TEMPLATES=(cli/templates/*.rs)
+          if [ ${#TEMPLATES[@]} -eq 0 ]; then
+            echo "::error::No templates found under cli/templates/. Expected at least one .rs scaffold."
+            exit 1
+          fi
+
+          FAILED=""
+          for template in "${TEMPLATES[@]}"; do
+            name=$(basename "$template" .rs)
+            echo "::group::$name"
+
+            # Templates are scaffolds, not compilable Rust: substitute the placeholder the
+            # CLI fills in before the file is valid.
+            sed 's/{{CONTRACT_NAME}}/TemplateContract/g' "$template" > "$HARNESS/src/lib.rs"
+
+            if grep -q '{{' "$HARNESS/src/lib.rs"; then
+              echo "::error file=$template::Unsubstituted placeholder remains after templating."
+              echo "This workflow only knows how to substitute {{CONTRACT_NAME}}; a new"
+              echo "placeholder was introduced and needs handling here. Remaining:"
+              grep -n '{{' "$HARNESS/src/lib.rs" || true
+              FAILED="$FAILED $name"
+              echo "::endgroup::"
+              continue
+            fi
+
+            # Remove any artifact from the previous template so a failed build here cannot be
+            # reported as a success against a stale .wasm.
+            wasm="$HARNESS/target/wasm32-unknown-unknown/release/template_check.wasm"
+            rm -f "$wasm"
+
+            if (cd "$HARNESS" && cargo build --release --target wasm32-unknown-unknown); then
+              if [ -f "$wasm" ]; then
+                echo "built $(basename "$wasm") ($(wc -c < "$wasm" | tr -d ' ') bytes)"
+              else
+                echo "::error file=$template::Build reported success but produced no .wasm artifact."
+                FAILED="$FAILED $name"
+              fi
+            else
+              echo "::error file=$template::Template does not compile to wasm32-unknown-unknown."
+              FAILED="$FAILED $name"
+            fi
+            echo "::endgroup::"
+          done
+
+          echo
+          if [ -n "$FAILED" ]; then
+            echo "::error::These templates do not compile:$FAILED"
+            echo "Anyone scaffolding a contract from them receives code that will not build."
+            exit 1
+          fi
+          echo "All ${#TEMPLATES[@]} templates compile to wasm32-unknown-unknown."

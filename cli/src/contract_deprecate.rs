@@ -36,8 +36,10 @@ pub struct DeprecationPayload {
 /// The full request body sent to the deprecation API endpoint.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SignedDeprecationRequest {
+    /// When the contract should be considered retired.
+    pub retirement_at: String,
     /// Deprecation reason visible to consumers.
-    pub reason: String,
+    pub deprecated_reason: String,
     /// Replacement contract ID for migration.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub replacement_contract_id: Option<String>,
@@ -46,6 +48,19 @@ pub struct SignedDeprecationRequest {
     pub migration_guide_url: Option<String>,
     /// Grace period in days before hard removal.
     pub grace_period_days: i32,
+    /// The canonical payload that was signed.
+    pub payload: DeprecationPayload,
+    /// Base64-encoded Ed25519 signature of the payload.
+    pub signature: String,
+    /// Stellar address derived from the public key.
+    pub signing_address: String,
+}
+
+/// The full request body sent to the contract rollback API wrapper.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SignedRollbackRequest {
+    /// Human-readable reason for the rollback.
+    pub reason: String,
     /// The canonical payload that was signed.
     pub payload: DeprecationPayload,
     /// Base64-encoded Ed25519 signature of the payload.
@@ -74,7 +89,6 @@ pub async fn run(
     let signing_key = decode_private_key(private_key)?;
     let verifying_key = signing_key.verifying_key();
     let public_key_bytes = verifying_key.to_bytes();
-    let public_key_b64 = BASE64.encode(public_key_bytes);
     let signing_address = derive_stellar_address(&public_key_bytes);
 
     // 2. Fetch current contract state so we can show a diff
@@ -91,7 +105,8 @@ pub async fn run(
 
     // 4. Build and sign the deprecation payload
     let nonce = uuid::Uuid::new_v4().to_string();
-    let timestamp = Utc::now().to_rfc3339();
+    let now = Utc::now();
+    let timestamp = now.to_rfc3339();
 
     let canonical_contract_id = contract_info
         .get("contract_id")
@@ -111,31 +126,18 @@ pub async fn run(
     let signature_b64 = BASE64.encode(signature.to_bytes());
 
     let request = SignedDeprecationRequest {
-        reason: reason.to_string(),
+        retirement_at: (now + chrono::Duration::days(i64::from(grace_period_days))).to_rfc3339(),
+        deprecated_reason: reason.to_string(),
         replacement_contract_id: replacement.map(String::from),
         migration_guide_url: migration_guide.map(String::from),
         grace_period_days,
         payload,
         signature: signature_b64,
-        public_key: public_key_b64,
         signing_address: signing_address.clone(),
     };
 
     // 5. Submit to registry
-    let client = crate::net::client();
-    let url = format!(
-        "{}/api/contracts/{}/deprecate",
-        api_url.trim_end_matches('/'),
-        address
-    );
-    log::debug!("POST {}", url);
-
-    let resp = client
-        .post(&url)
-        .json(&request)
-        .send_with_retry()
-        .await
-        .context("Failed to reach the registry API. Is the registry running?")?;
+    let resp = submit_deprecation_request(api_url, address, &request).await?;
 
     let status = resp.status();
     let body: Value = resp.json().await.unwrap_or(Value::Null);
@@ -220,6 +222,147 @@ pub async fn run(
     Ok(())
 }
 
+/// Main entry point for `soroban-registry contract rollback`.
+pub async fn rollback(
+    api_url: &str,
+    address: &str,
+    reason: &str,
+    private_key: &str,
+    yes: bool,
+    json_output: bool,
+) -> Result<()> {
+    let signing_key = decode_private_key(private_key)?;
+    let verifying_key = signing_key.verifying_key();
+    let public_key_bytes = verifying_key.to_bytes();
+    let public_key_b64 = BASE64.encode(public_key_bytes);
+    let signing_address = derive_stellar_address(&public_key_bytes);
+
+    let contract_info = fetch_contract_info(api_url, address).await?;
+
+    if !yes {
+        render_rollback_preview(address, reason, &contract_info, &signing_address);
+        if !prompt_confirmation()? {
+            println!("{}", "Rollback cancelled.".yellow());
+            return Ok(());
+        }
+    }
+
+    let nonce = uuid::Uuid::new_v4().to_string();
+    let timestamp = Utc::now().to_rfc3339();
+
+    let canonical_contract_id = contract_info
+        .get("contract_id")
+        .and_then(Value::as_str)
+        .unwrap_or(address)
+        .to_string();
+
+    let payload = DeprecationPayload {
+        contract_id: canonical_contract_id,
+        action: "rollback".to_string(),
+        timestamp,
+        nonce,
+    };
+
+    let signature = signing_key.sign(build_signing_message(&payload).as_bytes());
+    let signature_b64 = BASE64.encode(signature.to_bytes());
+
+    let request = SignedRollbackRequest {
+        reason: reason.to_string(),
+        payload,
+        signature: signature_b64,
+        public_key: public_key_b64,
+        signing_address: signing_address.clone(),
+    };
+
+    let client = crate::net::client();
+    let url = format!(
+        "{}/api/contracts/{}/deprecate",
+        api_url.trim_end_matches('/'),
+        address
+    );
+    log::debug!("DELETE {}?override=true", url);
+
+    let resp = client
+        .delete(&url)
+        .query(&[("override", "true")])
+        .json(&request)
+        .send_with_retry()
+        .await
+        .context("Failed to reach the registry API. Is the registry running?")?;
+
+    let status = resp.status();
+    let body: Value = resp.json().await.unwrap_or(Value::Null);
+
+    if !status.is_success() {
+        let error_type = body
+            .get("error")
+            .and_then(Value::as_str)
+            .unwrap_or("unknown");
+        let error_msg = body
+            .get("message")
+            .and_then(Value::as_str)
+            .unwrap_or("Unknown error");
+
+        match error_type {
+            "unauthorized" | "signature_invalid" => {
+                bail!(
+                    "Signature authorization failed: {}. Ensure you are using the publisher's private key for this contract.",
+                    error_msg
+                );
+            }
+            _ => {
+                bail!(
+                    "Rollback failed (HTTP {}): {} — {}",
+                    status.as_u16(),
+                    error_type,
+                    error_msg
+                );
+            }
+        }
+    }
+
+    if json_output {
+        let result = json!({
+            "status": "active",
+            "contract_id": address,
+            "reason": reason,
+            "signing_address": signing_address,
+        });
+        println!("{}", serde_json::to_string_pretty(&result)?);
+    } else {
+        println!("\n{}", "Contract rollback completed successfully!".green().bold());
+        println!("  {}: {}", "Contract".bold(), address.cyan());
+        println!("  {}: {}", "Reason".bold(), reason);
+        println!("  {}: {}", "Signed By".bold(), signing_address.bright_magenta());
+        println!();
+    }
+
+    Ok(())
+}
+
+async fn submit_deprecation_request(
+    api_url: &str,
+    address: &str,
+    request: &SignedDeprecationRequest,
+) -> Result<reqwest::Response> {
+    let client = crate::net::client();
+    let url = format!(
+        "{}/api/contracts/{}/deprecate",
+        api_url.trim_end_matches('/'),
+        address
+    );
+    log::debug!("POST {}", url);
+
+    let resp = client
+        .post(&url)
+        .json(request)
+        .send_with_retry()
+        .await
+        .context("Failed to reach the registry API. Is the registry running?")?;
+
+    Ok(resp)
+}
+
 // ── Signing ──────────────────────────────────────────────────────────────────
 
 /// Build the canonical signing message from a deprecation payload.
@@ -284,16 +427,10 @@ fn decode_private_key(key: &str) -> Result<SigningKey> {
 
 /// Derive a Stellar-style address from a 32-byte Ed25519 public key.
 fn derive_stellar_address(public_key_bytes: &[u8; 32]) -> String {
-    use ripemd::Ripemd160;
-    use sha2::{Digest, Sha256};
-
-    let sha256_hash = Sha256::digest(public_key_bytes);
-    let ripemd_hash = Ripemd160::digest(sha256_hash);
-    let mut versioned = vec![0x00];
-    versioned.extend_from_slice(&ripemd_hash);
-    let checksum = Sha256::digest(&Sha256::digest(&versioned));
-    versioned.extend_from_slice(&checksum[..4]);
-    bs58::encode(&versioned).into_string()
+    stellar_strkey::ed25519::PublicKey(*public_key_bytes)
+        .to_string()
+        .as_str()
+        .to_owned()
 }
 
 // ── Contract info fetch ──────────────────────────────────────────────────────
@@ -376,6 +513,48 @@ fn render_state_diff(
             repl.cyan()
         );
     }
+    println!("{}\n", "═".repeat(50).cyan());
+}
+
+/// Print a state diff showing what will change when a deprecated contract is rolled back.
+fn render_rollback_preview(
+    address: &str,
+    reason: &str,
+    contract_info: &Value,
+    signing_address: &str,
+) {
+    let name = contract_info
+        .get("name")
+        .and_then(Value::as_str)
+        .unwrap_or("(unknown)");
+    let current_status = contract_info
+        .get("status")
+        .or_else(|| contract_info.get("deprecation_status"))
+        .and_then(Value::as_str)
+        .unwrap_or("active");
+    let network = contract_info
+        .get("network")
+        .and_then(Value::as_str)
+        .unwrap_or("(unknown)");
+
+    println!("\n{}", "Contract Rollback Preview".bold().cyan());
+    println!("{}", "═".repeat(50).cyan());
+    println!("  {}: {} ({})", "Contract".bold(), address.cyan(), name.dimmed());
+    println!("  {}: {}", "Network".bold(), network);
+    println!("  {}: {}", "Signed By".bold(), signing_address.bright_magenta());
+
+    println!("\n  {}", "State Change:".bold().yellow());
+    println!(
+        "    {} {} → {}",
+        "Status:".bold(),
+        current_status.red(),
+        "active".green()
+    );
+    println!(
+        "    {} (none) → {}",
+        "Reason:".bold(),
+        reason
+    );
     println!("{}\n", "═".repeat(50).cyan());
 }
 
@@ -578,7 +757,8 @@ mod tests {
         let addr1 = derive_stellar_address(&bytes);
         let addr2 = derive_stellar_address(&bytes);
         assert_eq!(addr1, addr2);
-        assert!(!addr1.is_empty());
+        assert!(addr1.starts_with('G'));
+        assert_eq!(addr1.len(), 56);
     }
 
     #[test]
@@ -607,26 +787,25 @@ mod tests {
         let (signing_key, verifying_key) = generate_test_keypair();
         let payload = make_payload("CTEST", "ser-nonce");
         let sig = sign_deprecation(&payload, &signing_key);
-        let pub_key = BASE64.encode(verifying_key.to_bytes());
         let address = derive_stellar_address(&verifying_key.to_bytes());
 
         let request = SignedDeprecationRequest {
-            reason: "end of life".to_string(),
+            retirement_at: "2030-01-01T00:00:00Z".to_string(),
+            deprecated_reason: "end of life".to_string(),
             replacement_contract_id: Some("CNEW".to_string()),
             migration_guide_url: Some("https://example.com/migrate".to_string()),
             grace_period_days: 30,
             payload,
             signature: sig,
-            public_key: pub_key,
             signing_address: address,
         };
 
         let json = serde_json::to_value(&request).unwrap();
-        assert_eq!(json["reason"], "end of life");
+        assert_eq!(json["deprecated_reason"], "end of life");
+        assert_eq!(json["retirement_at"], "2030-01-01T00:00:00Z");
         assert_eq!(json["replacement_contract_id"], "CNEW");
         assert_eq!(json["grace_period_days"], 30);
         assert!(json["signature"].is_string());
-        assert!(json["public_key"].is_string());
         assert!(json["signing_address"].is_string());
         assert!(json["payload"]["contract_id"].is_string());
     }
