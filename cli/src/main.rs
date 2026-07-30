@@ -28,6 +28,7 @@ mod contract_audit;
 mod contract_dependency;
 mod contract_deploy;
 mod contract_deprecate;
+mod contract_snapshot;
 mod contract_highlight;
 mod contract_interaction;
 mod contract_register;
@@ -1809,6 +1810,55 @@ pub enum KeysCommands {
 /// Sub-commands for the `contract` group (#522)
 #[derive(Debug, Subcommand)]
 pub enum ContractCommands {
+
+    /// Export a signed, offline-verifiable snapshot of a contract (#1116)
+    ///
+    /// Captures metadata, verification status, dependency scan findings,
+    /// deprecation state and successor lineage as of now, signed by the
+    /// registry so it can be audited without a live API.
+    ///
+    /// Usage: soroban-registry contract snapshot <ID> --output <FILE>
+    Snapshot {
+        /// Contract UUID to snapshot
+        id: String,
+
+        /// File to write the signed snapshot to
+        #[arg(long, short = 'o')]
+        output: String,
+
+        /// Emit machine-readable JSON
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// Verify a previously exported contract snapshot (#1116)
+    ///
+    /// Runs entirely offline unless --fetch-key is passed. Exits non-zero when
+    /// verification fails, so it can gate a compliance pipeline.
+    ///
+    /// Usage: soroban-registry contract verify-snapshot <FILE> [--expect-key <FP>]
+    VerifySnapshot {
+        /// Path to the snapshot file
+        file: String,
+
+        /// Registry key fingerprint to pin against. Without it, a valid result
+        /// proves only that the bundle is self-consistent.
+        #[arg(long)]
+        expect_key: Option<String>,
+
+        /// Fail if the snapshot is older than this many days
+        #[arg(long)]
+        max_age_days: Option<i64>,
+
+        /// Fetch the expected fingerprint from the registry instead of pinning
+        /// it locally. Requires network access.
+        #[arg(long)]
+        fetch_key: bool,
+
+        /// Emit machine-readable JSON
+        #[arg(long)]
+        json: bool,
+    },
 
     /// Assess security and operational risks for a contract (#837)
     ///
@@ -4422,6 +4472,30 @@ pub async fn dispatch_command(
                 let fmt = if json { "json" } else { &format };
                 contract_audit::run(&cli.api_url, &lockfile, fix, init, &contracts, fmt).await?;
             }
+            ContractCommands::Snapshot { id, output, json } => {
+                log::debug!("Command: contract snapshot | id={} output={}", id, output);
+                contract_snapshot::run_export(&cli.api_url, &id, &output, json).await?;
+            }
+
+            ContractCommands::VerifySnapshot {
+                file,
+                expect_key,
+                max_age_days,
+                fetch_key,
+                json,
+            } => {
+                log::debug!("Command: contract verify-snapshot | file={}", file);
+                contract_snapshot::run_verify(
+                    &cli.api_url,
+                    &file,
+                    expect_key.as_deref(),
+                    max_age_days,
+                    fetch_key,
+                    json,
+                )
+                .await?;
+            }
+
             ContractCommands::Deprecate {
                 address,
                 reason,
