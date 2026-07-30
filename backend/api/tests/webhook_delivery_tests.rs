@@ -91,9 +91,7 @@ fn signature_always_has_sha256_prefix() {
 #[test]
 fn signature_is_64_hex_chars_after_prefix() {
     let sig = sign_payload("hello world", "secret123");
-    let hex_part = sig
-        .strip_prefix("sha256=")
-        .expect("prefix present");
+    let hex_part = sig.strip_prefix("sha256=").expect("prefix present");
     assert_eq!(
         hex_part.len(),
         64,
@@ -112,7 +110,10 @@ fn signature_is_deterministic_for_same_inputs() {
     let secret = "deterministic-secret-key";
     let sig1 = sign_payload(payload, secret);
     let sig2 = sign_payload(payload, secret);
-    assert_eq!(sig1, sig2, "same inputs must always produce the same signature");
+    assert_eq!(
+        sig1, sig2,
+        "same inputs must always produce the same signature"
+    );
 }
 
 // ──────────────────────────────────────────────────────────────────────────────

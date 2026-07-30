@@ -211,7 +211,14 @@ fn test_tampered_payload_fails_verification() {
     let (_, attacker) = new_keypair();
     let signed_at = now_unix();
 
-    let signed = initiate_payload(contract, &address, &recipient, 1_800_000_000, "n", signed_at);
+    let signed = initiate_payload(
+        contract,
+        &address,
+        &recipient,
+        1_800_000_000,
+        "n",
+        signed_at,
+    );
     let signature = sign_b64(&signing, &signed);
 
     // The same signature, but the recipient has been swapped for the attacker.
@@ -835,7 +842,10 @@ async fn test_concurrent_accepts_complete_exactly_once() {
     }
 
     assert_eq!(accepted, 1, "exactly one acceptance may succeed");
-    assert_eq!(conflicted, 9, "the other nine must be rejected as conflicts");
+    assert_eq!(
+        conflicted, 9,
+        "the other nine must be rejected as conflicts"
+    );
 
     let row = get_transfer(&sc, transfer_id).await;
     assert_eq!(row["status"], "completed");
@@ -980,9 +990,7 @@ async fn test_stored_signatures_verify_offline() {
                 payload.as_bytes(),
                 &ed25519_dalek::Signature::from_bytes(&signature_bytes),
             )
-            .unwrap_or_else(|e| {
-                panic!("stored {} did not verify offline: {}", signature_field, e)
-            });
+            .unwrap_or_else(|e| panic!("stored {} did not verify offline: {}", signature_field, e));
     }
 
     // And the two signatures come from genuinely different accounts (invariant I1).
@@ -1175,9 +1183,17 @@ async fn test_sender_can_cancel_pending_transfer() {
     );
     let (status, cancelled) = post_confirm(&sc, transfer_id, Some(&sc.owner.token), &body).await;
 
-    assert_eq!(status, StatusCode::OK, "sender cancel failed: {}", cancelled);
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "sender cancel failed: {}",
+        cancelled
+    );
     assert_eq!(cancelled["status"], "rejected");
-    assert_eq!(cancelled["decision_signer_address"], json!(sc.owner.address));
+    assert_eq!(
+        cancelled["decision_signer_address"],
+        json!(sc.owner.address)
+    );
 }
 
 #[tokio::test]
@@ -1356,6 +1372,7 @@ async fn test_expired_transfer_is_reported_as_expired_on_read() {
         "expired",
         "reading a past-due transfer must expire it"
     );
-    assert!(log_actions(&get_logs(&sc, transfer_id).await)
-        .contains(&"transfer_expired".to_string()));
+    assert!(
+        log_actions(&get_logs(&sc, transfer_id).await).contains(&"transfer_expired".to_string())
+    );
 }

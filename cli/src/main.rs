@@ -18,6 +18,7 @@ mod batch_update;
 mod batch_verify;
 mod cache;
 mod cached_http;
+mod category;
 mod cicd;
 mod codegen;
 mod commands;
@@ -57,6 +58,7 @@ mod package_signing;
 mod patch;
 mod plugins;
 mod profiler;
+mod publisher;
 mod release_notes;
 mod shell;
 mod sla;
@@ -1144,9 +1146,26 @@ pub enum Commands {
         action: EnvCommands,
     },
 
+    /// Publisher account tools
+    Publisher {
+        #[command(subcommand)]
+        action: PublisherCommands,
+    },
+
     /// External command (may be provided by an installed plugin)
     #[command(external_subcommand)]
     External(Vec<String>),
+}
+
+/// Sub-commands for the `publisher` group (#1124).
+#[derive(Debug, Subcommand)]
+pub enum PublisherCommands {
+    /// Diagnose local publisher setup (config, session, signing key, API reachability)
+    Doctor {
+        /// Output the diagnostic report as machine-readable JSON
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 /// Sub-commands for the `network` group
@@ -1806,6 +1825,40 @@ pub enum KeysCommands {
     },
 }
 
+/// Sub-commands for `contract category`.
+#[derive(Debug, Subcommand)]
+pub enum CategoryCommands {
+    /// List all categories with descriptions and contract counts
+    List {
+        /// Scope contract counts to a single network (mainnet | testnet | futurenet)
+        #[arg(long)]
+        network: Option<String>,
+
+        /// Output format for stdout: table, json, csv, yaml
+        #[arg(long, default_value = "table")]
+        format: String,
+
+        /// Also write the category list to a file: csv or json
+        #[arg(long)]
+        export: Option<String>,
+    },
+
+    /// Show detailed per-category statistics (counts, recent, trending)
+    Stats {
+        /// Scope statistics to a single network (mainnet | testnet | futurenet)
+        #[arg(long)]
+        network: Option<String>,
+
+        /// Output format for stdout: table, json, csv, yaml
+        #[arg(long, default_value = "table")]
+        format: String,
+
+        /// Also write the statistics to a file: csv or json
+        #[arg(long)]
+        export: Option<String>,
+    },
+}
+
 /// Sub-commands for the `contract` group (#522)
 #[derive(Debug, Subcommand)]
 pub enum ContractCommands {
@@ -2062,6 +2115,12 @@ pub enum ContractCommands {
         /// Compact summary mode: show aggregate counts without the full tree
         #[arg(long)]
         summary: bool,
+    },
+
+    /// List and inspect contract categories
+    Category {
+        #[command(subcommand)]
+        action: CategoryCommands,
     },
 
     /// Update contract metadata after registration (#828)
@@ -4334,6 +4393,35 @@ pub async fn dispatch_command(
                     .unwrap_or(crate::output_format::OutputFormat::Table);
                 contract_dependency::run(&cli.api_url, &address, depth, fmt, summary).await?;
             }
+            ContractCommands::Category { action } => match action {
+                CategoryCommands::List {
+                    network,
+                    format,
+                    export,
+                } => {
+                    log::debug!(
+                        "Command: contract category list | network={:?} format={}",
+                        network,
+                        format
+                    );
+                    let fmt = crate::output_format::validate_format(&format)?;
+                    category::list(&cli.api_url, network.as_deref(), fmt, export.as_deref()).await?;
+                }
+                CategoryCommands::Stats {
+                    network,
+                    format,
+                    export,
+                } => {
+                    log::debug!(
+                        "Command: contract category stats | network={:?} format={}",
+                        network,
+                        format
+                    );
+                    let fmt = crate::output_format::validate_format(&format)?;
+                    category::stats(&cli.api_url, network.as_deref(), fmt, export.as_deref())
+                        .await?;
+                }
+            },
             ContractCommands::Update {
                 address,
                 name,

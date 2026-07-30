@@ -252,7 +252,9 @@ pub async fn deprecate_contract(
 
     let reason = req.deprecated_reason.clone().or_else(|| req.notes.clone());
 
-    if req.migration_guide_url.is_none() && req.replacement_contract_id.is_none() && reason.is_none()
+    if req.migration_guide_url.is_none()
+        && req.replacement_contract_id.is_none()
+        && reason.is_none()
     {
         return Err(ApiError::bad_request(
             "MissingMigrationPath",
@@ -348,13 +350,12 @@ pub async fn deprecate_contract(
     // ── Emit contract.deprecated webhook (best-effort) ────────────────────────
     // Fetch the publisher_id for this contract so we can route the webhook to
     // the correct set of subscriptions.
-    if let Ok(publisher_id) = sqlx::query_scalar::<_, uuid::Uuid>(
-        "SELECT publisher_id FROM contracts WHERE id = $1",
-    )
-    .bind(contract_uuid)
-    .fetch_optional(&state.db)
-    .await
-    .map(|opt| opt.unwrap_or(uuid::Uuid::nil()))
+    if let Ok(publisher_id) =
+        sqlx::query_scalar::<_, uuid::Uuid>("SELECT publisher_id FROM contracts WHERE id = $1")
+            .bind(contract_uuid)
+            .fetch_optional(&state.db)
+            .await
+            .map(|opt| opt.unwrap_or(uuid::Uuid::nil()))
     {
         if !publisher_id.is_nil() {
             crate::webhook_events::emit_webhook_event(
@@ -403,13 +404,12 @@ pub async fn undeprecate_contract(
 ) -> ApiResult<Json<DeprecationInfo>> {
     let (contract_uuid, contract_id) = fetch_contract_identity(&state, &id).await?;
 
-    let is_deprecated: bool = sqlx::query_scalar(
-        "SELECT COALESCE(is_deprecated, FALSE) FROM contracts WHERE id = $1",
-    )
-    .bind(contract_uuid)
-    .fetch_one(&state.db)
-    .await
-    .map_err(|err| db_internal_error("fetch is_deprecated", err))?;
+    let is_deprecated: bool =
+        sqlx::query_scalar("SELECT COALESCE(is_deprecated, FALSE) FROM contracts WHERE id = $1")
+            .bind(contract_uuid)
+            .fetch_one(&state.db)
+            .await
+            .map_err(|err| db_internal_error("fetch is_deprecated", err))?;
 
     if !is_deprecated {
         return get_deprecation_info(State(state), Path(contract_id)).await;
@@ -753,12 +753,13 @@ async fn fetch_contract_uuid(state: &AppState, contract_id: &str) -> ApiResult<U
 }
 
 async fn resolve_contract_selector(state: &AppState, id: Uuid) -> ApiResult<String> {
-    let selector = sqlx::query_scalar::<_, String>("SELECT contract_id FROM contracts WHERE id = $1")
-        .bind(id)
-        .fetch_optional(&state.db)
-        .await
-        .map_err(|err| db_internal_error("resolve replacement selector", err))?
-        .unwrap_or_else(|| id.to_string());
+    let selector =
+        sqlx::query_scalar::<_, String>("SELECT contract_id FROM contracts WHERE id = $1")
+            .bind(id)
+            .fetch_optional(&state.db)
+            .await
+            .map_err(|err| db_internal_error("resolve replacement selector", err))?
+            .unwrap_or_else(|| id.to_string());
     Ok(selector)
 }
 

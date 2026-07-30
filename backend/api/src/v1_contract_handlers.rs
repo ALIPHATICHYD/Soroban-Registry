@@ -154,12 +154,8 @@ pub async fn get_contract_metadata_v1(
 
     // Issue #1061: attach a deprecation warning so callers are notified without
     // requiring a separate request to /deprecation-info.
-    let deprecation_warning = crate::deprecation_handlers::build_deprecation_warning(
-        &state,
-        contract_uuid,
-        None,
-    )
-    .await;
+    let deprecation_warning =
+        crate::deprecation_handlers::build_deprecation_warning(&state, contract_uuid, None).await;
 
     let response = json!({
         "id": contract.id,

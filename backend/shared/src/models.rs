@@ -216,7 +216,9 @@ pub struct NetworkHealthResponse {
 }
 
 /// Network where the contract is deployed
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, sqlx::Type, utoipa::ToSchema, PartialEq, Eq)]
+#[derive(
+    Debug, Clone, Copy, Serialize, Deserialize, sqlx::Type, utoipa::ToSchema, PartialEq, Eq,
+)]
 #[sqlx(type_name = "network_type", rename_all = "lowercase")]
 #[serde(rename_all = "lowercase")]
 pub enum Network {
@@ -246,7 +248,9 @@ fn parse_network_value<E: de::Error>(value: &str) -> Result<Network, E> {
     }
 }
 
-pub fn deserialize_optional_networks<'de, D>(deserializer: D) -> Result<Option<Vec<Network>>, D::Error>
+pub fn deserialize_optional_networks<'de, D>(
+    deserializer: D,
+) -> Result<Option<Vec<Network>>, D::Error>
 where
     D: serde::Deserializer<'de>,
 {

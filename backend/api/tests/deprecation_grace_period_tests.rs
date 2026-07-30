@@ -77,11 +77,7 @@ async fn test_deprecated_contract_still_resolvable() {
         .await
         .expect("deprecate request");
 
-    assert_eq!(
-        dep_res.status(),
-        StatusCode::OK,
-        "deprecate should succeed"
-    );
+    assert_eq!(dep_res.status(), StatusCode::OK, "deprecate should succeed");
 
     // The contract must still be resolvable (200) from the main GET endpoint
     let get_res = client

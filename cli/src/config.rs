@@ -61,6 +61,24 @@ struct ConfigFile {
     current_profile: Option<String>,
     defaults: Option<DefaultsSection>,
     profiles: Option<std::collections::HashMap<String, DefaultsSection>>,
+    auth: Option<AuthSection>,
+}
+
+/// Optional `[auth]` section of `config.toml`, used by `publisher doctor` to
+/// diagnose local publishing setup. Both fields are optional so an absent
+/// section (or absent config file) resolves to `AuthSection::default()`.
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+pub struct AuthSection {
+    pub session_token: Option<String>,
+    pub signing_key_path: Option<String>,
+}
+
+/// Load the `[auth]` section from the user's config file, if present.
+///
+/// Returns `None` when there is no config file or no `[auth]` section, so
+/// callers can `unwrap_or_default()` for a clean "nothing configured" state.
+pub fn load_auth_section() -> Option<AuthSection> {
+    load_config_file_safely().ok().and_then(|cfg| cfg.auth)
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]

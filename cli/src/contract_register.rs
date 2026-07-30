@@ -398,6 +398,9 @@ async fn resolve_drafts(
             request: PublishRequest {
                 contract_id,
                 wasm_hash,
+                // Registration records metadata only; the WASM artifact is
+                // uploaded separately, so it stays quarantined until then.
+                wasm_artifact_base64: None,
                 name,
                 slug,
                 description,

@@ -114,7 +114,9 @@ pub fn validate_wasm(wasm_bytes: &[u8]) -> WasmValidationResult {
     }
 
     let has_contract_spec = custom_sections.iter().any(|s| s == CONTRACT_SPEC_SECTION);
-    let has_env_meta = custom_sections.iter().any(|s| s == CONTRACT_ENV_META_SECTION);
+    let has_env_meta = custom_sections
+        .iter()
+        .any(|s| s == CONTRACT_ENV_META_SECTION);
 
     // Valid = structurally parseable AND has at least one function.
     let valid = errors.is_empty();
@@ -165,7 +167,10 @@ mod tests {
     fn parses_minimal_wasm_without_parse_errors() {
         let result = validate_wasm(MINIMAL_WASM);
         assert!(
-            !result.errors.iter().any(|e| e.contains("WASM parsing error")),
+            !result
+                .errors
+                .iter()
+                .any(|e| e.contains("WASM parsing error")),
             "unexpected parse errors: {:?}",
             result.errors
         );
