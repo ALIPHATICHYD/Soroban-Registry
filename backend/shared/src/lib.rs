@@ -1,4 +1,5 @@
 pub mod abi;
+pub mod contract_spec;
 pub mod error;
 pub mod logging;
 pub mod models;
