@@ -448,6 +448,9 @@ _soroban-registry() {
             soroban__registry__subcmd__contract,import)
                 cmd="soroban__registry__subcmd__contract__subcmd__import"
                 ;;
+            soroban__registry__subcmd__contract,inspect-spec)
+                cmd="soroban__registry__subcmd__contract__subcmd__inspect__subcmd__spec"
+                ;;
             soroban__registry__subcmd__contract,interaction)
                 cmd="soroban__registry__subcmd__contract__subcmd__interaction"
                 ;;
@@ -504,6 +507,9 @@ _soroban-registry() {
                 ;;
             soroban__registry__subcmd__contract__subcmd__help,import)
                 cmd="soroban__registry__subcmd__contract__subcmd__help__subcmd__import"
+                ;;
+            soroban__registry__subcmd__contract__subcmd__help,inspect-spec)
+                cmd="soroban__registry__subcmd__contract__subcmd__help__subcmd__inspect__subcmd__spec"
                 ;;
             soroban__registry__subcmd__contract__subcmd__help,interaction)
                 cmd="soroban__registry__subcmd__contract__subcmd__help__subcmd__interaction"
@@ -891,6 +897,9 @@ _soroban-registry() {
                 ;;
             soroban__registry__subcmd__help__subcmd__contract,import)
                 cmd="soroban__registry__subcmd__help__subcmd__contract__subcmd__import"
+                ;;
+            soroban__registry__subcmd__help__subcmd__contract,inspect-spec)
+                cmd="soroban__registry__subcmd__help__subcmd__contract__subcmd__inspect__subcmd__spec"
                 ;;
             soroban__registry__subcmd__help__subcmd__contract,interaction)
                 cmd="soroban__registry__subcmd__help__subcmd__contract__subcmd__interaction"
@@ -4039,7 +4048,7 @@ _soroban-registry() {
             return 0
             ;;
         soroban__subcmd__registry__subcmd__contract)
-            opts="-v -h --api-url --network --timeout --profile --no-cache --verbose --check-updates --describe --help publish snapshot verify-snapshot risk deploy register verify details stats export highlight interaction dependency update import rollback audit deprecate help"
+            opts="-v -h --api-url --network --timeout --profile --no-cache --verbose --check-updates --describe --help publish snapshot verify-snapshot risk deploy register verify details stats export highlight interaction dependency update import rollback audit deprecate inspect-spec help"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 2 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
@@ -4341,7 +4350,7 @@ _soroban-registry() {
             return 0
             ;;
         soroban__subcmd__registry__subcmd__contract__subcmd__help)
-            opts="publish snapshot verify-snapshot risk deploy register verify details stats export highlight interaction dependency update import rollback audit deprecate help"
+            opts="publish snapshot verify-snapshot risk deploy register verify details stats export highlight interaction dependency update import rollback audit deprecate inspect-spec help"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
@@ -4467,6 +4476,20 @@ _soroban-registry() {
             return 0
             ;;
         soroban__subcmd__registry__subcmd__contract__subcmd__help__subcmd__import)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        soroban__subcmd__registry__subcmd__contract__subcmd__help__subcmd__inspect__subcmd__spec)
             opts=""
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
@@ -4693,6 +4716,36 @@ _soroban-registry() {
                     COMPREPLY=($(compgen -f "${cur}"))
                     return 0
                     ;;
+                --api-url)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                --network)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                --timeout)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                --profile)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        soroban__subcmd__registry__subcmd__contract__subcmd__inspect__subcmd__spec)
+            opts="-v -h --json --api-url --network --timeout --profile --no-cache --verbose --check-updates --describe --help"
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
                 --api-url)
                     COMPREPLY=($(compgen -f "${cur}"))
                     return 0
@@ -6515,7 +6568,7 @@ _soroban-registry() {
             return 0
             ;;
         soroban__subcmd__registry__subcmd__help__subcmd__contract)
-            opts="publish snapshot verify-snapshot risk deploy register verify details stats export highlight interaction dependency update import rollback audit deprecate"
+            opts="publish snapshot verify-snapshot risk deploy register verify details stats export highlight interaction dependency update import rollback audit deprecate inspect-spec"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
@@ -6627,6 +6680,20 @@ _soroban-registry() {
             return 0
             ;;
         soroban__subcmd__registry__subcmd__help__subcmd__contract__subcmd__import)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        soroban__subcmd__registry__subcmd__help__subcmd__contract__subcmd__inspect__subcmd__spec)
             opts=""
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )

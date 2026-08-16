@@ -2347,6 +2347,7 @@ Register-ArgumentCompleter -Native -CommandName 'soroban-registry' -ScriptBlock 
             [CompletionResult]::new('rollback', 'rollback', [CompletionResultType]::ParameterValue, 'Rollback a deprecated contract to active state (#1091)')
             [CompletionResult]::new('audit', 'audit', [CompletionResultType]::ParameterValue, 'Detect drift between local lockfile and registry state (#1060)')
             [CompletionResult]::new('deprecate', 'deprecate', [CompletionResultType]::ParameterValue, 'Deprecate a contract with publisher-signed authorization (#1091)')
+            [CompletionResult]::new('inspect-spec', 'inspect-spec', [CompletionResultType]::ParameterValue, 'Inspect embedded Soroban contract specification in a local WASM binary (#1142)')
             [CompletionResult]::new('help', 'help', [CompletionResultType]::ParameterValue, 'Print this message or the help of the given subcommand(s)')
             break
         }
@@ -2700,6 +2701,21 @@ Register-ArgumentCompleter -Native -CommandName 'soroban-registry' -ScriptBlock 
             [CompletionResult]::new('--help', '--help', [CompletionResultType]::ParameterName, 'Print help (see more with ''--help'')')
             break
         }
+        'soroban-registry;contract;inspect-spec' {
+            [CompletionResult]::new('--api-url', '--api-url', [CompletionResultType]::ParameterName, 'Registry API URL')
+            [CompletionResult]::new('--network', '--network', [CompletionResultType]::ParameterName, 'Stellar network to use (mainnet | testnet | futurenet)')
+            [CompletionResult]::new('--timeout', '--timeout', [CompletionResultType]::ParameterName, 'Global timeout for network/API operations (seconds)')
+            [CompletionResult]::new('--profile', '--profile', [CompletionResultType]::ParameterName, 'Registry configuration profile to use')
+            [CompletionResult]::new('--json', '--json', [CompletionResultType]::ParameterName, 'Output inspection summary as machine-readable JSON')
+            [CompletionResult]::new('--no-cache', '--no-cache', [CompletionResultType]::ParameterName, 'Skip local response cache and always fetch fresh data')
+            [CompletionResult]::new('-v', '-v', [CompletionResultType]::ParameterName, 'Enable verbose output. Repeat to increase verbosity (-v, -vv, -vvv)')
+            [CompletionResult]::new('--verbose', '--verbose', [CompletionResultType]::ParameterName, 'Enable verbose output. Repeat to increase verbosity (-v, -vv, -vvv)')
+            [CompletionResult]::new('--check-updates', '--check-updates', [CompletionResultType]::ParameterName, 'Check for CLI updates before running the command')
+            [CompletionResult]::new('--describe', '--describe', [CompletionResultType]::ParameterName, 'Print machine-readable JSON command schema description (#1145)')
+            [CompletionResult]::new('-h', '-h', [CompletionResultType]::ParameterName, 'Print help (see more with ''--help'')')
+            [CompletionResult]::new('--help', '--help', [CompletionResultType]::ParameterName, 'Print help (see more with ''--help'')')
+            break
+        }
         'soroban-registry;contract;help' {
             [CompletionResult]::new('publish', 'publish', [CompletionResultType]::ParameterValue, 'Publish a contract with optional policy-as-code admission evaluation (#1148)')
             [CompletionResult]::new('snapshot', 'snapshot', [CompletionResultType]::ParameterValue, 'Export a signed, offline-verifiable snapshot of a contract (#1116)')
@@ -2719,6 +2735,7 @@ Register-ArgumentCompleter -Native -CommandName 'soroban-registry' -ScriptBlock 
             [CompletionResult]::new('rollback', 'rollback', [CompletionResultType]::ParameterValue, 'Rollback a deprecated contract to active state (#1091)')
             [CompletionResult]::new('audit', 'audit', [CompletionResultType]::ParameterValue, 'Detect drift between local lockfile and registry state (#1060)')
             [CompletionResult]::new('deprecate', 'deprecate', [CompletionResultType]::ParameterValue, 'Deprecate a contract with publisher-signed authorization (#1091)')
+            [CompletionResult]::new('inspect-spec', 'inspect-spec', [CompletionResultType]::ParameterValue, 'Inspect embedded Soroban contract specification in a local WASM binary (#1142)')
             [CompletionResult]::new('help', 'help', [CompletionResultType]::ParameterValue, 'Print this message or the help of the given subcommand(s)')
             break
         }
@@ -2774,6 +2791,9 @@ Register-ArgumentCompleter -Native -CommandName 'soroban-registry' -ScriptBlock 
             break
         }
         'soroban-registry;contract;help;deprecate' {
+            break
+        }
+        'soroban-registry;contract;help;inspect-spec' {
             break
         }
         'soroban-registry;contract;help;help' {
@@ -4484,6 +4504,7 @@ Register-ArgumentCompleter -Native -CommandName 'soroban-registry' -ScriptBlock 
             [CompletionResult]::new('rollback', 'rollback', [CompletionResultType]::ParameterValue, 'Rollback a deprecated contract to active state (#1091)')
             [CompletionResult]::new('audit', 'audit', [CompletionResultType]::ParameterValue, 'Detect drift between local lockfile and registry state (#1060)')
             [CompletionResult]::new('deprecate', 'deprecate', [CompletionResultType]::ParameterValue, 'Deprecate a contract with publisher-signed authorization (#1091)')
+            [CompletionResult]::new('inspect-spec', 'inspect-spec', [CompletionResultType]::ParameterValue, 'Inspect embedded Soroban contract specification in a local WASM binary (#1142)')
             break
         }
         'soroban-registry;help;contract;publish' {
@@ -4538,6 +4559,9 @@ Register-ArgumentCompleter -Native -CommandName 'soroban-registry' -ScriptBlock 
             break
         }
         'soroban-registry;help;contract;deprecate' {
+            break
+        }
+        'soroban-registry;help;contract;inspect-spec' {
             break
         }
         'soroban-registry;help;api-key' {

@@ -135,6 +135,19 @@ pub fn validate_wasm(wasm_bytes: &[u8]) -> WasmValidationResult {
     }
 }
 
+/// Extract payload bytes of a named custom section from a WASM binary.
+pub fn extract_custom_section(wasm_bytes: &[u8], target_name: &str) -> Option<Vec<u8>> {
+    let parser = Parser::new(0);
+    for payload in parser.parse_all(wasm_bytes) {
+        if let Ok(wasmparser::Payload::CustomSection(c)) = payload {
+            if c.name() == target_name {
+                return Some(c.data().to_vec());
+            }
+        }
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

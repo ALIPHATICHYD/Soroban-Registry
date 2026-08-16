@@ -28,6 +28,7 @@ mod contract_audit;
 mod contract_dependency;
 mod contract_deploy;
 mod contract_deprecate;
+mod contract_inspect_spec;
 mod contract_snapshot;
 mod contract_highlight;
 mod contract_interaction;
@@ -2423,6 +2424,17 @@ pub enum ContractCommands {
         #[arg(long)]
         json: bool,
     },
+
+    /// Inspect embedded Soroban contract specification in a local WASM binary (#1142)
+    #[command(name = "inspect-spec")]
+    InspectSpec {
+        /// Path to local WASM binary file
+        wasm_file: String,
+
+        /// Output inspection summary as machine-readable JSON
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 /// Sub-commands for the `api-key` group (#842)
@@ -4757,6 +4769,10 @@ pub async fn dispatch_command(
                     json,
                 )
                 .await?;
+            }
+            ContractCommands::InspectSpec { wasm_file, json } => {
+                log::debug!("Command: contract inspect-spec | wasm_file={}", wasm_file);
+                contract_inspect_spec::run_inspect_spec(&wasm_file, json).await?;
             }
         },
         Commands::ApiKey { action } => match action {
