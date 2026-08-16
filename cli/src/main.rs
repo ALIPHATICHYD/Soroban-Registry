@@ -77,9 +77,10 @@ mod wizard;
 mod diagnostic;
 mod output_format;
 mod search;
+mod describe;
 
 use anyhow::Result;
-use clap::{ArgAction, Parser, Subcommand, ValueEnum};
+use clap::{ArgAction, CommandFactory, Parser, Subcommand, ValueEnum};
 use colored::Colorize;
 use patch::Severity;
 
@@ -124,6 +125,10 @@ pub struct Cli {
     /// Check for CLI updates before running the command.
     #[arg(long, global = true)]
     pub check_updates: bool,
+
+    /// Print machine-readable JSON command schema description (#1145)
+    #[arg(long, global = true)]
+    pub describe: bool,
 
     #[command(subcommand)]
     pub command: Commands,
@@ -337,6 +342,18 @@ pub enum Commands {
         /// Target shell
         #[arg(value_enum)]
         shell: completion::CompletionShell,
+    },
+
+    /// Generate or verify CLI command schemas and shell completion scripts (#1145)
+    #[command(name = "generate-artifacts")]
+    GenerateArtifacts {
+        /// Verify that existing generated artifacts are up to date (fails CI on drift)
+        #[arg(long)]
+        check: bool,
+
+        /// Target output directory for generated artifacts
+        #[arg(long)]
+        output_dir: Option<String>,
     },
 
     /// Check CLI version and update availability
@@ -2876,6 +2893,11 @@ pub enum UpgradeSubcommands {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    let root_cmd = Cli::command();
+    if describe::process_describe_if_requested(&root_cmd)? {
+        return Ok(());
+    }
+
     let mut cli = Cli::parse();
 
     if cli.check_updates {
@@ -3167,6 +3189,10 @@ pub async fn dispatch_command(
         Commands::Completion { shell } => {
             completion::generate_script(shell);
             eprintln!("\n{}", completion::install_hint(shell));
+        }
+        Commands::GenerateArtifacts { check, output_dir } => {
+            let path = output_dir.as_deref().map(std::path::Path::new);
+            describe::generate_or_check_artifacts(check, path)?;
         }
         Commands::Analytics {
             query,
