@@ -54,6 +54,9 @@ pub struct SnapshotPayload {
     /// been deprecated.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub deprecation: Option<Value>,
+    /// Policy admission decision metadata, absent when no policy evaluation was attached.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub policy_evaluation: Option<Value>,
     /// Successor chain, oldest first, built by following
     /// `replacement_contract_id` transitively. Empty when nothing supersedes
     /// this contract.
@@ -322,6 +325,7 @@ mod tests {
             },
             dependency_scan: Some(serde_json::json!({"findings": [], "scanned": true})),
             deprecation: None,
+            policy_evaluation: None,
             lineage: vec![LineageLink {
                 contract_id: "CBBBB".into(),
                 name: Some("token-v2".into()),

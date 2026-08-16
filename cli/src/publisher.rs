@@ -51,8 +51,9 @@ pub async fn doctor(api_url: &str, json: bool) -> Result<()> {
     }
 
     // 2. Check Auth / Session state
-    let auth = crate::config::load_auth_section().unwrap_or_default();
-    if let Some(token) = &auth.session_token {
+    let user_cfg = crate::user_config::load().ok();
+    let token = user_cfg.and_then(|c| c.api_key);
+    if let Some(token) = &token {
         if !token.trim().is_empty() {
             report.session_valid = true;
             if !json {
@@ -65,15 +66,15 @@ pub async fn doctor(api_url: &str, json: bool) -> Result<()> {
             }
         }
     } else {
-        report.errors.push("No session token found. Publisher may not be able to authenticate.".into());
+        report.errors.push("No active session or API token found.".into());
         if !json {
-            println!("  {} No session token found", "[ERR]".red());
+            println!("  {} No active session or token found", "[ERR]".red());
         }
     }
 
     // 3. Check Signing Key presence
-    if let Some(key_path) = &auth.signing_key_path {
-        if Path::new(key_path).exists() {
+    if let Ok(key_path) = std::env::var("SOROBAN_SIGNING_KEY_PATH") {
+        if Path::new(&key_path).exists() {
             report.signing_key_present = true;
             if !json {
                 println!("  {} Signing key found at: {}", "[OK]".green(), key_path);
@@ -81,14 +82,11 @@ pub async fn doctor(api_url: &str, json: bool) -> Result<()> {
         } else {
             report.errors.push(format!("Signing key file not found at: {}", key_path));
             if !json {
-                println!("  {} Signing key file missing at: {}", "[ERR]".red(), key_path);
+                println!("  {} Signing key file not found: {}", "[ERR]".red(), key_path);
             }
         }
-    } else {
-        report.errors.push("No signing key configured. Please set 'signing_key_path' in your config.".into());
-        if !json {
-            println!("  {} No signing key configured", "[ERR]".red());
-        }
+    } else if !json {
+        println!("  {} No signing key configured (SOROBAN_SIGNING_KEY_PATH)", "[INFO]".yellow());
     }
 
     // 4. Check Registry Connectivity

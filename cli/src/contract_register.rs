@@ -398,6 +398,7 @@ async fn resolve_drafts(
             request: PublishRequest {
                 contract_id,
                 wasm_hash,
+                wasm_artifact_base64: None,
                 name,
                 slug,
                 description,
@@ -408,6 +409,9 @@ async fn resolve_drafts(
                 publisher_address,
                 dependencies,
                 is_cicd,
+                policy: None,
+                dry_run: false,
+                explain: false,
             },
             registry_id: None,
             registry_url: None,

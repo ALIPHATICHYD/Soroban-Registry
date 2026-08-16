@@ -57,7 +57,9 @@ mod notification;
 mod package_signing;
 mod patch;
 mod plugins;
+mod policy;
 mod profiler;
+mod publisher;
 mod release_notes;
 mod shell;
 mod sla;
@@ -209,6 +211,18 @@ pub enum Commands {
         /// Skip pre-submission contract tests
         #[arg(long)]
         skip_tests: bool,
+
+        /// Path to policy-as-code YAML or JSON file (#1148)
+        #[arg(long)]
+        policy: Option<String>,
+
+        /// Display policy evaluation rule details (#1148)
+        #[arg(long)]
+        explain: bool,
+
+        /// Evaluate policy and validate without submitting to registry (#1148)
+        #[arg(long)]
+        dry_run: bool,
     },
 
     /// List contracts in the registry
@@ -861,6 +875,18 @@ pub enum Commands {
     Keys {
         #[command(subcommand)]
         action: KeysCommands,
+    },
+
+    /// Policy-as-code admission evaluation and reporting (#1148)
+    Policy {
+        #[command(subcommand)]
+        action: PolicyCommands,
+    },
+
+    /// Publisher environment diagnostics (#841)
+    Publisher {
+        #[command(subcommand)]
+        action: PublisherCommands,
     },
 
     /// Contract deployment verification and security scan (#522)
@@ -1807,9 +1833,91 @@ pub enum KeysCommands {
     },
 }
 
+/// Sub-commands for the `policy` group (#1148)
+#[derive(Debug, Subcommand)]
+pub enum PolicyCommands {
+    /// Evaluate a policy-as-code file against a contract artifact or context
+    Check {
+        /// Optional path to WASM contract file or project
+        wasm_path: Option<String>,
+
+        /// Path to policy YAML or JSON file
+        #[arg(long, short)]
+        policy: String,
+
+        /// Display detailed evaluation results for each rule
+        #[arg(long)]
+        explain: bool,
+
+        /// Output evaluation results as machine-readable JSON
+        #[arg(long)]
+        json: bool,
+
+        /// Dry-run mode: evaluate policy without submitting
+        #[arg(long)]
+        dry_run: bool,
+    },
+}
+
+/// Sub-commands for the `publisher` group (#841)
+#[derive(Debug, Subcommand)]
+pub enum PublisherCommands {
+    /// Run publisher environment diagnostics
+    Doctor {
+        #[arg(long)]
+        json: bool,
+    },
+}
+
 /// Sub-commands for the `contract` group (#522)
 #[derive(Debug, Subcommand)]
 pub enum ContractCommands {
+    /// Publish a contract with optional policy-as-code admission evaluation (#1148)
+    Publish {
+        /// On-chain contract ID
+        #[arg(long)]
+        contract_id: String,
+
+        /// Human-readable contract name
+        #[arg(long)]
+        name: String,
+
+        /// Optional description
+        #[arg(long)]
+        description: Option<String>,
+
+        /// Network (mainnet, testnet, futurenet)
+        #[arg(long, default_value = "Testnet")]
+        network: String,
+
+        /// Category
+        #[arg(long)]
+        category: Option<String>,
+
+        /// Comma-separated tags
+        #[arg(long)]
+        tags: Option<String>,
+
+        /// Publisher Stellar address
+        #[arg(long)]
+        publisher: String,
+
+        /// Path to contract project directory for preflight testing
+        #[arg(long, default_value = ".")]
+        contract_path: String,
+
+        /// Path to policy-as-code YAML or JSON file (#1148)
+        #[arg(long)]
+        policy: Option<String>,
+
+        /// Display policy evaluation rule details (#1148)
+        #[arg(long)]
+        explain: bool,
+
+        /// Evaluate policy and validate without submitting to registry (#1148)
+        #[arg(long)]
+        dry_run: bool,
+    },
 
     /// Export a signed, offline-verifiable snapshot of a contract (#1116)
     ///
@@ -3106,6 +3214,9 @@ pub async fn dispatch_command(
             require_coverage,
             coverage_threshold,
             skip_tests,
+            policy,
+            explain,
+            dry_run,
         } => {
             let tags_vec = tags
                 .map(|t| t.split(',').map(|s| s.trim().to_string()).collect())
@@ -3116,23 +3227,37 @@ pub async fn dispatch_command(
                 name,
                 tags_vec
             );
-            commands::publish(
-                &cli.api_url,
-                &contract_id,
-                &name,
-                description.as_deref(),
-                network,
-                category.as_deref(),
-                tags_vec,
-                &publisher,
-                false,
-                &contract_path,
-                test_command.as_deref(),
-                require_coverage,
-                coverage_threshold,
-                skip_tests,
-            )
-            .await?;
+
+            if let Some(ref policy_path) = policy {
+                policy::run_policy_check(
+                    Some(contract_path.clone()),
+                    policy_path.clone(),
+                    explain,
+                    false,
+                    dry_run,
+                )
+                .await?;
+            }
+
+            if !dry_run {
+                commands::publish(
+                    &cli.api_url,
+                    &contract_id,
+                    &name,
+                    description.as_deref(),
+                    network,
+                    category.as_deref(),
+                    tags_vec,
+                    &publisher,
+                    false,
+                    &contract_path,
+                    test_command.as_deref(),
+                    require_coverage,
+                    coverage_threshold,
+                    skip_tests,
+                )
+                .await?;
+            }
         }
         Commands::List {
             limit,
@@ -4159,8 +4284,68 @@ pub async fn dispatch_command(
                 webhook::verify_signature_cmd(&secret, &payload, &signature)?;
             }
         },
+        Commands::Policy { action } => match action {
+            PolicyCommands::Check {
+                wasm_path,
+                policy,
+                explain,
+                json,
+                dry_run,
+            } => {
+                policy::run_policy_check(wasm_path, policy, explain, json, dry_run).await?;
+            }
+        },
+
         // ── Contract verify command (#522) ───────────────────────────────────
         Commands::Contract { action } => match action {
+            ContractCommands::Publish {
+                contract_id,
+                name,
+                description,
+                network: _publish_net,
+                category,
+                tags,
+                publisher,
+                contract_path,
+                policy,
+                explain,
+                dry_run,
+            } => {
+                let tags_vec = tags
+                    .map(|t| t.split(',').map(|s| s.trim().to_string()).collect())
+                    .unwrap_or_default();
+
+                if let Some(ref policy_path) = policy {
+                    policy::run_policy_check(
+                        Some(contract_path.clone()),
+                        policy_path.clone(),
+                        explain,
+                        false,
+                        dry_run,
+                    )
+                    .await?;
+                }
+
+                if !dry_run {
+                    commands::publish(
+                        &cli.api_url,
+                        &contract_id,
+                        &name,
+                        description.as_deref(),
+                        network,
+                        category.as_deref(),
+                        tags_vec,
+                        &publisher,
+                        false,
+                        &contract_path,
+                        None,
+                        false,
+                        0.0,
+                        false,
+                    )
+                    .await?;
+                }
+            }
             ContractCommands::Register { file, batch, json } => {
                 log::debug!(
                     "Command: contract register | file={:?} batch={} json={}",

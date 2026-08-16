@@ -196,6 +196,7 @@ pub async fn get_contract_snapshot(
         },
         dependency_scan,
         deprecation,
+        policy_evaluation: None,
         lineage,
     };
 

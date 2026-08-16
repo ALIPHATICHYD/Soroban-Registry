@@ -313,6 +313,7 @@ pub fn contract_routes() -> Router<AppState> {
             "/api/contracts",
             get(handlers::list_contracts).post(handlers::publish_contract),
         )
+        .route("/api/policy/check", post(handlers::check_policy))
         .route("/api/contracts/tags", get(handlers::list_tags))
         .route(
             "/api/contracts/export",

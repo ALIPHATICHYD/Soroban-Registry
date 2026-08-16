@@ -4648,6 +4648,34 @@ pub async fn publish_contract(
     result
 }
 
+pub async fn check_policy(
+    Json(req): Json<shared::models::PolicyCheckRequest>,
+) -> ApiResult<Json<shared::models::PolicyCheckResponse>> {
+    let ctx = req.context.unwrap_or_default();
+    let policy_str = req.policy.ok_or_else(|| {
+        ApiError::bad_request("MissingPolicy", "A policy definition must be provided")
+    })?;
+
+    let policy_def = shared::policy::PolicyDefinition::from_yaml(&policy_str)
+        .or_else(|_| shared::policy::PolicyDefinition::from_json(&policy_str))
+        .map_err(|err| {
+            ApiError::unprocessable(
+                "PolicyEvaluationFailed",
+                format!("Failed to parse admission policy: {err}"),
+            )
+        })?;
+
+    let evaluation = shared::policy::PolicyEvaluator::evaluate(&policy_def, &ctx)
+        .map_err(|err| {
+            ApiError::unprocessable(
+                "PolicyEvaluationFailed",
+                format!("Policy evaluation failed: {err}"),
+            )
+        })?;
+
+    Ok(Json(shared::models::PolicyCheckResponse { evaluation }))
+}
+
 async fn publish_contract_inner(
     state: &AppState,
     headers: &HeaderMap,
@@ -4671,6 +4699,106 @@ async fn publish_contract_inner(
         },
     };
     let wasm_hash = req.wasm_hash.clone();
+
+    let artifact_bytes_len = req
+        .wasm_artifact_base64
+        .as_deref()
+        .map(|s| (s.len() * 3) / 4)
+        .unwrap_or(0) as u64;
+
+    let admission_ctx = shared::policy::AdmissionContext {
+        artifact: shared::policy::ArtifactContext {
+            signature_verified: req.wasm_artifact_base64.is_some(),
+            size: artifact_bytes_len,
+            hash: req.wasm_hash.clone(),
+            is_wasm: true,
+        },
+        verification: shared::policy::VerificationContext {
+            state: "unverified".to_string(),
+            verified: false,
+        },
+        provenance: shared::policy::ProvenanceContext {
+            present: req.is_cicd,
+            builder_image: None,
+            reproducible: false,
+        },
+        vulnerabilities: shared::policy::VulnerabilityContext {
+            count: if artifact_scan.status == "failed" { 1 } else { 0 },
+            critical_count: if artifact_scan.status == "failed" { 1 } else { 0 },
+            high_count: 0,
+        },
+        risk: shared::policy::RiskContext {
+            max_severity: if artifact_scan.status == "failed" {
+                "critical".to_string()
+            } else {
+                "none".to_string()
+            },
+            score: if artifact_scan.status == "failed" { 9.0 } else { 0.0 },
+        },
+        dependency: shared::policy::DependencyContext {
+            revoked_count: 0,
+            has_revoked: false,
+            risk_score: 0.0,
+        },
+        interface: shared::policy::InterfaceContext {
+            compatible: true,
+            breaking_changes: 0,
+        },
+        network: shared::policy::NetworkContext {
+            identity: req.network.to_string(),
+            passphrase: None,
+        },
+        metadata: shared::policy::MetadataContext {
+            complete: req.description.is_some() && req.category.is_some(),
+            completeness: if req.description.is_some() { 0.8 } else { 0.5 },
+            has_readme: false,
+            has_license: false,
+            has_repository: req.source_url.is_some(),
+            has_version: true,
+        },
+    };
+
+    let _policy_eval_result = if let Some(ref policy_str) = req.policy {
+        let policy_def = shared::policy::PolicyDefinition::from_yaml(policy_str)
+            .or_else(|_| shared::policy::PolicyDefinition::from_json(policy_str))
+            .map_err(|err| {
+                ApiError::unprocessable(
+                    "PolicyEvaluationFailed",
+                    format!("Failed to parse admission policy: {err}"),
+                )
+            })?;
+
+        let eval_res = shared::policy::PolicyEvaluator::evaluate(&policy_def, &admission_ctx)
+            .map_err(|err| {
+                ApiError::unprocessable(
+                    "PolicyEvaluationFailed",
+                    format!("Policy evaluation failed: {err}"),
+                )
+            })?;
+
+        if !eval_res.allowed {
+            return Err(ApiError::unprocessable(
+                "PolicyAdmissionDenied",
+                format!(
+                    "Contract admission denied by policy: {}",
+                    eval_res.reasons.join("; ")
+                ),
+            )
+            .with_details(serde_json::to_value(&eval_res).unwrap_or_default()));
+        }
+
+        if req.dry_run {
+            return Err(ApiError::bad_request(
+                "DryRunPolicyEvaluation",
+                "Policy dry-run evaluated successfully without publishing",
+            )
+            .with_details(serde_json::to_value(&eval_res).unwrap_or_default()));
+        }
+
+        Some(eval_res)
+    } else {
+        None
+    };
 
     // Duplicate detection (Issue #953): a contract is uniquely identified by
     // (contract_id, network). If one is already registered, this is either a
