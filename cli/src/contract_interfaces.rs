@@ -31,17 +31,13 @@ pub async fn run_local(wasm_path: &str, json: bool) -> Result<()> {
         anyhow::bail!("WASM file is empty: {}", wasm_path);
     }
 
-    let validation = shared::wasm::validate_wasm(&bytes);
-    if !validation.has_contract_spec {
-        anyhow::bail!(
+    let spec_bytes = shared::wasm::extract_contract_spec_bytes(&bytes).ok_or_else(|| {
+        anyhow::anyhow!(
             "No {} section found: this WASM does not embed a Soroban contract spec, \
              so no interface fingerprint can be derived.",
             shared::wasm::CONTRACT_SPEC_SECTION
-        );
-    }
-
-    let spec_bytes = shared::wasm::extract_contract_spec_bytes(&bytes)
-        .expect("has_contract_spec is true, so the section must be extractable");
+        )
+    })?;
 
     let entries = shared::contract_spec::parse_contract_spec(&spec_bytes).map_err(|e| {
         anyhow::anyhow!(
