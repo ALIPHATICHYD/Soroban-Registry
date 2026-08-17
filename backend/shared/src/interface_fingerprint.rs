@@ -17,6 +17,7 @@ use crate::contract_spec::{
     ScSpecUdtUnionCaseV0,
 };
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 use sha2::{Digest, Sha256};
 
 pub const ALGORITHM: &str = "soroban-interface-v1";
@@ -78,11 +79,16 @@ fn canonical_union_case(case: &ScSpecUdtUnionCaseV0) -> String {
     }
 }
 
-/// Build the canonical signature and derived fingerprint for a single spec
-/// entry. Returns `None` for entry variants that carry no independent
-/// identity (there are none today, but this keeps the mapping total and
-/// future-proof).
-fn fingerprint_entry(entry: &ScSpecEntry) -> (EntryKind, String, String) {
+/// Build the human-readable signature, and the structured (collision-safe)
+/// hash input, for a single spec entry.
+///
+/// The hash input is a `serde_json::Value` rather than a hand-joined
+/// string: joining fields with plain delimiters (e.g. `,`/`:`) is not safe
+/// because a name or UDT type reference could itself contain those
+/// characters, letting two structurally different entries serialize to the
+/// same joined string. JSON's own escaping and structural nesting rules out
+/// that collision regardless of what the individual strings contain.
+fn fingerprint_entry(entry: &ScSpecEntry) -> (EntryKind, String, String, serde_json::Value) {
     match entry {
         ScSpecEntry::FunctionV0(f) => {
             let inputs: Vec<String> = f
@@ -97,7 +103,12 @@ fn fingerprint_entry(entry: &ScSpecEntry) -> (EntryKind, String, String) {
                 inputs.join(","),
                 outputs.join(",")
             );
-            (EntryKind::Function, f.name.clone(), sig)
+            let hash_input = json!({
+                "fn": f.name,
+                "in": f.inputs.iter().map(|i| json!([i.name, canonical_type(&i.type_def)])).collect::<Vec<_>>(),
+                "out": outputs,
+            });
+            (EntryKind::Function, f.name.clone(), sig, hash_input)
         }
         ScSpecEntry::UdtStructV0(s) => {
             let fields: Vec<String> = s
@@ -106,37 +117,58 @@ fn fingerprint_entry(entry: &ScSpecEntry) -> (EntryKind, String, String) {
                 .map(|field| format!("{}:{}", field.name, canonical_type(&field.type_def)))
                 .collect();
             let sig = format!("struct {} {{{}}}", s.name, fields.join(","));
-            (EntryKind::Type, s.name.clone(), sig)
+            let hash_input = json!({
+                "struct": s.name,
+                "fields": s.fields.iter().map(|field| json!([field.name, canonical_type(&field.type_def)])).collect::<Vec<_>>(),
+            });
+            (EntryKind::Type, s.name.clone(), sig, hash_input)
         }
         ScSpecEntry::UdtUnionV0(u) => {
-            let mut cases: Vec<String> = u.cases.iter().map(canonical_union_case).collect();
+            let cases: Vec<String> = u.cases.iter().map(canonical_union_case).collect();
+            let sig = format!("union {} {{{}}}", u.name, cases.join(","));
             // Union case order is part of the wire ABI (it is the
             // discriminant), so it is preserved rather than sorted.
-            let _ = &mut cases;
-            let sig = format!("union {} {{{}}}", u.name, cases.join(","));
-            (EntryKind::Type, u.name.clone(), sig)
+            let hash_input = json!({
+                "union": u.name,
+                "cases": u.cases.iter().map(|case| match case {
+                    ScSpecUdtUnionCaseV0::Void { name, .. } => json!(["void", name, []]),
+                    ScSpecUdtUnionCaseV0::Tuple { name, types, .. } => {
+                        let types: Vec<String> = types.iter().map(canonical_type).collect();
+                        json!(["tuple", name, types])
+                    }
+                }).collect::<Vec<_>>(),
+            });
+            (EntryKind::Type, u.name.clone(), sig, hash_input)
         }
         ScSpecEntry::UdtEnumV0(e) => {
             let mut cases: Vec<(u32, &str)> =
                 e.cases.iter().map(|c| (c.value, c.name.as_str())).collect();
             cases.sort_by_key(|(v, _)| *v);
-            let cases: Vec<String> = cases
-                .into_iter()
+            let sig_cases: Vec<String> = cases
+                .iter()
                 .map(|(v, name)| format!("{name}={v}"))
                 .collect();
-            let sig = format!("enum {} {{{}}}", e.name, cases.join(","));
-            (EntryKind::Type, e.name.clone(), sig)
+            let sig = format!("enum {} {{{}}}", e.name, sig_cases.join(","));
+            let hash_input = json!({
+                "enum": e.name,
+                "cases": cases.iter().map(|(v, name)| json!([name, v])).collect::<Vec<_>>(),
+            });
+            (EntryKind::Type, e.name.clone(), sig, hash_input)
         }
         ScSpecEntry::UdtErrorEnumV0(e) => {
             let mut cases: Vec<(u32, &str)> =
                 e.cases.iter().map(|c| (c.value, c.name.as_str())).collect();
             cases.sort_by_key(|(v, _)| *v);
-            let cases: Vec<String> = cases
-                .into_iter()
+            let sig_cases: Vec<String> = cases
+                .iter()
                 .map(|(v, name)| format!("{name}={v}"))
                 .collect();
-            let sig = format!("error {} {{{}}}", e.name, cases.join(","));
-            (EntryKind::Error, e.name.clone(), sig)
+            let sig = format!("error {} {{{}}}", e.name, sig_cases.join(","));
+            let hash_input = json!({
+                "error": e.name,
+                "cases": cases.iter().map(|(v, name)| json!([name, v])).collect::<Vec<_>>(),
+            });
+            (EntryKind::Error, e.name.clone(), sig, hash_input)
         }
         ScSpecEntry::EventV0(ev) => {
             let params: Vec<String> = ev
@@ -163,7 +195,19 @@ fn fingerprint_entry(entry: &ScSpecEntry) -> (EntryKind, String, String) {
                 params.join(","),
                 format_tag
             );
-            (EntryKind::Event, ev.name.clone(), sig)
+            let hash_input = json!({
+                "event": ev.name,
+                "topics": ev.prefix_topics,
+                "params": ev.params.iter().map(|p| {
+                    let loc = match p.location {
+                        ScSpecEventParamLocationV0::Data => "data",
+                        ScSpecEventParamLocationV0::TopicList => "topic",
+                    };
+                    json!([p.name, canonical_type(&p.type_def), loc])
+                }).collect::<Vec<_>>(),
+                "format": format_tag,
+            });
+            (EntryKind::Event, ev.name.clone(), sig, hash_input)
         }
     }
 }
@@ -181,8 +225,10 @@ pub fn fingerprint_spec(entries: &[ScSpecEntry]) -> InterfaceFingerprint {
     let mut errors = Vec::new();
 
     for entry in entries {
-        let (kind, name, signature) = fingerprint_entry(entry);
-        let fingerprint = sha256_hex(&format!("{ALGORITHM}:{kind:?}:{signature}"));
+        let (kind, name, signature, hash_input) = fingerprint_entry(entry);
+        let hash_input_str =
+            serde_json::to_string(&hash_input).expect("json::Value serialization cannot fail");
+        let fingerprint = sha256_hex(&format!("{ALGORITHM}:{kind:?}:{hash_input_str}"));
         let item = EntryFingerprint {
             kind,
             name,
@@ -311,6 +357,28 @@ mod tests {
         assert_ne!(
             fingerprint_spec(&[a]).functions[0].fingerprint,
             fingerprint_spec(&[b]).functions[0].fingerprint
+        );
+    }
+
+    #[test]
+    fn delimiter_confusable_functions_do_not_collide() {
+        // Two inputs "a:u32" + "b:u64" naively joined with ',' produce the
+        // same string as one input named "a" whose UDT type name is
+        // "u32,b:u64" naively joined with ':'. The structured JSON hash
+        // input must keep these distinguishable.
+        let two_inputs = func(
+            "f",
+            vec![("a", ScSpecTypeDef::U32), ("b", ScSpecTypeDef::U64)],
+            vec![],
+        );
+        let one_input = func(
+            "f",
+            vec![("a", ScSpecTypeDef::Udt("u32,b:u64".to_string()))],
+            vec![],
+        );
+        assert_ne!(
+            fingerprint_spec(&[two_inputs]).functions[0].fingerprint,
+            fingerprint_spec(&[one_input]).functions[0].fingerprint
         );
     }
 
