@@ -1,6 +1,7 @@
 pub mod abi;
 pub mod contract_spec;
 pub mod error;
+pub mod interface_fingerprint;
 pub mod logging;
 pub mod models;
 pub mod pagination;
