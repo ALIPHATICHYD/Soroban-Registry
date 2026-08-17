@@ -273,10 +273,6 @@ impl<'a> Cursor<'a> {
         Ok(self.read_u32()? as i32)
     }
 
-    fn read_bool(&mut self) -> Result<bool, SpecParseError> {
-        Ok(self.read_u32()? != 0)
-    }
-
     /// XDR variable-length opaque/string: u32 length, bytes, zero-padded to a
     /// 4-byte boundary.
     fn read_var_bytes(&mut self) -> Result<&'a [u8], SpecParseError> {
@@ -525,14 +521,6 @@ impl<'a> Cursor<'a> {
             other => Err(SpecParseError::InvalidDiscriminant { at, value: other }),
         }
     }
-}
-
-// `read_bool` is part of the XDR primitive set this module supports even
-// though no currently-decoded entry uses it; keep it exercised so it does
-// not bit-rot silently.
-#[allow(dead_code)]
-fn _assert_read_bool_used(c: &mut Cursor) -> Result<bool, SpecParseError> {
-    c.read_bool()
 }
 
 /// Parse the raw bytes of a `contractspecv0` custom section into its
