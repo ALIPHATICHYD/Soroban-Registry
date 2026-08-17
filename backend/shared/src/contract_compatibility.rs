@@ -12,7 +12,9 @@
 //! `breaking` verdict by accident. Any comparison built from a missing or
 //! malformed side short-circuits to [`CompatibilityLevel::Unknown`].
 
-use crate::contract_spec::{ScSpecEntry, ScSpecTypeDef, ScSpecUdtUnionCaseV0};
+use crate::contract_spec::{
+    ScSpecEntry, ScSpecEventParamLocationV0, ScSpecTypeDef, ScSpecUdtUnionCaseV0,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
@@ -90,11 +92,36 @@ impl CompatibilityReport {
         }
     }
 
-    pub fn has_at_least(&self, level: CompatibilityLevel) -> bool {
-        self.changes
-            .iter()
-            .any(|c| c.level.severity_rank() >= level.severity_rank())
-            || self.overall.severity_rank() >= level.severity_rank()
+    /// True if any change (or the overall verdict) meets or exceeds
+    /// `threshold` under `--fail-on` semantics.
+    ///
+    /// This is deliberately *not* `level.severity_rank() >= threshold.severity_rank()`:
+    /// `severity_rank` exists to make `Unknown` dominate when combining levels
+    /// into an overall verdict (so incomplete data is never masked), but for a
+    /// `--fail-on` gate the intent is cumulative inclusion in the documented
+    /// order `breaking | potential | unknown` — `--fail-on unknown` must catch
+    /// breaking and potentially-breaking changes too, not just literal
+    /// `Unknown` results. Reusing `severity_rank` here previously made
+    /// `--fail-on unknown` the *narrowest* threshold instead of the broadest.
+    pub fn has_at_least(&self, threshold: CompatibilityLevel) -> bool {
+        let matches = |level: CompatibilityLevel| -> bool {
+            match threshold {
+                CompatibilityLevel::Breaking => level == CompatibilityLevel::Breaking,
+                CompatibilityLevel::PotentiallyBreaking => matches!(
+                    level,
+                    CompatibilityLevel::Breaking | CompatibilityLevel::PotentiallyBreaking
+                ),
+                CompatibilityLevel::Unknown => matches!(
+                    level,
+                    CompatibilityLevel::Breaking
+                        | CompatibilityLevel::PotentiallyBreaking
+                        | CompatibilityLevel::Unknown
+                ),
+                CompatibilityLevel::Compatible => true,
+            }
+        };
+
+        self.changes.iter().any(|c| matches(c.level)) || matches(self.overall)
     }
 }
 
@@ -215,7 +242,8 @@ fn diff_functions(from: &[ScSpecEntry], to: &[ScSpecEntry], changes: &mut Vec<Ch
                                     type_str(&gi.type_def)
                                 ),
                             });
-                        } else if fi.name != gi.name {
+                        }
+                        if fi.name != gi.name {
                             changes.push(Change {
                                 category: ChangeCategory::Function,
                                 level: CompatibilityLevel::PotentiallyBreaking,
@@ -613,9 +641,12 @@ fn diff_error_enums(from: &[ScSpecEntry], to: &[ScSpecEntry], changes: &mut Vec<
                     if !ca.contains_key(case_name) {
                         changes.push(Change {
                             category: ChangeCategory::Error,
-                            level: CompatibilityLevel::Compatible,
+                            level: CompatibilityLevel::PotentiallyBreaking,
                             subject: name.to_string(),
-                            description: format!("Error `{name}::{case_name}` was added"),
+                            description: format!(
+                                "Error `{name}::{case_name}` was added \
+                                 (breaks exhaustive matches on consumers)"
+                            ),
                         });
                     }
                 }
@@ -673,15 +704,15 @@ fn diff_events(from: &[ScSpecEntry], to: &[ScSpecEntry], changes: &mut Vec<Chang
                         ),
                     });
                 } else {
-                    let pa: Vec<(&str, String)> = ev
+                    let pa: Vec<(&str, String, ScSpecEventParamLocationV0)> = ev
                         .params
                         .iter()
-                        .map(|p| (p.name.as_str(), type_str(&p.type_def)))
+                        .map(|p| (p.name.as_str(), type_str(&p.type_def), p.location))
                         .collect();
-                    let pb: Vec<(&str, String)> = other
+                    let pb: Vec<(&str, String, ScSpecEventParamLocationV0)> = other
                         .params
                         .iter()
-                        .map(|p| (p.name.as_str(), type_str(&p.type_def)))
+                        .map(|p| (p.name.as_str(), type_str(&p.type_def), p.location))
                         .collect();
                     if pa != pb {
                         changes.push(Change {
@@ -1007,5 +1038,130 @@ mod tests {
             &net(),
         );
         assert_eq!(report.overall, CompatibilityLevel::PotentiallyBreaking);
+    }
+
+    #[test]
+    fn fail_on_unknown_still_catches_breaking_changes() {
+        // Regression: --fail-on unknown must be the *most* inclusive
+        // threshold (breaking ⊂ potential ⊂ unknown), not the narrowest.
+        let a = vec![func("f", vec![], vec![]), func("g", vec![], vec![])];
+        let b = vec![func("f", vec![], vec![])]; // `g` removed: Breaking
+        let report = compare(
+            &SpecSource::Entries(a),
+            &SpecSource::Entries(b),
+            &net(),
+            &net(),
+        );
+        assert_eq!(report.overall, CompatibilityLevel::Breaking);
+        assert!(report.has_at_least(CompatibilityLevel::Unknown));
+        assert!(report.has_at_least(CompatibilityLevel::PotentiallyBreaking));
+        assert!(report.has_at_least(CompatibilityLevel::Breaking));
+    }
+
+    #[test]
+    fn fail_on_breaking_does_not_trigger_on_potentially_breaking() {
+        use crate::contract_spec::{ScSpecUdtEnumCaseV0, ScSpecUdtEnumV0};
+
+        let make = |cases: Vec<ScSpecUdtEnumCaseV0>| {
+            ScSpecEntry::UdtEnumV0(ScSpecUdtEnumV0 {
+                doc: "".into(),
+                lib: "".into(),
+                name: "Kind".into(),
+                cases,
+            })
+        };
+        let a = vec![make(vec![])];
+        let b = vec![make(vec![ScSpecUdtEnumCaseV0 {
+            doc: "".into(),
+            name: "New".into(),
+            value: 0,
+        }])];
+        let report = compare(
+            &SpecSource::Entries(a),
+            &SpecSource::Entries(b),
+            &net(),
+            &net(),
+        );
+        assert_eq!(report.overall, CompatibilityLevel::PotentiallyBreaking);
+        assert!(!report.has_at_least(CompatibilityLevel::Breaking));
+        assert!(report.has_at_least(CompatibilityLevel::PotentiallyBreaking));
+    }
+
+    #[test]
+    fn event_param_location_change_is_detected() {
+        use crate::contract_spec::{
+            ScSpecEventDataFormat, ScSpecEventParamLocationV0, ScSpecEventParamV0, ScSpecEventV0,
+        };
+
+        let make = |location: ScSpecEventParamLocationV0| {
+            ScSpecEntry::EventV0(ScSpecEventV0 {
+                doc: "".into(),
+                lib: "".into(),
+                name: "transfer".into(),
+                prefix_topics: vec![],
+                params: vec![ScSpecEventParamV0 {
+                    doc: "".into(),
+                    name: "from".into(),
+                    type_def: ScSpecTypeDef::Address,
+                    location,
+                }],
+                data_format: ScSpecEventDataFormat::SingleValue,
+            })
+        };
+
+        let report = compare(
+            &SpecSource::Entries(vec![make(ScSpecEventParamLocationV0::Data)]),
+            &SpecSource::Entries(vec![make(ScSpecEventParamLocationV0::TopicList)]),
+            &net(),
+            &net(),
+        );
+        assert_eq!(report.overall, CompatibilityLevel::Breaking);
+    }
+
+    #[test]
+    fn adding_an_error_case_is_potentially_breaking_like_enum_case_addition() {
+        use crate::contract_spec::{ScSpecUdtErrorEnumCaseV0, ScSpecUdtErrorEnumV0};
+
+        let make = |cases: Vec<ScSpecUdtErrorEnumCaseV0>| {
+            ScSpecEntry::UdtErrorEnumV0(ScSpecUdtErrorEnumV0 {
+                doc: "".into(),
+                lib: "".into(),
+                name: "Error".into(),
+                cases,
+            })
+        };
+        let a = vec![make(vec![])];
+        let b = vec![make(vec![ScSpecUdtErrorEnumCaseV0 {
+            doc: "".into(),
+            name: "NotFound".into(),
+            value: 1,
+        }])];
+        let report = compare(
+            &SpecSource::Entries(a),
+            &SpecSource::Entries(b),
+            &net(),
+            &net(),
+        );
+        assert_eq!(report.overall, CompatibilityLevel::PotentiallyBreaking);
+    }
+
+    #[test]
+    fn parameter_rename_and_retype_both_reported() {
+        let a = vec![func("f", vec![("old_name", ScSpecTypeDef::U32)], vec![])];
+        let b = vec![func("f", vec![("new_name", ScSpecTypeDef::U64)], vec![])];
+        let report = compare(
+            &SpecSource::Entries(a),
+            &SpecSource::Entries(b),
+            &net(),
+            &net(),
+        );
+        assert!(report
+            .changes
+            .iter()
+            .any(|c| c.description.contains("type changed")));
+        assert!(report
+            .changes
+            .iter()
+            .any(|c| c.description.contains("renamed")));
     }
 }
