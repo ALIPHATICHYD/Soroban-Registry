@@ -31,6 +31,7 @@ mod contract_deprecate;
 mod contract_snapshot;
 mod contract_highlight;
 mod contract_interaction;
+mod contract_interfaces;
 mod contract_register;
 mod contract_risk;
 mod contract_update;
@@ -1980,6 +1981,21 @@ pub enum ContractCommands {
         /// Skip cache and always fetch fresh data from registry
         #[arg(long)]
         no_cache: bool,
+    },
+
+    /// Derive and display a contract's deterministic interface fingerprint
+    /// (functions, types, events, errors) from a local compiled WASM
+    /// artifact.
+    ///
+    /// Usage: soroban-registry contract interfaces --wasm <path> [--json]
+    Interfaces {
+        /// Path to a local compiled WASM contract to inspect.
+        #[arg(long)]
+        wasm: String,
+
+        /// Output results as machine-readable JSON
+        #[arg(long)]
+        json: bool,
     },
 
     /// Display detailed information about a contract
@@ -4227,6 +4243,10 @@ pub async fn dispatch_command(
                         );
                     }
                 }
+            }
+            ContractCommands::Interfaces { wasm, json } => {
+                log::debug!("Command: contract interfaces | wasm={} json={}", wasm, json);
+                contract_interfaces::run_local(&wasm, json).await?;
             }
             ContractCommands::Details {
                 address,
