@@ -32,6 +32,12 @@ fn options() -> HttpCacheOptions {
     CACHE_OPTS.get().copied().unwrap_or_default()
 }
 
+/// The per-invocation cache settings, for callers that do their own fetching —
+/// e.g. the shared registry client's cache hook in [`crate::registry`].
+pub fn cache_options() -> HttpCacheOptions {
+    options()
+}
+
 /// Perform a GET request, returning cached body when available.
 pub async fn cached_get(url: &str, query: &[(&str, String)]) -> Result<(StatusCode, String)> {
     let opts = options();

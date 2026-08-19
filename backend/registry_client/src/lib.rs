@@ -1,55 +1,128 @@
-//! Typed client for the Soroban Registry HTTP API.
+//! Typed Rust client for the Soroban Registry HTTP API.
 //!
-//! The registry paginates in two ways — stable keyset **cursor** pagination
-//! served by PostgreSQL, and **offset** pagination served by Elasticsearch (see
-//! `docs/pagination.md`). Consumers used to have to know which endpoint uses
-//! which, and manage continuation state by hand: easy to mix a cursor with an
-//! offset, lose results, re-read a page, or loop forever on a bad token.
+//! The registry's HTTP surface — request construction, authentication, retries,
+//! pagination, response decoding, and error mapping — lives here rather than in
+//! any one consumer. The CLI, CI integrations, publisher automation, and
+//! third-party tools then share one interpretation of pagination tokens,
+//! authentication failures, conflict responses, and structured API errors.
 //!
-//! This crate wraps both behind one abstraction. Pick a mode, get a
-//! [`Paginator`], and iterate:
+//! # Searching
 //!
 //! ```no_run
-//! use futures_util::StreamExt;
 //! use registry_client::{ContractSearchRequest, PageLimits, RegistryClient};
 //!
 //! # async fn example() -> registry_client::Result<()> {
-//! let client = RegistryClient::new("http://localhost:3001")?;
-//! let request = ContractSearchRequest::cursor("swap").with_networks(["testnet"]);
+//! let client = RegistryClient::new("https://registry.example")?;
 //!
-//! // Page at a time…
+//! // Walk every page of a search, bounded at 1000 items.
 //! let mut walk = client.search_paginator(
-//!     request.clone(),
+//!     ContractSearchRequest::cursor("swap").with_networks(["testnet"]),
 //!     PageLimits::default().with_max_items(Some(1_000)),
 //! )?;
 //! while let Some(page) = walk.next_page().await? {
-//!     println!("{} result(s) of {:?}", page.items.len(), page.total);
-//! }
-//!
-//! // …or as a stream of items. The stream is not `Unpin`, so pin it to poll it.
-//! let mut items = Box::pin(
-//!     client
-//!         .search_paginator(request, PageLimits::default().with_max_items(Some(1_000)))?
-//!         .items(),
-//! );
-//! while let Some(hit) = items.next().await {
-//!     println!("{}", hit?.name);
+//!     for hit in page.items {
+//!         println!("{} — {}", hit.name, hit.contract_id);
+//!     }
 //! }
 //! # Ok(())
 //! # }
 //! ```
 //!
-//! Every walk is bounded, cancellable, and refuses to follow a continuation that
-//! cannot make progress — see [`pagination`] for the full list of guarantees.
+//! # Publishing
+//!
+//! ```no_run
+//! use registry_client::{Auth, ClientConfig, Network, PublishRequest, RegistryClient};
+//!
+//! # async fn example() -> registry_client::Result<()> {
+//! let client = RegistryClient::from_config(
+//!     ClientConfig::new("https://registry.example").with_auth(Auth::bearer("…token…")),
+//! )?;
+//!
+//! let request = PublishRequest {
+//!     contract_id: "CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC".to_string(),
+//!     wasm_hash: "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08".to_string(),
+//!     wasm_artifact_base64: None,
+//!     name: "swap-router".to_string(),
+//!     slug: None,
+//!     description: Some("AMM router".to_string()),
+//!     network: Network::Testnet,
+//!     category: Some("DeFi".to_string()),
+//!     tags: vec!["amm".to_string()],
+//!     source_url: None,
+//!     publisher_address: "GDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC".to_string(),
+//!     dependencies: Vec::new(),
+//!     is_cicd: true,
+//! };
+//!
+//! // With an idempotency key a lost response can be retried safely: the
+//! // registry replays the original result instead of publishing twice.
+//! match client
+//!     .publish_contract(&request, Some("release-1.4.2".to_string()))
+//!     .await
+//! {
+//!     Ok(contract) => println!("published {}", contract.contract_id),
+//!     Err(err) if err.is_auth() => eprintln!("log in again: {err}"),
+//!     Err(err) => return Err(err),
+//! }
+//! # Ok(())
+//! # }
+//! ```
+//!
+//! # Errors
+//!
+//! Failure modes stay distinct — [`Error::Unauthorized`], [`Error::Forbidden`],
+//! [`Error::Validation`], [`Error::Conflict`], [`Error::IdempotencyInProgress`],
+//! [`Error::RateLimited`], [`Error::Upstream`], [`Error::Timeout`],
+//! [`Error::MalformedResponse`] — and each carries the server's `code`,
+//! `message`, structured `details`, request id, and `Retry-After` where present.
+//!
+//! # Retries
+//!
+//! [`RetryPolicy`] is explicit and configurable. Safe methods may be retried;
+//! a mutation is retried **only** when the call supplies an idempotency key, so
+//! a publish is never silently repeated. `Retry-After` is honoured up to a
+//! configurable ceiling.
+//!
+//! # Secrets
+//!
+//! Bearer tokens, API keys, and webhook signing secrets are held in [`Secret`],
+//! whose `Debug`/`Display` print `<redacted>`. Errors carry no headers, so
+//! logging a client, a config, or an error cannot leak a credential.
+//!
+//! # Cancellation
+//!
+//! [`RegistryClient::with_cancel_token`] aborts in-flight requests, and a
+//! [`Paginator`] stops between pages, keeping what it already emitted.
 
+pub mod api;
 pub mod client;
+pub mod config;
 pub mod error;
+pub mod http;
 pub mod models;
 pub mod pagination;
 
-pub use client::{ContractSearchFetcher, RegistryClient};
-pub use error::{Error, PaginationError, Result};
-pub use models::{ContractHit, ContractSearchRequest, SearchEndpoint};
+pub use api::contracts::{ContractListFetcher, ContractSearchFetcher};
+pub use api::snapshots::RegistrySigningKey;
+pub use api::verification::{
+    ContractVerifyRequest, VerificationHistoryEntry, VerificationHistoryResponse,
+    VerificationStatusResponse, VerificationSubmitResponse,
+};
+pub use api::webhooks::{CreatedWebhook, WebhookDelivery};
+pub use client::RegistryClient;
+pub use config::{
+    default_user_agent, Auth, ClientConfig, RetryPolicy, Secret, DEFAULT_MAX_ATTEMPTS,
+    DEFAULT_TIMEOUT, REDACTED,
+};
+pub use error::{ApiErrorDetails, Error, PaginationError, Result, TransportKind};
+pub use http::{query_pairs_from, RequestSpec, ResponseCache, IDEMPOTENCY_KEY_HEADER};
+pub use models::{
+    ConfirmOwnershipTransferRequest, Contract, ContractGetResponse, ContractHit,
+    ContractSearchParams, ContractSearchRequest, ContractSnapshot, CreateOwnershipTransferRequest,
+    CreateWebhookRequest, DependencyScanReport, DeprecateContractRequest, DeprecationInfo, Network,
+    OwnershipTransfer, OwnershipTransferLog, PaginatedResponse, PublishRequest, SearchEndpoint,
+    UpdateContractMetadataRequest, WebhookConfiguration,
+};
 pub use pagination::{
     CancelToken, PageCollection, PageCursor, PageFetcher, PageLimits, PageRequest, PaginationMode,
     Paginator, RegistryPage, StopReason, DEFAULT_MAX_PAGES, DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE,

@@ -60,6 +60,7 @@ mod package_signing;
 mod patch;
 mod plugins;
 mod profiler;
+mod registry;
 mod release_notes;
 mod shell;
 mod sla;
@@ -2879,6 +2880,8 @@ async fn main() -> Result<()> {
         no_cache: cli.no_cache,
         verbose: cli.verbose,
     });
+    // The shared registry client picks up the same resolved timeout.
+    registry::init(cli.timeout);
 
     // ── Initialise logger ─────────────────────────────────────────────────────
     // -v counts; each level raises verbosity by one step.

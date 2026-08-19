@@ -1,11 +1,9 @@
 //! `soroban-registry contract update` — update contract metadata (#828).
 
 use crate::contract_deploy::{upload_icon_to_backend, validate_and_process_icon};
-use crate::net::RequestBuilderExt;
 use anyhow::{bail, Context, Result};
 use colored::Colorize;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 use std::io::{self, Write};
 
 #[derive(Debug, Clone, Serialize)]
@@ -18,6 +16,29 @@ struct MetadataPatch {
     category: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     tags: Option<Vec<String>>,
+}
+
+impl MetadataPatch {
+    /// The registry's own request type. `user_id` is server-derived from the
+    /// caller's session, so the CLI never sets it.
+    fn to_request(&self) -> registry_client::UpdateContractMetadataRequest {
+        registry_client::UpdateContractMetadataRequest {
+            name: self.name.clone(),
+            description: self.description.clone(),
+            category: self.category.clone(),
+            tags: self.tags.clone(),
+            user_id: None,
+        }
+    }
+}
+
+/// A key that is identical for the same patch applied to the same contract, so
+/// a retried update collapses into one version-history entry instead of two.
+fn metadata_idempotency_key(contract_id: &str, patch: &MetadataPatch) -> String {
+    use sha2::{Digest, Sha256};
+    let canonical = serde_json::to_string(patch).unwrap_or_default();
+    let digest = Sha256::digest(format!("{contract_id}:{canonical}").as_bytes());
+    format!("cli-metadata-{}", hex::encode(&digest[..16]))
 }
 
 #[derive(Debug, Deserialize)]
@@ -108,26 +129,15 @@ pub async fn run(args: UpdateArgs<'_>) -> Result<()> {
         }
     }
 
-    let url = format!(
-        "{}/api/contracts/{}/metadata",
-        args.api_url.trim_end_matches('/'),
-        current.id
-    );
-    let client = crate::net::client();
-    let response = client
-        .patch(&url)
-        .json(&patch)
-        .send_with_retry()
+    // A metadata update appends a version-history entry, so it is only retried
+    // under an idempotency key derived from the contract and the exact patch.
+    let idempotency_key = metadata_idempotency_key(&current.id, &patch);
+    let updated = crate::registry::uncached_client(args.api_url)
+        .await?
+        .update_contract_metadata(&current.id, &patch.to_request(), Some(idempotency_key))
         .await
-        .with_context(|| format!("PATCH {url}"))?;
-
-    if !response.status().is_success() {
-        let status = response.status();
-        let body = response.text().await.unwrap_or_default();
-        bail!("Metadata update failed ({status}): {body}");
-    }
-
-    let updated: Value = response.json().await.context("Invalid update response")?;
+        .map_err(|err| anyhow::anyhow!("Metadata update failed: {err}"))?;
+    let updated = serde_json::to_value(&updated).context("Invalid update response")?;
 
     if let Some(icon_path) = &args.icon {
         let icon_data = validate_and_process_icon(icon_path)?;
@@ -151,30 +161,31 @@ pub async fn run(args: UpdateArgs<'_>) -> Result<()> {
     Ok(())
 }
 
+/// Read the contract through the shared client, so a missing contract, an
+/// expired session, and a server fault stay distinguishable.
 async fn fetch_contract(api_url: &str, address: &str) -> Result<ContractRecord> {
-    let url = format!(
-        "{}/api/contracts/{}",
-        api_url.trim_end_matches('/'),
-        address
-    );
-    let client = crate::net::client();
-    let response = client
-        .get(&url)
-        .send_with_retry()
+    let response = crate::registry::uncached_client(api_url)
+        .await?
+        .get_contract(address)
         .await
-        .with_context(|| format!("GET {url}"))?;
+        .map_err(|err| match err {
+            registry_client::Error::NotFound(_) => anyhow::anyhow!("Contract not found: {address}"),
+            other => anyhow::anyhow!("Failed to fetch contract: {other}"),
+        })?;
 
-    if response.status() == reqwest::StatusCode::NOT_FOUND {
-        bail!("Contract not found: {address}");
-    }
-    if !response.status().is_success() {
-        bail!("Failed to fetch contract ({})", response.status());
-    }
-
-    response
-        .json::<ContractRecord>()
-        .await
-        .context("Failed to parse contract response")
+    let contract = response.contract;
+    Ok(ContractRecord {
+        id: contract.id.to_string(),
+        contract_id: contract.contract_id,
+        name: contract.name,
+        description: contract.description,
+        category: contract.category,
+        tags: contract
+            .tags
+            .into_iter()
+            .map(|tag| TagRecord { name: tag.name })
+            .collect(),
+    })
 }
 
 fn current_tags(contract: &ContractRecord) -> Vec<String> {

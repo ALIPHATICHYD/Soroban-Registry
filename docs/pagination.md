@@ -95,11 +95,14 @@ removed elsewhere in the result set.
   infinite scroll): use **cursor** pagination.
 - **Relevance-ranked results or jump-to-page UIs**: use **offset** pagination.
 
-## Client-side pagination (`registry_client`)
+## Client-side pagination (`soroban-registry-client`)
 
 Everything above is the HTTP contract. Consumers should not implement it by
-hand: the `registry_client` crate (`backend/registry_client`) wraps both modes
-in one typed abstraction, and the CLI's `contract search` command uses it.
+hand: the `soroban-registry-client` crate (`backend/registry_client`, imported
+as `registry_client`) wraps both modes in one typed abstraction, and the CLI
+uses it for search, list, metadata and publish. See
+[registry-client.md](./registry-client.md) for the rest of that crate —
+configuration, authentication, retries, idempotency and the error taxonomy.
 
 ```rust
 use registry_client::{ContractSearchRequest, PageLimits, RegistryClient};
