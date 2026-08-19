@@ -255,3 +255,90 @@ fn print_human(outcome: &VerifyBuildOutcome) {
     }
     println!();
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn normalize_hash_accepts_lowercase_hex() {
+        let h = "a".repeat(64);
+        assert_eq!(normalize_hash(&h), Some(h));
+    }
+
+    #[test]
+    fn normalize_hash_lowercases_and_strips_0x_prefix() {
+        let h = format!("0x{}", "A".repeat(64));
+        assert_eq!(normalize_hash(&h), Some("a".repeat(64)));
+    }
+
+    #[test]
+    fn normalize_hash_rejects_wrong_length() {
+        assert_eq!(normalize_hash("abc123"), None);
+    }
+
+    #[test]
+    fn normalize_hash_rejects_non_hex() {
+        let h = "g".repeat(64);
+        assert_eq!(normalize_hash(&h), None);
+    }
+
+    #[test]
+    fn toolchain_matches_substring_of_full_rustc_banner() {
+        assert!(toolchain_matches(
+            "1.79.0",
+            "rustc 1.79.0 (129f3b996 2024-06-10)"
+        ));
+    }
+
+    #[test]
+    fn toolchain_matches_rejects_different_version() {
+        assert!(!toolchain_matches(
+            "1.79.0",
+            "rustc 1.80.1 (129f3b996 2024-06-10)"
+        ));
+    }
+
+    #[test]
+    fn find_wasm_artifact_returns_none_when_no_target_dir() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(find_wasm_artifact(dir.path()).is_none());
+    }
+
+    #[test]
+    fn find_wasm_artifact_finds_wasm32v1_none_release_output() {
+        let dir = tempfile::tempdir().unwrap();
+        let release_dir = dir.path().join("target/wasm32v1-none/release");
+        std::fs::create_dir_all(&release_dir).unwrap();
+        std::fs::write(release_dir.join("contract.wasm"), b"\0asm").unwrap();
+
+        let found = find_wasm_artifact(dir.path());
+        assert!(found.is_some());
+        assert_eq!(found.unwrap().extension().unwrap(), "wasm");
+    }
+
+    #[test]
+    fn find_wasm_artifact_falls_back_to_wasm32_unknown_unknown() {
+        let dir = tempfile::tempdir().unwrap();
+        let release_dir = dir.path().join("target/wasm32-unknown-unknown/release");
+        std::fs::create_dir_all(&release_dir).unwrap();
+        std::fs::write(release_dir.join("contract.wasm"), b"\0asm").unwrap();
+
+        assert!(find_wasm_artifact(dir.path()).is_some());
+    }
+
+    #[tokio::test]
+    async fn attempt_rebuild_reports_missing_source_when_no_cargo_toml() {
+        let dir = tempfile::tempdir().unwrap();
+        let provenance = BuildProvenance::default();
+        let outcome = attempt_rebuild(
+            &provenance,
+            dir.path().to_str().unwrap(),
+            &"a".repeat(64),
+            false,
+        )
+        .await;
+        assert!(matches!(outcome, VerifyBuildOutcome::MissingSource { .. }));
+        assert!(!outcome.is_success());
+    }
+}
