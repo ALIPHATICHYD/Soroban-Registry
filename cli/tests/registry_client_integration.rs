@@ -529,3 +529,117 @@ async fn a_failing_publish_is_attempted_once_per_run() {
         "the key must not change between attempts: {keys:?}"
     );
 }
+
+// ── contract reads (info / contract details) ──────────────────────────────────
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn info_passes_the_server_document_through_verbatim() {
+    let server = MockServer::start().await;
+    // A field the client's typed models do not know about must survive `--json`.
+    let mut body = contract(7);
+    body["stats"] = json!({"deployments_count": 12, "interactions_count": 340});
+    Mock::given(method("GET"))
+        .and(path(
+            "/api/contracts/CA000000000000000000000000000000000000000000000000000007",
+        ))
+        .and(query_param("include_stats", "true"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(body))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let output = run_cli(
+        &server.uri(),
+        &[
+            "info",
+            "CA000000000000000000000000000000000000000000000000000007",
+            "--json",
+        ],
+    )
+    .await;
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let rendered = stdout_json(&output);
+    assert_eq!(rendered["name"], "contract-7");
+    assert_eq!(
+        rendered["stats"]["deployments_count"], 12,
+        "unknown fields must not be dropped by the client"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn info_reports_a_missing_contract_clearly() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/contracts/CAMISSING"))
+        .respond_with(ResponseTemplate::new(404).set_body_json(json!({
+            "code": "ContractNotFound",
+            "message": "No contract found"
+        })))
+        .mount(&server)
+        .await;
+
+    let output = run_cli(&server.uri(), &["info", "CAMISSING"]).await;
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("Contract not found for address or slug"),
+        "{stderr}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn contract_details_sends_the_network_filter_and_identifies_the_cli() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path(
+            "/api/contracts/CA000000000000000000000000000000000000000000000000000005",
+        ))
+        .and(query_param("network", "testnet"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(contract(5)))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let output = run_cli(
+        &server.uri(),
+        &[
+            "contract",
+            "details",
+            "CA000000000000000000000000000000000000000000000000000005",
+            "--network",
+            "testnet",
+            "--json",
+        ],
+    )
+    .await;
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let request = server
+        .received_requests()
+        .await
+        .expect("requests")
+        .into_iter()
+        .next()
+        .expect("a GET was sent");
+    let user_agent = request
+        .headers
+        .get("user-agent")
+        .expect("every request identifies the caller")
+        .to_str()
+        .expect("ascii");
+    assert!(
+        user_agent.starts_with("soroban-registry-cli/"),
+        "{user_agent}"
+    );
+}
