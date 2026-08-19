@@ -45,7 +45,7 @@ impl FailOn {
     }
 }
 
-fn load_spec(wasm_path: &str) -> Result<(SpecSource, NetworkContext)> {
+fn load_spec(wasm_path: &str) -> Result<SpecSource> {
     let path = std::path::Path::new(wasm_path);
     if !path.exists() {
         anyhow::bail!("WASM file not found: {}", wasm_path);
@@ -56,17 +56,13 @@ fn load_spec(wasm_path: &str) -> Result<(SpecSource, NetworkContext)> {
         anyhow::bail!("WASM file is empty: {}", wasm_path);
     }
 
-    let validation = shared::wasm::validate_wasm(&bytes);
-    if !validation.has_contract_spec {
-        return Ok((SpecSource::Missing, NetworkContext::default()));
-    }
-
-    let spec_bytes = shared::wasm::extract_contract_spec_bytes(&bytes)
-        .expect("has_contract_spec is true, so the section must be extractable");
+    let Some(spec_bytes) = shared::wasm::extract_contract_spec_bytes(&bytes) else {
+        return Ok(SpecSource::Missing);
+    };
 
     match shared::contract_spec::parse_contract_spec(&spec_bytes) {
-        Ok(entries) => Ok((SpecSource::Entries(entries), NetworkContext::default())),
-        Err(e) => Ok((SpecSource::Malformed(e.to_string()), NetworkContext::default())),
+        Ok(entries) => Ok(SpecSource::Entries(entries)),
+        Err(e) => Ok(SpecSource::Malformed(e.to_string())),
     }
 }
 
@@ -90,8 +86,8 @@ pub async fn run(
         fail_on
     );
 
-    let (from_spec, _) = load_spec(from_wasm)?;
-    let (to_spec, _) = load_spec(to_wasm)?;
+    let from_spec = load_spec(from_wasm)?;
+    let to_spec = load_spec(to_wasm)?;
     let from_net = NetworkContext {
         passphrase: from_network_passphrase,
     };
