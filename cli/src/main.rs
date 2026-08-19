@@ -32,10 +32,12 @@ mod contract_snapshot;
 mod contract_highlight;
 mod contract_interaction;
 mod contract_interfaces;
+mod contract_provenance;
 mod contract_register;
 mod contract_risk;
 mod contract_update;
 mod contract_verify;
+mod contract_verify_build;
 mod contracts;
 mod conversions;
 mod coverage;
@@ -1992,6 +1994,48 @@ pub enum ContractCommands {
         /// Path to a local compiled WASM contract to inspect.
         #[arg(long)]
         wasm: String,
+
+        /// Output results as machine-readable JSON
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// Display build-provenance metadata recorded for a contract, read from
+    /// a local manifest file.
+    ///
+    /// Usage: soroban-registry contract provenance --manifest <path> [--json]
+    Provenance {
+        /// Path to a local provenance manifest (JSON) to display.
+        #[arg(long)]
+        manifest: String,
+
+        /// Output results as machine-readable JSON
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// Attempt to independently reproduce a contract's published WASM
+    /// artifact from source, and compare its hash against the expected
+    /// (registry-recorded) artifact hash.
+    ///
+    /// Usage: soroban-registry contract verify-build --manifest <path> --source-dir <dir> --expected-hash <hash> [--allow-toolchain-mismatch] [--json]
+    VerifyBuild {
+        /// Path to a local provenance manifest (JSON) describing the recorded build.
+        #[arg(long)]
+        manifest: String,
+
+        /// Directory containing the contract's source to rebuild.
+        #[arg(long)]
+        source_dir: String,
+
+        /// The registry-recorded WASM artifact hash to compare the rebuild against.
+        #[arg(long)]
+        expected_hash: String,
+
+        /// Proceed with the rebuild even if the locally installed rustc
+        /// version doesn't match the version recorded in provenance.
+        #[arg(long)]
+        allow_toolchain_mismatch: bool,
 
         /// Output results as machine-readable JSON
         #[arg(long)]
@@ -4247,6 +4291,32 @@ pub async fn dispatch_command(
             ContractCommands::Interfaces { wasm, json } => {
                 log::debug!("Command: contract interfaces | wasm={} json={}", wasm, json);
                 contract_interfaces::run_local(&wasm, json).await?;
+            }
+            ContractCommands::Provenance { manifest, json } => {
+                log::debug!("Command: contract provenance | manifest={} json={}", manifest, json);
+                contract_provenance::run_local(&manifest, json).await?;
+            }
+            ContractCommands::VerifyBuild {
+                manifest,
+                source_dir,
+                expected_hash,
+                allow_toolchain_mismatch,
+                json,
+            } => {
+                log::debug!(
+                    "Command: contract verify-build | manifest={} source_dir={} json={}",
+                    manifest,
+                    source_dir,
+                    json
+                );
+                contract_verify_build::run(
+                    &manifest,
+                    &source_dir,
+                    &expected_hash,
+                    allow_toolchain_mismatch,
+                    json,
+                )
+                .await?;
             }
             ContractCommands::Details {
                 address,
