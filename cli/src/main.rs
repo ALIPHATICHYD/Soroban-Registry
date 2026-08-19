@@ -59,6 +59,7 @@ mod package_signing;
 mod patch;
 mod plugins;
 mod profiler;
+mod publisher;
 mod release_notes;
 mod shell;
 mod sla;
@@ -1144,6 +1145,12 @@ pub enum Commands {
     Env {
         #[command(subcommand)]
         action: EnvCommands,
+    },
+
+    /// Publisher environment diagnostics
+    Publisher {
+        #[command(subcommand)]
+        action: PublisherCommands,
     },
 
     /// External command (may be provided by an installed plugin)
@@ -2449,6 +2456,19 @@ pub enum EnvCommands {
     Switch {
         /// Environment name to activate
         environment: String,
+    },
+}
+
+/// Sub-commands for the `publisher` group
+#[derive(Debug, Subcommand)]
+pub enum PublisherCommands {
+    /// Diagnose the local publishing environment (config, session, signing key, connectivity)
+    ///
+    /// Usage: soroban-registry publisher doctor [--json]
+    Doctor {
+        /// Output results as machine-readable JSON
+        #[arg(long)]
+        json: bool,
     },
 }
 
