@@ -2,9 +2,9 @@
 
 use crate::net::RequestBuilderExt;
 use crate::output_format;
-use registry_client::ContractSearchParams;
 use anyhow::{Context, Result};
 use colored::Colorize;
+use registry_client::ContractSearchParams;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use serde_yaml;
@@ -278,13 +278,18 @@ pub async fn search(
         .max("Network".len());
     let cat_w = items
         .iter()
-        .filter_map(|contract| contract.category.as_deref().filter(|value| !value.is_empty()))
+        .filter_map(|contract| {
+            contract
+                .category
+                .as_deref()
+                .filter(|value| !value.is_empty())
+        })
         .map(|value| value.chars().count())
         .max()
         .unwrap_or(0)
         .max("Category".len());
-    // "○ Unverified" is the longest possible verified cell value (12 visible chars).
-    let ver_w = "○ Unverified".chars().count();
+    // "Unverified" is the longest possible verified cell value.
+    let ver_w = "Unverified".chars().count();
     let link_prefix = format!("{}/contracts/", api_url);
     let link_w = items
         .iter()
@@ -298,9 +303,9 @@ pub async fn search(
     for contract in items {
         let link = format!("{}/contracts/{}", api_url, contract.contract_id);
         let verified = if contract.is_verified {
-            "✓ Verified".green().to_string()
+            "Verified".green().to_string()
         } else {
-            "○ Unverified".yellow().to_string()
+            "Unverified".yellow().to_string()
         };
 
         rows.push(vec![
@@ -332,9 +337,9 @@ pub async fn search(
         let category = contract.category.as_deref().unwrap_or_default();
         let cat_pad = " ".repeat(cat_w.saturating_sub(category.chars().count()));
         let verified_visible = if contract.is_verified {
-            "✓ Verified".chars().count()
+            "Verified".chars().count()
         } else {
-            "○ Unverified".chars().count()
+            "Unverified".chars().count()
         };
         let verified_pad = " ".repeat(ver_w.saturating_sub(verified_visible));
 
@@ -1509,7 +1514,6 @@ pub async fn migrate(
     Ok(())
 }
 
-
 pub async fn export(
     api_url: &str,
     id: Option<&str>,
@@ -2074,7 +2078,11 @@ mod tests {
             &["defi".to_string(), "token".to_string()],
             VALID_PUBLISHER,
         );
-        assert!(result.is_ok(), "Expected valid inputs to pass: {:?}", result);
+        assert!(
+            result.is_ok(),
+            "Expected valid inputs to pass: {:?}",
+            result
+        );
     }
 
     #[test]
@@ -2089,7 +2097,11 @@ mod tests {
         );
         assert!(result.is_err());
         let msg = result.unwrap_err().to_string();
-        assert!(msg.contains("contract_id"), "Error should mention contract_id: {}", msg);
+        assert!(
+            msg.contains("contract_id"),
+            "Error should mention contract_id: {}",
+            msg
+        );
     }
 
     #[test]
@@ -2104,7 +2116,11 @@ mod tests {
         );
         assert!(result.is_err());
         let msg = result.unwrap_err().to_string();
-        assert!(msg.contains("name is required"), "Error should mention name: {}", msg);
+        assert!(
+            msg.contains("name is required"),
+            "Error should mention name: {}",
+            msg
+        );
     }
 
     #[test]
@@ -2119,7 +2135,11 @@ mod tests {
         );
         assert!(result.is_err());
         let msg = result.unwrap_err().to_string();
-        assert!(msg.contains("publisher"), "Error should mention publisher: {}", msg);
+        assert!(
+            msg.contains("publisher"),
+            "Error should mention publisher: {}",
+            msg
+        );
     }
 
     #[test]
@@ -2134,7 +2154,11 @@ mod tests {
         );
         assert!(result.is_err());
         let msg = result.unwrap_err().to_string();
-        assert!(msg.contains("category"), "Error should mention category: {}", msg);
+        assert!(
+            msg.contains("category"),
+            "Error should mention category: {}",
+            msg
+        );
     }
 
     #[test]
@@ -2156,12 +2180,12 @@ mod tests {
     #[test]
     fn validate_publish_inputs_collects_multiple_errors() {
         let result = validate_publish_inputs(
-            "bad",            // invalid contract_id
-            "",               // empty name
+            "bad", // invalid contract_id
+            "",    // empty name
             Network::Testnet,
             None,
             &[],
-            "bad-publisher",  // invalid publisher
+            "bad-publisher", // invalid publisher
         );
         assert!(result.is_err());
         let msg = result.unwrap_err().to_string();
@@ -2175,7 +2199,7 @@ mod tests {
     async fn publish_dry_run_does_not_send_request() {
         // dry_run should succeed without a running backend
         let result = super::publish(
-            "http://localhost:0",   // unreachable URL
+            "http://localhost:0", // unreachable URL
             VALID_CONTRACT_ID,
             "My Contract",
             Some("A test contract"),
@@ -2186,7 +2210,11 @@ mod tests {
             true,
         )
         .await;
-        assert!(result.is_ok(), "Dry-run should succeed without backend: {:?}", result);
+        assert!(
+            result.is_ok(),
+            "Dry-run should succeed without backend: {:?}",
+            result
+        );
     }
 
     #[tokio::test]
@@ -2203,7 +2231,10 @@ mod tests {
             true,
         )
         .await;
-        assert!(result.is_err(), "Dry-run should still catch validation errors");
+        assert!(
+            result.is_err(),
+            "Dry-run should still catch validation errors"
+        );
     }
 }
 pub fn incident_trigger(contract_id: &str, severity_str: &str) -> Result<()> {

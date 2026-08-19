@@ -153,12 +153,12 @@ fn print_human(
 
     for hit in &collected.items {
         let verified = if hit.is_verified {
-            " ✓ verified".green().to_string()
+            " [verified]".green().to_string()
         } else {
             String::new()
         };
         let deprecated = if hit.is_deprecated {
-            " ⚠ deprecated".yellow().to_string()
+            " [deprecated]".yellow().to_string()
         } else {
             String::new()
         };
@@ -198,7 +198,7 @@ fn print_pagination_footer(
     };
 
     println!(
-        "  {} {} result(s){} · {} page(s) · {} pagination",
+        "  {} {} result(s){} | {} page(s) | {} pagination",
         "Showing".bold(),
         collected.items.len(),
         of_total,

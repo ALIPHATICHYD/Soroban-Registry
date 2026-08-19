@@ -40,7 +40,7 @@ let client = RegistryClient::from_config(
 | `auth` | `Auth::None` | `Auth::bearer(token)` or `Auth::api_key(header, value)`. |
 | `timeout` | 30s | Applied per attempt, not per call. |
 | `user_agent` | `soroban-registry-client/<version>` | Identifies the SDK to the registry. |
-| `retry` | 3 attempts, 250 ms → ×3 backoff, honours `Retry-After` | See [Retries](#retries). |
+| `retry` | 3 attempts, 250 ms initial backoff, x3 growth, honours `Retry-After` | See [Retries](#retries). |
 
 `RegistryClient::with_http_client` takes your own `reqwest::Client` when you
 need custom TLS, proxies or pooling. Cloning a client is cheap and shares the

@@ -68,7 +68,7 @@ impl ResponseCache for CliResponseCache {
     fn get(&self, key: &str) -> Option<String> {
         if self.options.no_cache {
             if self.options.verbose >= 1 {
-                eprintln!("{} cache bypassed: {}", "↷".yellow(), truncate(key));
+                eprintln!("{} bypassed: {}", "[cache]".yellow(), truncate(key));
             }
             return None;
         }
@@ -77,8 +77,8 @@ impl ResponseCache for CliResponseCache {
             Ok(Some(entry)) => {
                 if self.options.verbose >= 1 {
                     eprintln!(
-                        "{} cache hit (expires in {}s): {}",
-                        "◀".cyan(),
+                        "{} hit (expires in {}s): {}",
+                        "[cache]".cyan(),
                         entry.expires_in().unwrap_or(0),
                         truncate(key)
                     );
@@ -101,7 +101,7 @@ impl ResponseCache for CliResponseCache {
         if let Err(err) = crate::cache::set_http_entry(&Self::disk_key(key), body) {
             log::debug!("HTTP cache write failed: {err}");
         } else if self.options.verbose >= 1 {
-            eprintln!("{} cached response: {}", "▶".cyan(), truncate(key));
+            eprintln!("{} stored: {}", "[cache]".cyan(), truncate(key));
         }
     }
 }
