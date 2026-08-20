@@ -3649,7 +3649,7 @@ pub struct CollaborativeReviewDetails {
 // ADVANCED CONTRACT DEPENDENCIES (issue #417)
 // ═══════════════════════════════════════════════════════════════════════════
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct DependencyNode {
     pub contract_id: String,
     pub resolved_id: Option<Uuid>,
@@ -3661,7 +3661,7 @@ pub struct DependencyNode {
     pub visualization_hints: serde_json::Value,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct DependencyResponse {
     pub root: DependencyNode,
     pub total_dependencies: usize,

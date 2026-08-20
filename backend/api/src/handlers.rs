@@ -5664,64 +5664,6 @@ pub async fn get_trust_score() -> impl IntoResponse {
 #[allow(dead_code)]
 #[utoipa::path(
     get,
-    path = "/api/contracts/{id}/dependencies",
-    params(
-        ("id" = String, Path, description = "Contract UUID")
-    ),
-    responses(
-        (status = 200, description = "List of direct dependencies", body = Object),
-        (status = 404, description = "Contract not found")
-    ),
-    tag = "Graphs"
-)]
-pub async fn get_contract_dependencies(
-    State(state): State<AppState>,
-    Path(id): Path<String>,
-) -> ApiResult<Json<Value>> {
-    let contract_uuid = Uuid::parse_str(&id)
-        .map_err(|_| ApiError::bad_request("InvalidContractId", format!("Invalid ID: {}", id)))?;
-
-    let deps: Vec<shared::ContractDependency> =
-        sqlx::query_as("SELECT * FROM contract_dependencies WHERE contract_id = $1")
-            .bind(contract_uuid)
-            .fetch_all(&state.db)
-            .await
-            .map_err(|e| db_internal_error("get_contract_dependencies", e))?;
-
-    Ok(Json(json!({ "dependencies": deps })))
-}
-
-#[utoipa::path(
-    get,
-    path = "/api/contracts/{id}/dependents",
-    params(
-        ("id" = String, Path, description = "Contract UUID")
-    ),
-    responses(
-        (status = 200, description = "List of direct dependents", body = Object),
-        (status = 404, description = "Contract not found")
-    ),
-    tag = "Graphs"
-)]
-pub async fn get_contract_dependents(
-    State(state): State<AppState>,
-    Path(id): Path<String>,
-) -> ApiResult<Json<Value>> {
-    let contract_uuid = Uuid::parse_str(&id)
-        .map_err(|_| ApiError::bad_request("InvalidContractId", format!("Invalid ID: {}", id)))?;
-
-    let dependents: Vec<shared::ContractDependency> =
-        sqlx::query_as("SELECT * FROM contract_dependencies WHERE dependency_contract_id = $1")
-            .bind(contract_uuid)
-            .fetch_all(&state.db)
-            .await
-            .map_err(|e| db_internal_error("get_contract_dependents", e))?;
-
-    Ok(Json(json!({ "dependents": dependents })))
-}
-
-#[utoipa::path(
-    get,
     path = "/api/contracts/graph",
     responses(
         (status = 200, description = "Full contract dependency graph", body = GraphResponse)

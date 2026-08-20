@@ -105,6 +105,7 @@ pub mod alerting;
 pub mod archival;
 pub mod audit;
 pub mod config;
+pub mod contract_ref;
 pub mod db_monitoring;
 pub mod db_pool;
 pub mod db_resilience;

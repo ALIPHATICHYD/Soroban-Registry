@@ -2,6 +2,7 @@ use crate::analytics_handlers;
 use crate::breaking_changes;
 use crate::contract_stats_handlers;
 use crate::custom_metrics_handlers;
+use crate::dependency_handlers;
 use crate::deprecation_handlers;
 use crate::handlers;
 use crate::handlers::{ContractChangelogEntry, ContractChangelogResponse};
@@ -38,8 +39,8 @@ use utoipa::OpenApi;
         handlers::get_contract_openapi_json,
         analytics_handlers::get_contract_analytics,
         analytics_handlers::get_analytics_summary,
-        handlers::get_contract_dependencies,
-        handlers::get_contract_dependents,
+        dependency_handlers::get_contract_dependencies,
+        dependency_handlers::get_contract_dependents,
         handlers::get_contract_graph,
         handlers::get_impact_analysis,
         contract_stats_handlers::get_contract_stats,
