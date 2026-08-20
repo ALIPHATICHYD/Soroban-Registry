@@ -440,3 +440,151 @@ pub async fn declare_contract_dependencies(
         }),
     ))
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Issue #1147 — Dependency graph summary and transitive risk
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Response for GET /api/contracts/:id/dependency-graph
+///
+/// A flat summary rather than the nested tree: this endpoint exists to answer
+/// "how big and how healthy is the closure", which a caller should be able to
+/// read without walking a recursive structure.
+#[derive(Debug, serde::Serialize, utoipa::ToSchema)]
+pub struct DependencyGraphSummary {
+    pub contract_id: Uuid,
+    pub network: String,
+    pub total_dependencies: usize,
+    /// Reachable contracts that resolved to a registry row.
+    pub resolved: usize,
+    /// References retained but not bound to any contract.
+    pub unresolved: usize,
+    /// Nodes hidden by tenancy: counted so the total stays honest, never named.
+    pub redacted: usize,
+    pub max_depth: usize,
+    pub has_circular: bool,
+    pub truncated: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub truncation_reason: Option<shared::dependency_graph::TruncationReason>,
+    /// Graph facts with no severity: cycles, unresolved edges, truncation.
+    pub diagnostics: Vec<shared::dependency_graph::Diagnostic>,
+}
+
+/// GET /api/contracts/:id/dependency-graph
+#[utoipa::path(
+    get,
+    path = "/api/contracts/{id}/dependency-graph",
+    params(
+        ("id" = String, Path, description = "Contract UUID or Stellar contract address"),
+        ("network" = Option<String>, Query, description = "Required to disambiguate an address registered on more than one network"),
+        ("depth" = Option<u32>, Query, description = "Maximum traversal depth, capped server-side"),
+        ("max_nodes" = Option<u32>, Query, description = "Maximum nodes returned, capped server-side"),
+        ("as_of" = Option<String>, Query, description = "RFC3339 instant; replays the declared graph as it stood then"),
+        ("include_telemetry" = Option<bool>, Query, description = "Include on-chain call edges alongside declared ones")
+    ),
+    responses(
+        (status = 200, description = "Dependency graph summary", body = DependencyGraphSummary),
+        (status = 404, description = "Contract not found"),
+        (status = 409, description = "Ambiguous contract address; retry with ?network=")
+    ),
+    tag = "Graphs"
+)]
+pub async fn get_dependency_graph(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Query(query): Query<DependencyQuery>,
+) -> ApiResult<Json<DependencyGraphSummary>> {
+    let contract = contract_ref::resolve(&state, &id, query.network).await?;
+
+    let request = TraversalRequest {
+        root: contract.uuid,
+        network: contract.network,
+        direction: Direction::Dependencies,
+        transitive: query.transitive.unwrap_or(true),
+        max_depth: query
+            .depth
+            .unwrap_or(shared::dependency_graph::DEFAULT_MAX_DEPTH),
+        max_nodes: query
+            .max_nodes
+            .unwrap_or(shared::dependency_graph::DEFAULT_MAX_NODES),
+        as_of: query.as_of,
+        caller_org: None,
+        include_telemetry: query.include_telemetry.unwrap_or(false),
+    };
+
+    let result = dependency_graph::traverse(&state.db, &request).await?;
+
+    let resolved = result
+        .rows
+        .iter()
+        .filter(|r| r.target_contract_id.is_some() && r.visible)
+        .count();
+    let redacted = result.rows.iter().filter(|r| !r.visible).count();
+    let unresolved = result
+        .rows
+        .iter()
+        .filter(|r| r.target_contract_id.is_none())
+        .count();
+
+    Ok(Json(DependencyGraphSummary {
+        contract_id: contract.uuid,
+        network: contract.network.to_string(),
+        total_dependencies: result.rows.len(),
+        resolved,
+        unresolved,
+        redacted,
+        max_depth: result
+            .rows
+            .iter()
+            .map(|r| r.depth as usize)
+            .max()
+            .unwrap_or(0),
+        has_circular: result
+            .diagnostics
+            .iter()
+            .any(|d| d.kind == DiagnosticKind::Cycle),
+        truncated: result.truncated,
+        truncation_reason: result.truncation_reason,
+        diagnostics: result.diagnostics,
+    }))
+}
+
+/// GET /api/contracts/:id/dependency-risk
+///
+/// Direct and inherited findings, each with the shortest path that reaches it,
+/// plus severity-free diagnostics.
+#[utoipa::path(
+    get,
+    path = "/api/contracts/{id}/dependency-risk",
+    params(
+        ("id" = String, Path, description = "Contract UUID or Stellar contract address"),
+        ("network" = Option<String>, Query, description = "Required to disambiguate an address registered on more than one network"),
+        ("depth" = Option<u32>, Query, description = "Maximum traversal depth, capped server-side")
+    ),
+    responses(
+        (status = 200, description = "Transitive risk report", body = Object),
+        (status = 404, description = "Contract not found"),
+        (status = 409, description = "Ambiguous contract address; retry with ?network=")
+    ),
+    tag = "Graphs"
+)]
+pub async fn get_dependency_risk(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Query(query): Query<DependencyQuery>,
+) -> ApiResult<Json<crate::dependency_risk::DependencyRiskReport>> {
+    let contract = contract_ref::resolve(&state, &id, query.network).await?;
+
+    let report = crate::dependency_risk::assess(
+        &state,
+        contract.uuid,
+        contract.network,
+        query
+            .depth
+            .unwrap_or(shared::dependency_graph::DEFAULT_MAX_DEPTH),
+        None,
+    )
+    .await?;
+
+    Ok(Json(report))
+}

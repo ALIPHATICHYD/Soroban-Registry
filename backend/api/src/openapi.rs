@@ -41,6 +41,8 @@ use utoipa::OpenApi;
         analytics_handlers::get_analytics_summary,
         dependency_handlers::get_contract_dependencies,
         dependency_handlers::get_contract_dependents,
+        dependency_handlers::get_dependency_graph,
+        dependency_handlers::get_dependency_risk,
         handlers::get_contract_graph,
         handlers::get_impact_analysis,
         contract_stats_handlers::get_contract_stats,
