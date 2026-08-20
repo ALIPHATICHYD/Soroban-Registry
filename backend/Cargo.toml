@@ -1,5 +1,13 @@
 [workspace]
-members = ["api", "indexer", "verifier", "shared", "seeder", "contract_abi"]
+members = [
+    "api",
+    "indexer",
+    "verifier",
+    "shared",
+    "seeder",
+    "contract_abi",
+    "registry_client",
+]
 resolver = "2"
 
 [workspace.package]

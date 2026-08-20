@@ -398,6 +398,9 @@ async fn resolve_drafts(
             request: PublishRequest {
                 contract_id,
                 wasm_hash,
+                // This flow registers already-deployed contracts from metadata,
+                // so there is no artifact to upload alongside the hash.
+                wasm_artifact_base64: None,
                 name,
                 slug,
                 description,
