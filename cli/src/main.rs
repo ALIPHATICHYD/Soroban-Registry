@@ -30,6 +30,7 @@ mod contract_deploy;
 mod contract_deprecate;
 mod contract_snapshot;
 mod contract_highlight;
+mod contract_compatibility;
 mod contract_interaction;
 mod contract_interfaces;
 mod contract_provenance;
@@ -2036,6 +2037,43 @@ pub enum ContractCommands {
         /// version doesn't match the version recorded in provenance.
         #[arg(long)]
         allow_toolchain_mismatch: bool,
+
+        /// Output results as machine-readable JSON
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// Structurally compare two local compiled WASM artifacts and classify
+    /// ABI changes as compatible, potentially breaking, breaking, or
+    /// unknown.
+    ///
+    /// Usage: soroban-registry contract compatibility --from <wasm> --to <wasm> [--strict] [--json] [--fail-on <level>]
+    Compatibility {
+        /// Path to the earlier/baseline compiled WASM contract.
+        #[arg(long)]
+        from: String,
+
+        /// Path to the newer/candidate compiled WASM contract.
+        #[arg(long)]
+        to: String,
+
+        /// Network passphrase associated with the `--from` artifact.
+        #[arg(long)]
+        from_network_passphrase: Option<String>,
+
+        /// Network passphrase associated with the `--to` artifact.
+        #[arg(long)]
+        to_network_passphrase: Option<String>,
+
+        /// Exit non-zero when changes at or above the --fail-on threshold
+        /// are found (default threshold: potentially_breaking).
+        #[arg(long)]
+        strict: bool,
+
+        /// Minimum severity that triggers a non-zero exit under --strict:
+        /// breaking | potential | unknown
+        #[arg(long, default_value = "potential")]
+        fail_on: String,
 
         /// Output results as machine-readable JSON
         #[arg(long)]
@@ -4315,6 +4353,35 @@ pub async fn dispatch_command(
                     &expected_hash,
                     allow_toolchain_mismatch,
                     json,
+                )
+                .await?;
+            }
+            ContractCommands::Compatibility {
+                from,
+                to,
+                from_network_passphrase,
+                to_network_passphrase,
+                strict,
+                fail_on,
+                json,
+            } => {
+                log::debug!(
+                    "Command: contract compatibility | from={} to={} strict={} fail_on={} json={}",
+                    from,
+                    to,
+                    strict,
+                    fail_on,
+                    json
+                );
+                let fail_on = contract_compatibility::FailOn::parse(&fail_on)?;
+                contract_compatibility::run(
+                    &from,
+                    &to,
+                    from_network_passphrase,
+                    to_network_passphrase,
+                    strict,
+                    json,
+                    fail_on,
                 )
                 .await?;
             }

@@ -222,6 +222,7 @@ pub enum SpecParseError {
     InvalidDiscriminant { at: usize, value: i32 },
     InvalidUtf8 { at: usize },
     TrailingBytes { at: usize },
+    TypeNestingTooDeep { at: usize },
 }
 
 impl fmt::Display for SpecParseError {
@@ -240,20 +241,35 @@ impl fmt::Display for SpecParseError {
             SpecParseError::TrailingBytes { at } => {
                 write!(f, "trailing unparsed bytes starting at {at}")
             }
+            SpecParseError::TypeNestingTooDeep { at } => write!(
+                f,
+                "type nesting exceeds maximum depth of {MAX_TYPE_DEPTH} at byte {at}"
+            ),
         }
     }
 }
 
 impl std::error::Error for SpecParseError {}
 
+/// Upper bound on `ScSpecTypeDef` nesting (`Option<Option<...>>`, etc.).
+/// Real Soroban contract specs nest a handful of levels deep at most; this
+/// exists purely to bound recursion against a crafted/corrupted section, not
+/// to constrain legitimate specs.
+const MAX_TYPE_DEPTH: usize = 32;
+
 struct Cursor<'a> {
     bytes: &'a [u8],
     pos: usize,
+    type_depth: usize,
 }
 
 impl<'a> Cursor<'a> {
     fn new(bytes: &'a [u8]) -> Self {
-        Self { bytes, pos: 0 }
+        Self {
+            bytes,
+            pos: 0,
+            type_depth: 0,
+        }
     }
 
     fn remaining(&self) -> usize {
@@ -311,6 +327,16 @@ impl<'a> Cursor<'a> {
 
     fn read_type_def(&mut self) -> Result<ScSpecTypeDef, SpecParseError> {
         let at = self.pos;
+        if self.type_depth >= MAX_TYPE_DEPTH {
+            return Err(SpecParseError::TypeNestingTooDeep { at });
+        }
+        self.type_depth += 1;
+        let result = self.read_type_def_inner(at);
+        self.type_depth -= 1;
+        result
+    }
+
+    fn read_type_def_inner(&mut self, at: usize) -> Result<ScSpecTypeDef, SpecParseError> {
         let disc = self.read_i32()?;
         let ty = match disc {
             0 => ScSpecTypeDef::Val,
@@ -807,5 +833,45 @@ mod tests {
     fn empty_section_yields_no_entries() {
         let entries = parse_contract_spec(&[]).unwrap();
         assert!(entries.is_empty());
+    }
+
+    #[test]
+    fn deeply_nested_option_type_is_rejected_not_stack_overflowed() {
+        let mut e = Encoder::new();
+        e.i32(0); // SC_SPEC_ENTRY_FUNCTION_V0
+        e.string("");
+        e.string("f");
+        e.u32(1); // inputs count
+        e.string("");
+        e.string("x");
+        // Nest far past MAX_TYPE_DEPTH consecutive Option wrappers with no
+        // terminal scalar; this would recurse unboundedly without the guard.
+        for _ in 0..(MAX_TYPE_DEPTH + 100) {
+            e.i32(1000); // Option
+        }
+        let bytes = e.finish();
+
+        let err = parse_contract_spec(&bytes).unwrap_err();
+        assert!(matches!(err, SpecParseError::TypeNestingTooDeep { .. }));
+    }
+
+    #[test]
+    fn moderately_nested_types_still_parse_successfully() {
+        let mut e = Encoder::new();
+        e.i32(0);
+        e.string("");
+        e.string("f");
+        e.u32(1);
+        e.string("");
+        e.string("x");
+        for _ in 0..5 {
+            e.i32(1000); // Option
+        }
+        e.type_scalar(4); // terminal U32
+        e.u32(0);
+        let bytes = e.finish();
+
+        let entries = parse_contract_spec(&bytes).unwrap();
+        assert_eq!(entries.len(), 1);
     }
 }
