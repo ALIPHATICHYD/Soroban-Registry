@@ -455,9 +455,165 @@ pub async fn save_dependencies(
         .await?;
     }
 
+    write_canonical_edges(&mut tx, contract_id, network, decls, &resolutions).await?;
+
     tx.commit().await?;
 
     Ok(resolutions)
+}
+
+/// Row shape for comparing a declaration against the edge currently on record.
+#[derive(sqlx::FromRow)]
+struct CurrentEdge {
+    target_ref: String,
+    target_contract_id: Option<Uuid>,
+    version_constraint: Option<String>,
+    expected_interface_id: Option<String>,
+    edge_state: String,
+}
+
+/// Mirror the declared dependency set into `contract_dependency_edges`
+/// (Issue #1147), superseding rather than deleting.
+///
+/// **Only genuine changes are superseded.** The natural implementation --
+/// supersede everything, insert everything, mirroring the DELETE-then-INSERT
+/// above -- would append a full history generation on every save even when
+/// nothing changed. `as_of` would then replay a wall of no-op churn and stop
+/// meaning anything. So a declaration whose `(target, version_constraint,
+/// expected_interface_id, state)` tuple is unchanged is left alone, keeping its
+/// original `recorded_at`.
+///
+/// Telemetry edges are never written here: they are read live from
+/// `contract_call_edge_daily_aggregates`, which is already the historical
+/// record and is upserted on every contract invocation.
+async fn write_canonical_edges(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    contract_id: Uuid,
+    network: Network,
+    decls: &[DependencyDeclaration],
+    resolutions: &[DependencyResolution],
+) -> Result<()> {
+    let current: Vec<CurrentEdge> = sqlx::query_as(
+        "SELECT target_ref, target_contract_id, version_constraint, expected_interface_id,
+                edge_state::text AS edge_state
+         FROM contract_dependency_edges
+         WHERE source_contract_id = $1
+           AND network = $2
+           AND edge_source = 'declared'
+           AND superseded_at IS NULL",
+    )
+    .bind(contract_id)
+    .bind(network)
+    .fetch_all(&mut **tx)
+    .await?;
+
+    let current_by_ref: HashMap<&str, &CurrentEdge> = current
+        .iter()
+        .map(|edge| (edge.target_ref.as_str(), edge))
+        .collect();
+
+    let mut unchanged: Vec<&str> = Vec::new();
+    let mut to_write: Vec<(&DependencyDeclaration, EdgeFacts)> = Vec::new();
+
+    for (decl, resolution) in decls.iter().zip(resolutions) {
+        let facts = edge_facts(tx, resolution).await?;
+        match current_by_ref.get(decl.name.as_str()) {
+            Some(existing)
+                if existing.target_contract_id == facts.target_contract_id
+                    && existing.version_constraint.as_deref()
+                        == Some(decl.version_constraint.as_str())
+                    && existing.expected_interface_id == facts.expected_interface_id
+                    && existing.edge_state == facts.edge_state =>
+            {
+                unchanged.push(decl.name.as_str());
+            }
+            _ => to_write.push((decl, facts)),
+        }
+    }
+
+    // Supersede every current edge that is not being carried forward unchanged:
+    // both the ones being rewritten and the ones the operator dropped.
+    sqlx::query(
+        "UPDATE contract_dependency_edges
+         SET superseded_at = NOW()
+         WHERE source_contract_id = $1
+           AND network = $2
+           AND edge_source = 'declared'
+           AND superseded_at IS NULL
+           AND target_ref <> ALL($3)",
+    )
+    .bind(contract_id)
+    .bind(network)
+    .bind(&unchanged)
+    .execute(&mut **tx)
+    .await?;
+
+    for (decl, facts) in &to_write {
+        sqlx::query(
+            "INSERT INTO contract_dependency_edges
+                (source_contract_id, target_contract_id, target_ref, network, edge_source,
+                 edge_state, version_constraint, expected_interface_id, expected_wasm_hash)
+             VALUES ($1, $2, $3, $4, 'declared', $5::dependency_edge_state, $6, $7, $8)",
+        )
+        .bind(contract_id)
+        .bind(facts.target_contract_id)
+        .bind(&decl.name)
+        .bind(network)
+        .bind(&facts.edge_state)
+        .bind(&decl.version_constraint)
+        .bind(&facts.expected_interface_id)
+        .bind(&facts.expected_wasm_hash)
+        .execute(&mut **tx)
+        .await?;
+    }
+
+    Ok(())
+}
+
+/// The target-derived facts recorded on an edge at declaration time.
+struct EdgeFacts {
+    target_contract_id: Option<Uuid>,
+    edge_state: String,
+    expected_interface_id: Option<String>,
+    expected_wasm_hash: Option<String>,
+}
+
+/// Snapshot the target's interface id and wasm hash as they are *now*.
+///
+/// These are the comparands for interface incompatibility later: the edge says
+/// what the target looked like when the dependency was declared, and drift from
+/// the target's current values is the diagnostic. Current values are always
+/// JOINed at read time; they are never denormalized onto the edge.
+async fn edge_facts(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    resolution: &DependencyResolution,
+) -> Result<EdgeFacts> {
+    let (target_contract_id, edge_state) = match resolution {
+        DependencyResolution::Resolved(id) => (Some(*id), "resolved"),
+        DependencyResolution::NetworkMismatch { .. } => (None, "network_mismatch"),
+        DependencyResolution::UnknownAddress | DependencyResolution::NotAnAddress => {
+            (None, "unresolved")
+        }
+    };
+
+    let (expected_interface_id, expected_wasm_hash) = match target_contract_id {
+        Some(id) => sqlx::query_as::<_, (Option<String>, String)>(
+            "SELECT interface_id, wasm_hash FROM contracts WHERE id = $1",
+        )
+        .bind(id)
+        .fetch_optional(&mut **tx)
+        .await?
+        .map(|(interface_id, wasm_hash)| (interface_id, Some(wasm_hash)))
+        .unwrap_or((None, None)),
+        None => (None, None),
+    };
+
+    Ok(EdgeFacts {
+        target_contract_id,
+        edge_state: edge_state.to_string(),
+        expected_interface_id,
+        expected_wasm_hash,
+    })
 }
 
 /// Build a localized graph around a specific contract
