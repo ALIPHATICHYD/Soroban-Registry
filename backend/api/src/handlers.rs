@@ -4655,7 +4655,10 @@ async fn publish_contract_inner(
     req: PublishRequest,
 ) -> ApiResult<Json<Contract>> {
     let publisher_id = actor.publisher_id()?;
-    let artifact_scan = match req.wasm_artifact_base64.as_deref() {
+    // The decoded artifact serves two consumers (Issue #1147): the existing
+    // scanner, and the interface fingerprint persisted on the row. Decode once.
+    let artifact = req.wasm_artifact_base64.as_deref();
+    let (artifact_scan, interface_id, interface_algorithm) = match artifact {
         Some(encoded) => {
             let bytes = BASE64.decode(encoded).map_err(|_| {
                 ApiError::bad_request(
@@ -4663,12 +4666,19 @@ async fn publish_contract_inner(
                     "wasm_artifact_base64 must be valid base64",
                 )
             })?;
-            crate::wasm_scanner::scan(&bytes, &req.wasm_hash)
+            let scan = crate::wasm_scanner::scan(&bytes, &req.wasm_hash);
+            let (interface_id, algorithm) =
+                crate::interface_id::derive_columns(&bytes, &req.contract_id);
+            (scan, interface_id, algorithm)
         }
-        None => crate::wasm_scanner::WasmScanResult {
-            status: "pending",
-            findings: vec!["artifact_not_supplied".to_string()],
-        },
+        None => (
+            crate::wasm_scanner::WasmScanResult {
+                status: "pending",
+                findings: vec!["artifact_not_supplied".to_string()],
+            },
+            None,
+            None,
+        ),
     };
     let wasm_hash = req.wasm_hash.clone();
 
@@ -4728,8 +4738,8 @@ async fn publish_contract_inner(
     let slug = generate_unique_slug(&state.db, &req.name, &req.network, req.slug.clone()).await?;
 
     let insert_result = sqlx::query_as::<_, Contract>(
-        "INSERT INTO contracts (contract_id, wasm_hash, name, slug, description, publisher_id, network, category, tags, logical_id, network_configs, visibility, artifact_scan_status, artifact_scan_findings)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, CASE WHEN $12 = 'passed' THEN 'public'::visibility_type ELSE 'private'::visibility_type END, $12, $13)
+        "INSERT INTO contracts (contract_id, wasm_hash, name, slug, description, publisher_id, network, category, tags, logical_id, network_configs, visibility, artifact_scan_status, artifact_scan_findings, interface_id, interface_algorithm)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, CASE WHEN $12 = 'passed' THEN 'public'::visibility_type ELSE 'private'::visibility_type END, $12, $13, $14, $15)
          RETURNING *",
     )
     .bind(&req.contract_id)
@@ -4745,6 +4755,8 @@ async fn publish_contract_inner(
     .bind(&network_configs)
     .bind(artifact_scan.status)
     .bind(json!(artifact_scan.findings))
+    .bind(&interface_id)
+    .bind(interface_algorithm)
     .fetch_one(&state.db)
     .await;
 

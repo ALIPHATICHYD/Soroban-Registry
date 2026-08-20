@@ -44,6 +44,7 @@ pub mod health;
 pub mod health_monitor;
 pub mod incident_handlers;
 pub mod incident_routes;
+pub mod interface_id;
 pub mod interoperability;
 pub mod interoperability_handlers;
 pub mod logging;
