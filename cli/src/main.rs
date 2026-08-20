@@ -75,6 +75,7 @@ mod wizard;
 mod diagnostic;
 mod output_format;
 mod search;
+mod publisher;
 
 use anyhow::Result;
 use clap::{ArgAction, Parser, Subcommand, ValueEnum};
@@ -125,6 +126,17 @@ pub struct Cli {
 
     #[command(subcommand)]
     pub command: Commands,
+}
+
+#[derive(Parser)]
+pub enum PublisherCommands {
+    /// Run diagnostic checks for the publisher
+    Doctor {
+        #[arg(long)]
+        api_url: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -209,6 +221,8 @@ pub enum Commands {
         /// Skip pre-submission contract tests
         #[arg(long)]
         skip_tests: bool,
+
+        Publisher(PublisherCommands),
     },
 
     /// List contracts in the registry
