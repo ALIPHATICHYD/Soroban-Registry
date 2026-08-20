@@ -167,6 +167,29 @@ Closes #37
 - Use `cargo clippy` for linting
 - Document public APIs with doc comments
 
+##### Transaction Discipline
+
+Any backend handler that writes to **more than one table** must wrap its core logic in `crate::transaction::with_transaction`. This ensures that partial writes are rolled back if a crash or conflict occurs mid-request, preserving database consistency.
+
+```rust
+use crate::transaction::with_transaction;
+
+let result = with_transaction(&state.db, "operation_name", |mut tx| async move {
+    // Write 1
+    sqlx::query("INSERT INTO table1 ...").execute(&mut *tx).await?;
+    
+    // Write 2
+    sqlx::query("INSERT INTO table2 ...").execute(&mut *tx).await?;
+    
+    // Return both your result and the transaction ownership
+    Ok((some_value, tx))
+}).await?;
+```
+
+- **Rule 1**: Always use `&mut *tx` (the transaction context) for writes inside the closure. Never use `&state.db`.
+- **Rule 2**: Read-only helpers can still use `&state.db` if they don't depend on uncommitted writes, but if they must see the transaction's changes, pass `&mut *tx`.
+- **Rule 3**: Handlers that only write to a *single* table do not require explicit transactions (autocommit is sufficient).
+
 ```rust
 /// Fetches contract dependencies
 ///

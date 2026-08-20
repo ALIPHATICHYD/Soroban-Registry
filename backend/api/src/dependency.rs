@@ -338,10 +338,23 @@ pub async fn save_dependencies(
     contract_id: Uuid,
     decls: &[DependencyDeclaration],
 ) -> Result<()> {
+    let mut tx = pool.begin().await?;
+    save_dependencies_tx(pool, &mut *tx, contract_id, decls).await?;
+    tx.commit().await?;
+    Ok(())
+}
+
+/// Transactional variant of `save_dependencies`
+pub async fn save_dependencies_tx(
+    pool: &PgPool,
+    conn: &mut sqlx::PgConnection,
+    contract_id: Uuid,
+    decls: &[DependencyDeclaration],
+) -> Result<()> {
     // Clear existing dependencies (optional, depends on if we want to merge or replace)
     sqlx::query("DELETE FROM contract_static_dependencies WHERE contract_id = $1")
         .bind(contract_id)
-        .execute(pool)
+        .execute(&mut *conn)
         .await?;
 
     for decl in decls {
@@ -371,7 +384,7 @@ pub async fn save_dependencies(
         .bind(&decl.name)
         .bind(dep_contract_id)
         .bind(&decl.version_constraint)
-        .execute(pool)
+        .execute(&mut *conn)
         .await?;
     }
 

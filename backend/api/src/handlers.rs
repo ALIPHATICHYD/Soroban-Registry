@@ -1424,7 +1424,15 @@ async fn record_contract_interaction(
     input: ContractInteractionInsert<'_>,
 ) -> Result<Uuid, sqlx::Error> {
     let mut tx = db.begin().await?;
+    let interaction_id = record_contract_interaction_inner(&mut *tx, input).await?;
+    tx.commit().await?;
+    Ok(interaction_id)
+}
 
+pub(crate) async fn record_contract_interaction_inner(
+    conn: &mut sqlx::PgConnection,
+    input: ContractInteractionInsert<'_>,
+) -> Result<Uuid, sqlx::Error> {
     let interaction_id: Uuid = sqlx::query_scalar(
         r#"
         INSERT INTO contract_interactions
@@ -1446,7 +1454,7 @@ async fn record_contract_interaction(
     .bind(input.timestamp)
     .bind(input.network)
     .bind(input.timestamp)
-    .fetch_one(&mut *tx)
+    .fetch_one(&mut *conn)
     .await?;
 
     sqlx::query(
@@ -1464,7 +1472,7 @@ async fn record_contract_interaction(
     .bind(input.interaction_type)
     .bind(input.network)
     .bind(input.timestamp.date_naive())
-    .execute(&mut *tx)
+    .execute(&mut *conn)
     .await?;
 
     if input.interaction_type == "invoke" {
@@ -1485,13 +1493,11 @@ async fn record_contract_interaction(
                 .bind(target_contract_id)
                 .bind(input.network)
                 .bind(input.timestamp.date_naive())
-                .execute(&mut *tx)
+                .execute(&mut *conn)
                 .await?;
             }
         }
     }
-
-    tx.commit().await?;
 
     Ok(interaction_id)
 }
@@ -4727,87 +4733,147 @@ async fn publish_contract_inner(
 
     let slug = generate_unique_slug(&state.db, &req.name, &req.network, req.slug.clone()).await?;
 
-    let insert_result = sqlx::query_as::<_, Contract>(
-        "INSERT INTO contracts (contract_id, wasm_hash, name, slug, description, publisher_id, network, category, tags, logical_id, network_configs, visibility, artifact_scan_status, artifact_scan_findings)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, CASE WHEN $12 = 'passed' THEN 'public'::visibility_type ELSE 'private'::visibility_type END, $12, $13)
-         RETURNING *",
-    )
-    .bind(&req.contract_id)
-    .bind(&wasm_hash)
-    .bind(&req.name)
-    .bind(&slug)
-    .bind(&req.description)
-    .bind(publisher_id)
-    .bind(&req.network)
-    .bind(&req.category)
-    .bind(&req.tags)
-    .bind(Option::<Uuid>::None as Option<Uuid>)
-    .bind(&network_configs)
-    .bind(artifact_scan.status)
-    .bind(json!(artifact_scan.findings))
-    .fetch_one(&state.db)
-    .await;
+    let ip_address = extract_ip_address(headers);
 
-    let contract = match insert_result {
-        Ok(c) => c,
-        Err(err) => {
-            if let sqlx::Error::Database(ref e) = err {
-                if e.constraint() == Some("contracts_contract_id_network_key") {
-                    return Err(ApiError::conflict(
-                        "ContractAlreadyRegistered",
-                        format!(
-                            "Contract {} is already registered for network {}",
-                            req.contract_id, req.network
-                        ),
-                    ));
-                }
-                if e.constraint() == Some("contracts_wasm_hash_key") {
-                    let existing: Contract = sqlx::query_as("SELECT * FROM contracts WHERE wasm_hash = $1")
-                        .bind(&wasm_hash)
-                        .fetch_one(&state.db)
-                        .await
-                        .map_err(|e2| db_internal_error("fetch existing canonical contract", e2))?;
-
-                    return Err(ApiError::conflict(
-                        "DuplicateContractContent",
-                        "A contract with identical WASM content already exists.",
-                    )
-                    .with_details(serde_json::json!({
-                        "existing_contract": {
-                            "id": existing.id,
-                            "contract_id": existing.contract_id,
-                            "slug": existing.slug,
-                            "network": existing.network.to_string(),
-                            "wasm_hash": existing.wasm_hash,
-                            "published_at": existing.created_at,
-                        }
-                    })));
-                }
-            }
-            return Err(db_internal_error("create contract", err));
-        }
-    };
-
-    // Create verification task for the validator network (Issue # validator network)
-    let _ = sqlx::query(
-        "INSERT INTO verification_tasks (contract_id, wasm_hash, status) VALUES ($1, $2, 'pending') ON CONFLICT DO NOTHING"
-    )
-    .bind(contract.id)
-    .bind(&wasm_hash)
-    .execute(&state.db)
-    .await;
-
-    // Set logical_id = id so this row is its own logical contract (Issue #43)
-    let _ = sqlx::query("UPDATE contracts SET logical_id = id WHERE id = $1")
-        .bind(contract.id)
-        .execute(&state.db)
+    let (contract, req) = crate::transaction::with_transaction(&state.db, "publish_contract", |mut tx| async move {
+        let insert_result = sqlx::query_as::<_, Contract>(
+            "INSERT INTO contracts (contract_id, wasm_hash, name, slug, description, publisher_id, network, category, tags, logical_id, network_configs, visibility, artifact_scan_status, artifact_scan_findings)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, CASE WHEN $12 = 'passed' THEN 'public'::visibility_type ELSE 'private'::visibility_type END, $12, $13)
+             RETURNING *",
+        )
+        .bind(&req.contract_id)
+        .bind(&wasm_hash)
+        .bind(&req.name)
+        .bind(&slug)
+        .bind(&req.description)
+        .bind(publisher_id)
+        .bind(&req.network)
+        .bind(&req.category)
+        .bind(&req.tags)
+        .bind(Option::<Uuid>::None as Option<Uuid>)
+        .bind(&network_configs)
+        .bind(artifact_scan.status)
+        .bind(json!(artifact_scan.findings))
+        .fetch_one(&mut *tx)
         .await;
 
-    let contract: Contract = sqlx::query_as("SELECT * FROM contracts WHERE id = $1")
+        let contract = match insert_result {
+            Ok(c) => c,
+            Err(err) => {
+                if let sqlx::Error::Database(ref e) = err {
+                    if e.constraint() == Some("contracts_contract_id_network_key") {
+                        return Err(ApiError::conflict(
+                            "ContractAlreadyRegistered",
+                            format!(
+                                "Contract {} is already registered for network {}",
+                                req.contract_id, req.network
+                            ),
+                        ));
+                    }
+                    if e.constraint() == Some("contracts_wasm_hash_key") {
+                        let existing: Contract = sqlx::query_as("SELECT * FROM contracts WHERE wasm_hash = $1")
+                            .bind(&wasm_hash)
+                            .fetch_one(&mut *tx)
+                            .await
+                            .map_err(|e2| db_internal_error("fetch existing canonical contract", e2))?;
+
+                        return Err(ApiError::conflict(
+                            "DuplicateContractContent",
+                            "A contract with identical WASM content already exists.",
+                        )
+                        .with_details(serde_json::json!({
+                            "existing_contract": {
+                                "id": existing.id,
+                                "contract_id": existing.contract_id,
+                                "slug": existing.slug,
+                                "network": existing.network.to_string(),
+                                "wasm_hash": existing.wasm_hash,
+                                "published_at": existing.created_at,
+                            }
+                        })));
+                    }
+                }
+                return Err(db_internal_error("create contract", err));
+            }
+        };
+
+        // Create verification task for the validator network (Issue # validator network)
+        let _ = sqlx::query(
+            "INSERT INTO verification_tasks (contract_id, wasm_hash, status) VALUES ($1, $2, 'pending') ON CONFLICT DO NOTHING"
+        )
         .bind(contract.id)
-        .fetch_one(&state.db)
+        .bind(&wasm_hash)
+        .execute(&mut *tx)
+        .await;
+
+        // Set logical_id = id so this row is its own logical contract (Issue #43)
+        let _ = sqlx::query("UPDATE contracts SET logical_id = id WHERE id = $1")
+            .bind(contract.id)
+            .execute(&mut *tx)
+            .await;
+
+        let contract: Contract = sqlx::query_as("SELECT * FROM contracts WHERE id = $1")
+            .bind(contract.id)
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(|err| db_internal_error("fetch contract after insert", err))?;
+
+        // Save dependencies if provided
+        if !req.dependencies.is_empty() {
+            if let Err(e) =
+                dependency::save_dependencies_tx(&state.db, &mut *tx, contract.id, &req.dependencies).await
+            {
+                tracing::error!(
+                    "Failed to save initial dependencies for contract {}: {}",
+                    contract.contract_id,
+                    e
+                );
+            }
+        }
+
+        let creation_changes = json!({
+            "contract_id": { "before": Value::Null, "after": contract.contract_id },
+            "name": { "before": Value::Null, "after": contract.name },
+            "slug": { "before": Value::Null, "after": contract.slug },
+            "description": { "before": Value::Null, "after": contract.description },
+            "publisher_id": { "before": Value::Null, "after": contract.publisher_id },
+            "network": { "before": Value::Null, "after": contract.network.to_string() },
+            "is_verified": { "before": Value::Null, "after": contract.is_verified },
+            "category": { "before": Value::Null, "after": contract.category },
+            "tags": { "before": Value::Null, "after": contract.tags }
+        });
+
+        write_contract_audit_log(
+            &mut *tx,
+            AuditActionType::ContractPublished,
+            contract.id,
+            publisher_id,
+            creation_changes,
+            &ip_address,
+        )
         .await
-        .map_err(|err| db_internal_error("fetch contract after insert", err))?;
+        .map_err(|err| db_internal_error("write contract_created audit log", err))?;
+
+        record_contract_interaction_inner(
+            &mut *tx,
+            ContractInteractionInsert {
+                contract_id: contract.id,
+                target_contract_id: None,
+                account: Some(&req.publisher_address),
+                interaction_type: "publish_success",
+                transaction_hash: None,
+                method: None,
+                parameters: None,
+                return_value: None,
+                timestamp: chrono::Utc::now(),
+                network: &contract.network,
+            },
+        )
+        .await
+        .map_err(|err| db_internal_error("record publish_success interaction", err))?;
+
+        Ok(((contract, req), tx))
+    }).await?;
 
     // Backfill contract metadata cache for immediate reads
     if let Ok(contract_json) = serde_json::to_string(&contract) {
@@ -4821,64 +4887,13 @@ async fn publish_contract_inner(
             .await;
     }
 
-    // Save dependencies if provided
     if !req.dependencies.is_empty() {
-        if let Err(e) =
-            dependency::save_dependencies(&state.db, contract.id, &req.dependencies).await
-        {
-            tracing::error!(
-                "Failed to save initial dependencies for contract {}: {}",
-                contract.contract_id,
-                e
-            );
-        }
         // Invalidate global graph cache
         state
             .cache
             .invalidate("system", "global:dependency_graph")
             .await;
     }
-
-    let creation_changes = json!({
-        "contract_id": { "before": Value::Null, "after": contract.contract_id },
-        "name": { "before": Value::Null, "after": contract.name },
-        "slug": { "before": Value::Null, "after": contract.slug },
-        "description": { "before": Value::Null, "after": contract.description },
-        "publisher_id": { "before": Value::Null, "after": contract.publisher_id },
-        "network": { "before": Value::Null, "after": contract.network.to_string() },
-        "is_verified": { "before": Value::Null, "after": contract.is_verified },
-        "category": { "before": Value::Null, "after": contract.category },
-        "tags": { "before": Value::Null, "after": contract.tags }
-    });
-
-    write_contract_audit_log(
-        &state.db,
-        AuditActionType::ContractPublished,
-        contract.id,
-        publisher_id,
-        creation_changes,
-        &extract_ip_address(headers),
-    )
-    .await
-    .map_err(|err| db_internal_error("write contract_created audit log", err))?;
-
-    record_contract_interaction(
-        &state.db,
-        ContractInteractionInsert {
-            contract_id: contract.id,
-            target_contract_id: None,
-            account: Some(&req.publisher_address),
-            interaction_type: "publish_success",
-            transaction_hash: None,
-            method: None,
-            parameters: None,
-            return_value: None,
-            timestamp: chrono::Utc::now(),
-            network: &contract.network,
-        },
-    )
-    .await
-    .map_err(|err| db_internal_error("record publish_success interaction", err))?;
 
     let _ = analytics::record_event(
         &state.db,
