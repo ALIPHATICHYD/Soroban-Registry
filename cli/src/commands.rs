@@ -75,13 +75,21 @@ pub fn profile(
             .context("Failed to serialize profile data")?;
         fs::write(output_path, profile_json)
             .with_context(|| format!("Failed to write profile output: {}", output_path))?;
-        println!("{} Profile output written to {}", "[OK]".green(), output_path);
+        println!(
+            "{} Profile output written to {}",
+            "[OK]".green(),
+            output_path
+        );
     }
 
     if let Some(flamegraph_path) = flamegraph {
         generate_flame_graph_file(&profile_data, flamegraph_path)
             .with_context(|| format!("Failed to generate flame graph at {}", flamegraph_path))?;
-        println!("{} Flame graph written to {}", "[OK]".green(), flamegraph_path);
+        println!(
+            "{} Flame graph written to {}",
+            "[OK]".green(),
+            flamegraph_path
+        );
     }
 
     if let Some(baseline_path) = compare {
@@ -864,7 +872,11 @@ pub async fn run_test_suite(options: TestSuiteOptions<'_>) -> Result<()> {
         });
         fs::write(report_output, serde_json::to_string_pretty(&report)?)
             .with_context(|| format!("Failed to write test report: {}", report_output))?;
-        println!("{} Test report written to {}", "[OK]".green(), report_output);
+        println!(
+            "{} Test report written to {}",
+            "[OK]".green(),
+            report_output
+        );
     }
 
     if let Some(profile_output) = options.profile_output {
@@ -876,7 +888,11 @@ pub async fn run_test_suite(options: TestSuiteOptions<'_>) -> Result<()> {
         });
         fs::write(profile_output, serde_json::to_string_pretty(&profile)?)
             .with_context(|| format!("Failed to write test profile: {}", profile_output))?;
-        println!("{} Test profile written to {}", "[OK]".green(), profile_output);
+        println!(
+            "{} Test profile written to {}",
+            "[OK]".green(),
+            profile_output
+        );
     }
 
     let teardown_result = if let Some(teardown_hook) = options.teardown_hook {
@@ -1408,7 +1424,9 @@ pub async fn migrate(
         );
         println!(
             "{}",
-            "[OK] Migration simulation complete (dry-run).".green().bold()
+            "[OK] Migration simulation complete (dry-run)."
+                .green()
+                .bold()
         );
         return Ok(());
     }
@@ -2473,7 +2491,9 @@ pub async fn config_rollback(
 
     println!(
         "{}",
-        "[OK] Configuration rolled back successfully!".green().bold()
+        "[OK] Configuration rolled back successfully!"
+            .green()
+            .bold()
     );
     println!("  {}: {}", "Environment".bold(), environment);
     println!(
@@ -3432,7 +3452,11 @@ pub async fn validate_call(
             }
         }
     } else {
-        println!("\n{} {}", "[ERR]".red().bold(), "Call is invalid!".red().bold());
+        println!(
+            "\n{} {}",
+            "[ERR]".red().bold(),
+            "Call is invalid!".red().bold()
+        );
 
         // Show errors
         if let Some(errors) = data["errors"].as_array() {

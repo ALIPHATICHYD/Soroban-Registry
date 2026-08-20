@@ -15,7 +15,11 @@ use shared::interface_fingerprint::{fingerprint_spec, EntryKind, InterfaceFinger
 
 /// `soroban-registry contract interfaces --wasm <path> [--json]`
 pub async fn run_local(wasm_path: &str, json: bool) -> Result<()> {
-    log::debug!("contract interfaces (local) | wasm={} json={}", wasm_path, json);
+    log::debug!(
+        "contract interfaces (local) | wasm={} json={}",
+        wasm_path,
+        json
+    );
 
     let path = std::path::Path::new(wasm_path);
     if !path.exists() {
@@ -89,6 +93,10 @@ fn print_group(
     for entry in entries {
         println!("  {} {}", "•".cyan(), entry.name.bold());
         println!("      {}", entry.signature.bright_black());
-        println!("      {} {}", "fingerprint:".dimmed(), entry.fingerprint.dimmed());
+        println!(
+            "      {} {}",
+            "fingerprint:".dimmed(),
+            entry.fingerprint.dimmed()
+        );
     }
 }

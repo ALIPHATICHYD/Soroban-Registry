@@ -3,16 +3,16 @@
 mod analytics;
 mod analyze;
 mod api_key;
-mod auth;
 mod audit_command;
+mod auth;
 mod backup;
-mod batch_ops;
 mod batch_audit;
 mod batch_deploy;
 mod batch_export;
 mod batch_import;
 mod batch_migrate;
 mod batch_notify;
+mod batch_ops;
 mod batch_register;
 mod batch_update;
 mod batch_verify;
@@ -28,13 +28,13 @@ mod contract_audit;
 mod contract_dependency;
 mod contract_deploy;
 mod contract_deprecate;
-mod contract_snapshot;
 mod contract_highlight;
 mod contract_interaction;
 mod contract_interfaces;
 mod contract_register;
 mod contract_risk;
 mod contract_search;
+mod contract_snapshot;
 mod contract_update;
 mod contract_verify;
 mod contracts;
@@ -4511,7 +4511,11 @@ pub async fn dispatch_command(
                 format,
                 summary,
             } => {
-                log::debug!("Command: contract dependency | address={} depth={}", address, depth);
+                log::debug!(
+                    "Command: contract dependency | address={} depth={}",
+                    address,
+                    depth
+                );
                 let fmt = crate::output_format::validate_format(&format)
                     .unwrap_or(crate::output_format::OutputFormat::Table);
                 contract_dependency::run(&cli.api_url, &address, depth, fmt, summary).await?;

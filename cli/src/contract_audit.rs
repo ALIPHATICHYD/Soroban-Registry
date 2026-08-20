@@ -124,7 +124,7 @@ pub async fn run(
         write_lockfile(lockfile_path, &updated)?;
         println!(
             "\n{} Lockfile updated at {}",
-            "✓".green(),
+            "[OK]".green(),
             lockfile_path.display()
         );
     }
@@ -142,9 +142,7 @@ pub async fn run(
 /// Generate an initial lockfile from a list of contract IDs.
 async fn run_init(api_url: &str, lockfile_path: &str, contract_ids: &[String]) -> Result<()> {
     if contract_ids.is_empty() {
-        anyhow::bail!(
-            "No contract IDs provided. Use --contracts <ID1,ID2,...> with --init."
-        );
+        anyhow::bail!("No contract IDs provided. Use --contracts <ID1,ID2,...> with --init.");
     }
 
     let path = Path::new(lockfile_path);
@@ -171,11 +169,11 @@ async fn run_init(api_url: &str, lockfile_path: &str, contract_ids: &[String]) -
         }
         match fetch_contract_meta(&client, api_url, id).await {
             Ok(entry) => {
-                println!("  {} {}", "✓".green(), id);
+                println!("  {} {}", "[OK]".green(), id);
                 contracts.insert(id.to_string(), entry);
             }
             Err(err) => {
-                eprintln!("  {} {} — {}", "✗".red(), id, err);
+                eprintln!("  {} {} — {}", "[ERR]".red(), id, err);
             }
         }
     }
@@ -194,7 +192,7 @@ async fn run_init(api_url: &str, lockfile_path: &str, contract_ids: &[String]) -
     write_lockfile(path, &lockfile)?;
     println!(
         "\n{} Lockfile created at {} with {} contract(s)",
-        "✓".green(),
+        "[OK]".green(),
         path.display(),
         lockfile.contracts.len()
     );
@@ -353,11 +351,7 @@ async fn fetch_contract_meta(
         anyhow::bail!("contract {} not found in registry", contract_id);
     }
     if !status.is_success() {
-        anyhow::bail!(
-            "registry returned {} for contract {}",
-            status,
-            contract_id
-        );
+        anyhow::bail!("registry returned {} for contract {}", status, contract_id);
     }
 
     let body: Value = resp
@@ -377,12 +371,8 @@ pub fn entry_from_api_response(contract_id: &str, value: &Value) -> LockEntry {
             .unwrap_or("")
             .to_string()
     };
-    let opt_field = |key: &str| -> Option<String> {
-        value
-            .get(key)
-            .and_then(Value::as_str)
-            .map(String::from)
-    };
+    let opt_field =
+        |key: &str| -> Option<String> { value.get(key).and_then(Value::as_str).map(String::from) };
 
     let api_contract_id = str_field("contract_id");
     LockEntry {
@@ -412,8 +402,7 @@ pub fn read_lockfile(path: &Path) -> Result<Lockfile> {
 
 /// Serialize and write a lockfile to disk.
 pub fn write_lockfile(path: &Path, lockfile: &Lockfile) -> Result<()> {
-    let json = serde_json::to_string_pretty(lockfile)
-        .context("Failed to serialize lockfile")?;
+    let json = serde_json::to_string_pretty(lockfile).context("Failed to serialize lockfile")?;
     fs::write(path, json)
         .with_context(|| format!("Failed to write lockfile: {}", path.display()))?;
     Ok(())
@@ -442,15 +431,12 @@ fn render_text_report(report: &DriftReport) {
         "Contract Drift Audit Report".bold(),
         "═".repeat(40)
     );
-    println!(
-        "  Contracts audited: {}",
-        report.audited.to_string().bold()
-    );
+    println!("  Contracts audited: {}", report.audited.to_string().bold());
 
     if !report.has_drift {
         println!(
             "\n  {} No drift detected. Local lockfile is in sync with the registry.",
-            "✓".green()
+            "[OK]".green()
         );
         return;
     }
@@ -652,10 +638,7 @@ mod tests {
 
         assert_eq!(parsed.version, 1);
         assert_eq!(parsed.contracts.len(), 1);
-        assert_eq!(
-            parsed.contracts["CABC123"].version,
-            "1.0.0"
-        );
+        assert_eq!(parsed.contracts["CABC123"].version, "1.0.0");
     }
 
     #[test]
