@@ -7,9 +7,10 @@
 //! propagation in `api::dependency_risk` supply rows; this module decides what
 //! they mean and in what order they are reported.
 //!
-//! Like [`crate::contract_spec`], this module is deliberately dependency-light
-//! so every workspace member -- API, CLI, verifier -- can share one definition
-//! of the wire shapes and one definition of the rules.
+//! It lives in `shared`, alongside [`crate::contract_spec`], so every workspace
+//! member -- API, CLI, verifier -- shares one definition of the wire shapes and
+//! one definition of the rules, and so the rules stay covered by
+//! `cargo test -p shared`.
 //!
 //! ## Two arrays, not one
 //!
@@ -23,6 +24,7 @@ use crate::models::IssueSeverity;
 use crate::semver::{SemVer, VersionConstraint};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
+use utoipa::ToSchema;
 use uuid::Uuid;
 
 // ── Traversal budget ────────────────────────────────────────────────────────
@@ -71,7 +73,9 @@ pub fn clamp_max_nodes(requested: Option<usize>) -> usize {
 // ── Edge vocabulary ─────────────────────────────────────────────────────────
 
 /// Where an edge came from. Mirrors the `dependency_edge_source` enum.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, ToSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum EdgeSource {
     /// Declared by the publisher through the dependencies endpoint.
@@ -82,7 +86,9 @@ pub enum EdgeSource {
 
 /// Whether an edge's declared reference bound to a registry contract.
 /// Mirrors the `dependency_edge_state` enum.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, ToSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum EdgeState {
     Resolved,
@@ -101,7 +107,7 @@ impl EdgeState {
 // ── Diagnostics ─────────────────────────────────────────────────────────────
 
 /// A fact about the shape of the graph. Carries **no** severity, deliberately.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct Diagnostic {
     pub kind: DiagnosticKind,
     /// Contracts involved, root first. Empty when the diagnostic is about the
@@ -112,7 +118,9 @@ pub struct Diagnostic {
     pub detail: String,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, ToSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum DiagnosticKind {
     /// The traversal re-encountered a contract already on the current path.
@@ -132,7 +140,7 @@ pub enum DiagnosticKind {
 
 /// Why a traversal stopped early. Always reported alongside `truncated: true`
 /// so a consumer can tell a genuinely small graph from a clipped one.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum TruncationReason {
     DepthLimit,
@@ -160,7 +168,9 @@ impl TruncationReason {
 /// you are calling directly is an immediate one. Some conditions do not
 /// propagate at all -- an interface incompatibility is a fact about one specific
 /// edge, so re-reporting it two hops away would be meaningless.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, ToSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum RiskRule {
     /// An open entry in `security_issues` or a matched CVE.
@@ -231,7 +241,7 @@ impl RiskRule {
 }
 
 /// One severity-bearing security condition, with provenance.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct Finding {
     pub rule_id: String,
     pub severity: IssueSeverity,
@@ -268,7 +278,7 @@ impl Finding {
 // ── Aggregation ─────────────────────────────────────────────────────────────
 
 /// Count of findings at each severity.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct SeverityCounts {
     pub critical: u32,
     pub high: u32,
@@ -308,7 +318,7 @@ impl SeverityCounts {
 /// is exactly the distinction an operator triaging an upgrade needs; and
 /// severity is ordinal, so summing or averaging it is meaningless. The tuple is
 /// deterministic, float-free, and is also what the CLI table renders.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct EffectiveRisk {
     /// `None` means no findings at all -- a state that stays reachable only
     /// because diagnostics are kept out of `findings`.
