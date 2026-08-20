@@ -24,7 +24,28 @@ use serde_json::{Map, Value};
 use sha2::{Digest, Sha256};
 
 /// Bumped when the payload shape changes in a way that alters canonical bytes.
+/// Schema emitted for a snapshot with no dependency graph. Still the default,
+/// so an existing consumer sees byte-identical output for the same contract.
 pub const SNAPSHOT_SCHEMA_VERSION: &str = "1.0";
+
+/// Schema emitted **only** for a snapshot that carries `dependency_graph`
+/// (Issue #1147).
+///
+/// Bumping is not optional here. `SnapshotPayload` has no
+/// `deny_unknown_fields`, so an old CLI handed a graph-bearing "1.0" snapshot
+/// would silently drop the field, recanonicalize without it, and report
+/// **"signature invalid"** -- telling the operator their snapshot was tampered
+/// with, which is the worst possible message from a correctness-critical tool.
+/// With a distinct version it returns `UnsupportedSchema("1.1")` instead: true,
+/// actionable, and impossible to mistake for tampering.
+///
+/// Gating the field behind a query parameter does not help, because the file
+/// that reaches the old CLI is exactly the gated one.
+pub const SNAPSHOT_SCHEMA_VERSION_WITH_GRAPH: &str = "1.1";
+
+/// Every schema version this build can verify.
+pub const SUPPORTED_SCHEMA_VERSIONS: &[&str] =
+    &[SNAPSHOT_SCHEMA_VERSION, SNAPSHOT_SCHEMA_VERSION_WITH_GRAPH];
 
 pub const SNAPSHOT_ALGORITHM: &str = "ed25519";
 
@@ -58,6 +79,25 @@ pub struct SnapshotPayload {
     /// `replacement_contract_id` transitively. Empty when nothing supersedes
     /// this contract.
     pub lineage: Vec<LineageLink>,
+    /// Dependency graph and transitive risk report (Issue #1147), present only
+    /// when explicitly requested. Its presence is what makes the payload
+    /// schema 1.1; see [`SNAPSHOT_SCHEMA_VERSION_WITH_GRAPH`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dependency_graph: Option<Value>,
+}
+
+impl SnapshotPayload {
+    /// The schema version this payload must declare.
+    ///
+    /// Derived from the content rather than passed in, so a caller cannot
+    /// produce a graph-bearing payload that claims to be 1.0.
+    pub fn required_schema_version(&self) -> &'static str {
+        if self.dependency_graph.is_some() {
+            SNAPSHOT_SCHEMA_VERSION_WITH_GRAPH
+        } else {
+            SNAPSHOT_SCHEMA_VERSION
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -229,7 +269,9 @@ pub fn verify_snapshot(
     expected_fingerprint: Option<&str>,
     max_age_days: Option<i64>,
 ) -> Result<(), SnapshotError> {
-    if snapshot.payload.schema_version != SNAPSHOT_SCHEMA_VERSION {
+    // A known-versions set, not equality against one constant. Equality would
+    // make every future schema indistinguishable from a corrupt file.
+    if !SUPPORTED_SCHEMA_VERSIONS.contains(&snapshot.payload.schema_version.as_str()) {
         return Err(SnapshotError::UnsupportedSchema(
             snapshot.payload.schema_version.clone(),
         ));
@@ -244,10 +286,9 @@ pub fn verify_snapshot(
     let key_bytes = BASE64
         .decode(&snapshot.signature.public_key)
         .map_err(|e| SnapshotError::MalformedKey(e.to_string()))?;
-    let key_array: [u8; 32] = key_bytes
-        .as_slice()
-        .try_into()
-        .map_err(|_| SnapshotError::MalformedKey(format!("expected 32 bytes, got {}", key_bytes.len())))?;
+    let key_array: [u8; 32] = key_bytes.as_slice().try_into().map_err(|_| {
+        SnapshotError::MalformedKey(format!("expected 32 bytes, got {}", key_bytes.len()))
+    })?;
     let verifying = VerifyingKey::from_bytes(&key_array)
         .map_err(|e| SnapshotError::MalformedKey(e.to_string()))?;
 
@@ -322,6 +363,7 @@ mod tests {
             },
             dependency_scan: Some(serde_json::json!({"findings": [], "scanned": true})),
             deprecation: None,
+            dependency_graph: None,
             lineage: vec![LineageLink {
                 contract_id: "CBBBB".into(),
                 name: Some("token-v2".into()),
@@ -474,6 +516,79 @@ mod tests {
     }
 
     #[test]
+    fn graph_bearing_payload_declares_schema_1_1() {
+        let mut payload = sample_payload();
+        assert_eq!(payload.required_schema_version(), SNAPSHOT_SCHEMA_VERSION);
+
+        payload.dependency_graph = Some(serde_json::json!({"total_dependencies": 2}));
+        assert_eq!(
+            payload.required_schema_version(),
+            SNAPSHOT_SCHEMA_VERSION_WITH_GRAPH
+        );
+    }
+
+    #[test]
+    fn a_graph_bearing_snapshot_verifies_under_1_1() {
+        let key = test_key(1);
+        let mut payload = sample_payload();
+        payload.dependency_graph = Some(serde_json::json!({"total_dependencies": 2}));
+        payload.schema_version = payload.required_schema_version().to_string();
+
+        let snapshot = sign_snapshot(payload, &key).unwrap();
+        assert_eq!(snapshot.payload.schema_version, "1.1");
+        assert!(verify_snapshot(&snapshot, None, None).is_ok());
+    }
+
+    #[test]
+    fn a_graphless_snapshot_still_verifies_under_1_0() {
+        // The default must not move: an existing consumer sees the same bytes
+        // for the same contract as before Issue #1147.
+        let key = test_key(1);
+        let snapshot = sign_snapshot(sample_payload(), &key).unwrap();
+        assert_eq!(snapshot.payload.schema_version, "1.0");
+        assert!(verify_snapshot(&snapshot, None, None).is_ok());
+    }
+
+    #[test]
+    fn dropping_the_graph_field_breaks_the_signature() {
+        // This is exactly the failure the version bump exists to prevent: an old
+        // reader that ignores `dependency_graph` recanonicalizes without it and
+        // sees an invalid signature. Asserting it here documents *why* a
+        // graph-bearing snapshot must not claim to be 1.0.
+        let key = test_key(1);
+        let mut payload = sample_payload();
+        payload.dependency_graph = Some(serde_json::json!({"total_dependencies": 2}));
+        payload.schema_version = payload.required_schema_version().to_string();
+        let mut snapshot = sign_snapshot(payload, &key).unwrap();
+
+        snapshot.payload.dependency_graph = None;
+        assert!(
+            matches!(
+                verify_snapshot(&snapshot, None, None),
+                Err(SnapshotError::SignatureMismatch)
+            ),
+            "silently losing the field must not look like a valid snapshot"
+        );
+    }
+
+    #[test]
+    fn every_supported_version_is_accepted() {
+        for version in SUPPORTED_SCHEMA_VERSIONS {
+            let key = test_key(1);
+            let mut payload = sample_payload();
+            if *version == SNAPSHOT_SCHEMA_VERSION_WITH_GRAPH {
+                payload.dependency_graph = Some(serde_json::json!({}));
+            }
+            payload.schema_version = (*version).to_string();
+            let snapshot = sign_snapshot(payload, &key).unwrap();
+            assert!(
+                verify_snapshot(&snapshot, None, None).is_ok(),
+                "{version} should verify"
+            );
+        }
+    }
+
+    #[test]
     fn schema_version_mismatch_is_rejected() {
         let key = test_key(1);
         let mut snapshot = sign_snapshot(sample_payload(), &key).unwrap();
@@ -523,6 +638,9 @@ mod tests {
         let contract = text.find("\"contract\"").unwrap();
         let exported = text.find("\"exported_at\"").unwrap();
         let schema = text.find("\"schema_version\"").unwrap();
-        assert!(contract < exported && exported < schema, "keys must be sorted: {text}");
+        assert!(
+            contract < exported && exported < schema,
+            "keys must be sorted: {text}"
+        );
     }
 }
