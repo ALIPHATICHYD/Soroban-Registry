@@ -226,28 +226,45 @@ async fn dependency_tree(
 
 /// Rebuild the nested tree from the flat, path-carrying traversal rows.
 ///
-/// Each row already knows its full root-to-node path, so nesting is a single
-/// grouping pass keyed on the parent -- no further queries, and no recursion
-/// over the database. A node that appears under two parents is emitted under
-/// each, which is what the tree shape means; it is expanded only once by the
-/// traversal itself.
+/// Grouping is keyed on the **parent path**, not on the parent contract id.
+/// Keying on the id alone conflates every occurrence of a contract that is
+/// reachable by more than one route: in a diamond, the shared node's children
+/// would be attached once per incoming path and then rendered under every
+/// occurrence, multiplying the subtree.
+///
+/// Each row already carries its full root-to-here path, so this is a single
+/// grouping pass -- no further queries and no recursion over the database.
 fn nest(rows: &[TraversedEdgeRow], root: Uuid) -> Vec<DependencyNode> {
-    let mut by_parent: BTreeMap<Uuid, Vec<&TraversedEdgeRow>> = BTreeMap::new();
+    let mut by_parent: BTreeMap<Vec<Uuid>, Vec<&TraversedEdgeRow>> = BTreeMap::new();
     for row in rows {
         by_parent
-            .entry(row.source_contract_id)
+            .entry(parent_path(row).to_vec())
             .or_default()
             .push(row);
     }
-    children_of(&by_parent, root, 1)
+    children_of(&by_parent, &[root], 1)
+}
+
+/// The path of the node this row hangs under.
+///
+/// A row that contributed a node (resolved, non-cycle) has `path` ending at
+/// that node, so its parent is one element shorter. A row that contributed no
+/// node -- unresolved, or cycle-closing -- already ends at its source, which is
+/// its parent.
+fn parent_path(row: &TraversedEdgeRow) -> &[Uuid] {
+    if row.target_contract_id.is_some() && row.cycle_with.is_none() {
+        &row.path[..row.path.len().saturating_sub(1)]
+    } else {
+        &row.path
+    }
 }
 
 fn children_of(
-    by_parent: &BTreeMap<Uuid, Vec<&TraversedEdgeRow>>,
-    parent: Uuid,
+    by_parent: &BTreeMap<Vec<Uuid>, Vec<&TraversedEdgeRow>>,
+    parent: &[Uuid],
     depth: usize,
 ) -> Vec<DependencyNode> {
-    let Some(rows) = by_parent.get(&parent) else {
+    let Some(rows) = by_parent.get(parent) else {
         return Vec::new();
     };
 
@@ -255,10 +272,11 @@ fn children_of(
         .map(|row| {
             let is_circular = row.cycle_with.is_some();
             // A cycle-closing row must not be expanded again here, or the tree
-            // would be infinite even though the traversal terminated.
-            let dependencies = match (row.target_contract_id, is_circular) {
-                (Some(target), false) => children_of(by_parent, target, depth + 1),
-                _ => Vec::new(),
+            // would be infinite even though the traversal itself terminated.
+            let dependencies = if is_circular || row.target_contract_id.is_none() {
+                Vec::new()
+            } else {
+                children_of(by_parent, &row.path, depth + 1)
             };
 
             DependencyNode {
@@ -266,8 +284,8 @@ fn children_of(
                 resolved_id: row.target_contract_id.filter(|_| row.visible),
                 name: row.target_name.clone(),
                 // Call volume is not carried by the edge model; the aggregate
-                // table remains the source for it and is reported separately by
-                // the graph endpoints rather than guessed at here.
+                // table remains the source for it and is reported by the graph
+                // endpoints rather than guessed at here.
                 call_volume: 0,
                 status: node_status(row),
                 is_circular,
