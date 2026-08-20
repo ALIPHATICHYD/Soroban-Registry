@@ -4407,8 +4407,18 @@ pub enum ScanStatus {
 // by the dependency risk combinator (Issue #1147) without cloning. The variant
 // order below IS the severity order; do not reorder it.
 #[derive(
-    Debug, Clone, Copy, Serialize, Deserialize, sqlx::Type, utoipa::ToSchema, PartialEq, Eq,
-    PartialOrd, Ord, Hash,
+    Debug,
+    Clone,
+    Copy,
+    Serialize,
+    Deserialize,
+    sqlx::Type,
+    utoipa::ToSchema,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
 )]
 #[sqlx(type_name = "issue_severity_type", rename_all = "lowercase")]
 pub enum IssueSeverity {

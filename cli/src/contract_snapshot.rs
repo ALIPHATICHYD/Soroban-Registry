@@ -270,6 +270,7 @@ mod tests {
             },
             dependency_scan: None,
             deprecation: None,
+            dependency_graph: None,
             lineage: vec![LineageLink {
                 contract_id: "CNEXT".into(),
                 name: None,
