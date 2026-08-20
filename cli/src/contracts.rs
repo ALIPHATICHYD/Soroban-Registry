@@ -245,9 +245,9 @@ fn print_table(contracts: &[ContractListItem]) {
     // Rows
     for contract in contracts {
         let verified = if contract.is_verified {
-            "✓".green().to_string()
+            "[OK]".green().to_string()
         } else {
-            "✗".red().to_string()
+            "[ERR]".red().to_string()
         };
 
         let health_color = match contract.health_score {
@@ -377,7 +377,7 @@ pub async fn info(api_url: &str, id: &str, json_output: bool) -> Result<()> {
     }
 
     let status_str = if is_verified {
-        "✓ Verified".green()
+        "[OK] Verified".green()
     } else {
         "○ Unverified".yellow()
     };

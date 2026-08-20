@@ -8,9 +8,9 @@ contract for both.
 
 | Endpoint | Offset | Cursor |
 | --- | --- | --- |
-| `GET /api/contracts` (list) | ✅ | ✅ |
-| `GET /api/search` (full-text) | ✅ | ✅ |
-| `GET /api/v1/contracts/search` (advanced) | ✅ | ✅ (served by PostgreSQL) |
+| `GET /api/contracts` (list) | yes | yes |
+| `GET /api/search` (full-text) | yes | yes |
+| `GET /api/v1/contracts/search` (advanced) | yes | yes (served by PostgreSQL) |
 
 ## Offset pagination (default)
 

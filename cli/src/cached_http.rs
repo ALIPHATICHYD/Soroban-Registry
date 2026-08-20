@@ -48,7 +48,7 @@ pub async fn cached_get(url: &str, query: &[(&str, String)]) -> Result<(StatusCo
             if opts.verbose >= 1 {
                 eprintln!(
                     "{} cache hit (expires in {}s): {}",
-                    "◀".cyan(),
+                    "<".cyan(),
                     entry.expires_in().unwrap_or(0),
                     truncate_key(&cache_key)
                 );
@@ -82,7 +82,7 @@ pub async fn cached_get(url: &str, query: &[(&str, String)]) -> Result<(StatusCo
         if opts.verbose >= 1 {
             eprintln!(
                 "{} cached response: {}",
-                "▶".cyan(),
+                ">".cyan(),
                 truncate_key(&cache_key)
             );
         }

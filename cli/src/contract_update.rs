@@ -85,7 +85,7 @@ pub async fn run(args: UpdateArgs<'_>) -> Result<()> {
     if args.homepage.is_some() {
         eprintln!(
             "{} Homepage updates are not yet supported by the registry API; the field will be ignored.",
-            "⚠".yellow()
+            "[WARN]".yellow()
         );
     }
 
@@ -153,7 +153,7 @@ pub async fn run(args: UpdateArgs<'_>) -> Result<()> {
     } else {
         println!(
             "\n{} Contract metadata updated successfully.",
-            "✔".green().bold()
+            "[OK]".green().bold()
         );
         println!("  Version history is preserved automatically by the registry.");
     }

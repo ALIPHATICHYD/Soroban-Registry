@@ -75,13 +75,13 @@ pub fn profile(
             .context("Failed to serialize profile data")?;
         fs::write(output_path, profile_json)
             .with_context(|| format!("Failed to write profile output: {}", output_path))?;
-        println!("{} Profile output written to {}", "✓".green(), output_path);
+        println!("{} Profile output written to {}", "[OK]".green(), output_path);
     }
 
     if let Some(flamegraph_path) = flamegraph {
         generate_flame_graph_file(&profile_data, flamegraph_path)
             .with_context(|| format!("Failed to generate flame graph at {}", flamegraph_path))?;
-        println!("{} Flame graph written to {}", "✓".green(), flamegraph_path);
+        println!("{} Flame graph written to {}", "[OK]".green(), flamegraph_path);
     }
 
     if let Some(baseline_path) = compare {
@@ -602,7 +602,7 @@ pub async fn publish(
         .await
         .map_err(|err| anyhow::anyhow!("Failed to publish: {err}"))?;
 
-    println!("{}", "✓ Contract published successfully!".green().bold());
+    println!("{}", "[OK] Contract published successfully!".green().bold());
     println!("\n{}: {}", "Name".bold(), contract.name);
     println!("{}: {}", "ID".bold(), contract.contract_id);
     println!(
@@ -808,7 +808,7 @@ pub async fn run_test_suite(options: TestSuiteOptions<'_>) -> Result<()> {
             .unwrap_or(0);
         println!(
             "{} Loaded mock config {} ({} service definitions)",
-            "✓".green(),
+            "[OK]".green(),
             mock_config,
             service_count
         );
@@ -864,7 +864,7 @@ pub async fn run_test_suite(options: TestSuiteOptions<'_>) -> Result<()> {
         });
         fs::write(report_output, serde_json::to_string_pretty(&report)?)
             .with_context(|| format!("Failed to write test report: {}", report_output))?;
-        println!("{} Test report written to {}", "✓".green(), report_output);
+        println!("{} Test report written to {}", "[OK]".green(), report_output);
     }
 
     if let Some(profile_output) = options.profile_output {
@@ -876,7 +876,7 @@ pub async fn run_test_suite(options: TestSuiteOptions<'_>) -> Result<()> {
         });
         fs::write(profile_output, serde_json::to_string_pretty(&profile)?)
             .with_context(|| format!("Failed to write test profile: {}", profile_output))?;
-        println!("{} Test profile written to {}", "✓".green(), profile_output);
+        println!("{} Test profile written to {}", "[OK]".green(), profile_output);
     }
 
     let teardown_result = if let Some(teardown_hook) = options.teardown_hook {
@@ -938,9 +938,9 @@ pub async fn run_contract_tests(
     let stderr = String::from_utf8_lossy(&output.stderr);
 
     if output.status.success() {
-        println!("{} Tests passed in {:.2}s", "✓".green(), duration);
+        println!("{} Tests passed in {:.2}s", "[OK]".green(), duration);
     } else {
-        println!("{} Tests failed in {:.2}s", "✗".red(), duration);
+        println!("{} Tests failed in {:.2}s", "[ERR]".red(), duration);
 
         if !stdout.trim().is_empty() {
             println!("\n{}\n{}", "Test output:".bold(), stdout);
@@ -981,14 +981,14 @@ pub async fn run_contract_tests(
                 } else {
                     println!(
                         "  {} Threshold met ({:.2}% >= {:.2}%)",
-                        "✓".green(),
+                        "[OK]".green(),
                         percent,
                         coverage_threshold
                     );
                 }
             }
         } else {
-            println!("  {} Coverage metrics unavailable.", "⚠".yellow());
+            println!("  {} Coverage metrics unavailable.", "[WARN]".yellow());
             if require_coverage {
                 anyhow::bail!(
                     "Coverage is required but could not be collected. Install cargo-tarpaulin or provide coverage-enabled test tooling."
@@ -1408,7 +1408,7 @@ pub async fn migrate(
         );
         println!(
             "{}",
-            "✓ Migration simulation complete (dry-run).".green().bold()
+            "[OK] Migration simulation complete (dry-run).".green().bold()
         );
         return Ok(());
     }
@@ -1537,7 +1537,7 @@ pub async fn export(
     })
     .await?;
 
-    println!("{}", "✓ Export complete!".green().bold());
+    println!("{}", "[OK] Export complete!".green().bold());
     println!(
         "  {}: {}",
         "Format".bold(),
@@ -1617,7 +1617,7 @@ pub async fn import(
 
     println!(
         "{}",
-        "✓ Import complete — integrity verified!".green().bold()
+        "[OK] Import complete — integrity verified!".green().bold()
     );
     println!(
         "  {}: {}",
@@ -1672,7 +1672,7 @@ pub async fn patch_create(
 
     let patch = PatchManager::create(api_url, version, hash, severity, rollout).await?;
 
-    println!("{}", "✓ Patch created!".green().bold());
+    println!("{}", "[OK] Patch created!".green().bold());
     println!("  {}: {}", "ID".bold(), patch.id);
     println!("  {}: {}", "Target Version".bold(), patch.target_version);
     println!(
@@ -1690,7 +1690,7 @@ pub async fn patch_create(
     if matches!(patch.severity, Severity::Critical | Severity::High) {
         println!(
             "  {} {}",
-            "⚠".red(),
+            "[WARN]".red(),
             format!(
                 "{} severity — immediate action recommended",
                 severity_colored(&patch.severity)
@@ -1742,7 +1742,7 @@ pub async fn trust_score(api_url: &str, contract_id: &str, network: Network) -> 
     println!("{}", "─".repeat(56));
 
     // ── Factor breakdown ──────────────────────────────────────────────────────
-    println!("\n  {} Factor Breakdown\n", "📊".bold());
+    println!("\n  {}\n", "Factor Breakdown".bold());
 
     if let Some(factors) = data["factors"].as_array() {
         for factor in factors {
@@ -1762,7 +1762,7 @@ pub async fn trust_score(api_url: &str, contract_id: &str, network: Network) -> 
     }
 
     // ── Weight documentation ──────────────────────────────────────────────────
-    println!("\n  {} Score Weights\n", "⚖️".bold());
+    println!("\n  {}\n", "Score Weights".bold());
     if let Ok(weights) = crate::conversions::as_object(&data["weights"], "weights") {
         for (k, v) in weights {
             let max_pts = crate::conversions::as_f64(v, "weight_value")?;
@@ -1783,7 +1783,7 @@ pub async fn patch_notify(api_url: &str, patch_id: &str) -> Result<()> {
 
     println!(
         "\n{} {} patch for version {}",
-        "⚠".bold(),
+        "[WARN]".bold(),
         severity_colored(&patch.severity),
         patch.target_version.bold()
     );
@@ -1818,7 +1818,7 @@ pub async fn patch_apply(api_url: &str, contract_id: &str, patch_id: &str) -> Re
 
     let audit = PatchManager::apply(api_url, contract_id, patch_id).await?;
 
-    println!("{}", "✓ Patch applied successfully!".green().bold());
+    println!("{}", "[OK] Patch applied successfully!".green().bold());
     println!("  {}: {}", "Contract".bold(), audit.contract_id);
     println!("  {}: {}", "Patch".bold(), audit.patch_id);
     println!("  {}: {}\n", "Applied At".bold(), audit.applied_at);
@@ -1941,7 +1941,7 @@ pub async fn run_tests(
     println!("\n{}", "Test Results:".bold().green());
     println!("{}", "=".repeat(80).cyan());
 
-    let status_icon = if result.passed { "✓" } else { "✗" };
+    let status_icon = if result.passed { "[OK]" } else { "[ERR]" };
 
     println!(
         "\n{} {} {} ({:.2}ms)",
@@ -1959,7 +1959,7 @@ pub async fn run_tests(
 
     println!("\n{}", "Step Results:".bold());
     for (i, step) in result.steps.iter().enumerate() {
-        let step_icon = if step.passed { "✓" } else { "✗" };
+        let step_icon = if step.passed { "[OK]" } else { "[ERR]" };
 
         println!(
             "  {}. {} {} ({:.2}ms)",
@@ -1992,7 +1992,7 @@ pub async fn run_tests(
         println!("  Coverage: {:.2}%", result.coverage.coverage_percent);
 
         if result.coverage.coverage_percent < 80.0 {
-            println!("  {} Low coverage detected!", "⚠".yellow());
+            println!("  {} Low coverage detected!", "[WARN]".yellow());
         }
     }
 
@@ -2001,7 +2001,7 @@ pub async fn run_tests(
         test_framework::generate_junit_xml(&[result.clone()], Path::new(junit_path))?;
         println!(
             "\n{} JUnit XML report exported to: {}",
-            "✓".green(),
+            "[OK]".green(),
             junit_path
         );
     }
@@ -2009,7 +2009,7 @@ pub async fn run_tests(
     if total_time.as_secs() > 5 {
         println!(
             "\n{} Test execution took {:.2}s (target: <5s)",
-            "⚠".yellow(),
+            "[WARN]".yellow(),
             total_time.as_secs_f64()
         );
     }
@@ -2263,7 +2263,7 @@ pub fn incident_trigger(contract_id: &str, severity_str: &str) -> Result<()> {
     if mgr.is_halted(contract_id) {
         println!(
             "\n  {} {}",
-            "⚡ CIRCUIT BREAKER ENGAGED —".red().bold(),
+            "CIRCUIT BREAKER ENGAGED —".red().bold(),
             format!("contract {} is now halted", contract_id).red()
         );
     }
@@ -2373,7 +2373,7 @@ pub async fn config_set(
 
     println!(
         "{}",
-        "✓ Configuration published successfully!".green().bold()
+        "[OK] Configuration published successfully!".green().bold()
     );
     println!("  {}: {}", "Environment".bold(), environment);
     println!(
@@ -2473,7 +2473,7 @@ pub async fn config_rollback(
 
     println!(
         "{}",
-        "✓ Configuration rolled back successfully!".green().bold()
+        "[OK] Configuration rolled back successfully!".green().bold()
     );
     println!("  {}: {}", "Environment".bold(), environment);
     println!(
@@ -3070,7 +3070,7 @@ pub fn incident_update(incident_id_str: &str, state_str: &str) -> Result<()> {
     ) {
         println!(
             "\n  {} {}",
-            "✓".green(),
+            "[OK]".green(),
             "Circuit breaker cleared — registry interactions for this contract resumed.".green()
         );
     }
@@ -3125,7 +3125,7 @@ pub async fn scan_deps(
     let findings = crate::conversions::as_array(&report["findings"], "findings")?;
 
     if findings.is_empty() {
-        println!("{}", "✓ No vulnerabilities found!".green().bold());
+        println!("{}", "[OK] No vulnerabilities found!".green().bold());
         return Ok(());
     }
 
@@ -3401,7 +3401,7 @@ pub async fn validate_call(
     if valid {
         println!(
             "\n{} {}",
-            "✓".green().bold(),
+            "[OK]".green().bold(),
             "Call is valid!".green().bold()
         );
 
@@ -3427,12 +3427,12 @@ pub async fn validate_call(
                 println!("\n{}", "Warnings:".bold().yellow());
                 for warning in warnings {
                     let msg = crate::conversions::as_str(&warning["message"], "message")?;
-                    println!("  {} {}", "⚠".yellow(), msg);
+                    println!("  {} {}", "[WARN]".yellow(), msg);
                 }
             }
         }
     } else {
-        println!("\n{} {}", "✗".red().bold(), "Call is invalid!".red().bold());
+        println!("\n{} {}", "[ERR]".red().bold(), "Call is invalid!".red().bold());
 
         // Show errors
         if let Some(errors) = data["errors"].as_array() {
@@ -3445,13 +3445,13 @@ pub async fn validate_call(
                 if let Some(f) = field {
                     println!(
                         "  {} [{}] {}: {}",
-                        "✗".red(),
+                        "[ERR]".red(),
                         code.bright_black(),
                         f.bold(),
                         msg
                     );
                 } else {
-                    println!("  {} [{}] {}", "✗".red(), code.bright_black(), msg);
+                    println!("  {} [{}] {}", "[ERR]".red(), code.bright_black(), msg);
                 }
 
                 if let Some(expected) = error["expected"].as_str() {
@@ -3509,7 +3509,7 @@ pub async fn generate_bindings(
         fs::write(output_path, &bindings)?;
         println!(
             "\n{} {} bindings written to: {}",
-            "✓".green().bold(),
+            "[OK]".green().bold(),
             language,
             output_path
         );
@@ -3882,7 +3882,7 @@ pub fn doc(contract_path: &str, output: &str) -> Result<()> {
     );
 
     fs::write(output, content)?;
-    println!("{} Documentation saved to: {}", "✓".green(), output);
+    println!("{} Documentation saved to: {}", "[OK]".green(), output);
 
     Ok(())
 }
@@ -4012,7 +4012,7 @@ pub fn openapi(contract_path: &str, output: &str, format: &str) -> Result<()> {
             let yaml = contract_abi::to_yaml(&doc).map_err(|e| anyhow::anyhow!("{}", e))?;
             let yaml_path = output.trim_end_matches(".pdf").to_string() + ".yaml";
             fs::write(&yaml_path, &yaml)?;
-            println!("{} Wrote {}", "✓".green(), yaml_path);
+            println!("{} Wrote {}", "[OK]".green(), yaml_path);
             return Ok(());
         }
         _ => anyhow::bail!(
@@ -4021,7 +4021,7 @@ pub fn openapi(contract_path: &str, output: &str, format: &str) -> Result<()> {
         ),
     };
     fs::write(output, content)?;
-    println!("{} Documentation saved to: {}", "✓".green(), output);
+    println!("{} Documentation saved to: {}", "[OK]".green(), output);
     Ok(())
 }
 
@@ -4031,7 +4031,7 @@ pub fn sla_record(id: &str, uptime: f64, latency: f64, error_rate: f64) -> Resul
     println!("Uptime: {:.2}%", uptime);
     println!("Latency: {:.2}ms", latency);
     println!("Error Rate: {:.2}%", error_rate);
-    println!("{} SLA metrics recorded", "✓".green());
+    println!("{} SLA metrics recorded", "[OK]".green());
 
     Ok(())
 }
@@ -4067,7 +4067,7 @@ pub async fn snapshot_create(api_url: &str, contract_id: &str) -> Result<()> {
 
     let snapshot: serde_json::Value = response.json().await?;
 
-    println!("{}", "✓ Snapshot created successfully!".green().bold());
+    println!("{}", "[OK] Snapshot created successfully!".green().bold());
     println!(
         "  {}: {}",
         "ID".bold(),
@@ -4326,7 +4326,7 @@ pub async fn stats(
 
     if let Some(path) = output {
         fs::write(path, &output_str)?;
-        println!("{} Stats written to {}", "✓".green(), path);
+        println!("{} Stats written to {}", "[OK]".green(), path);
     } else {
         println!("{}", output_str);
     }
