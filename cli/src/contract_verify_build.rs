@@ -224,10 +224,10 @@ fn print_human(outcome: &VerifyBuildOutcome) {
 
     match outcome {
         VerifyBuildOutcome::MissingSource { detail } => {
-            println!("{} {}", "✗ Missing source:".red().bold(), detail);
+            println!("{} {}", "[FAIL] Missing source:".red().bold(), detail);
         }
         VerifyBuildOutcome::ToolchainMismatch { recorded, installed } => {
-            println!("{}", "✗ Toolchain mismatch".red().bold());
+            println!("{}", "[FAIL] Toolchain mismatch".red().bold());
             println!("  Recorded:  {}", recorded);
             println!("  Installed: {}", installed);
             println!(
@@ -236,11 +236,11 @@ fn print_human(outcome: &VerifyBuildOutcome) {
             );
         }
         VerifyBuildOutcome::BuildFailed { detail } => {
-            println!("{}", "✗ Build failed".red().bold());
+            println!("{}", "[FAIL] Build failed".red().bold());
             println!("{}", detail.dimmed());
         }
         VerifyBuildOutcome::HashMismatch { expected, actual } => {
-            println!("{}", "✗ Hash mismatch".red().bold());
+            println!("{}", "[FAIL] Hash mismatch".red().bold());
             println!("  Expected: {}", expected.bright_black());
             println!("  Actual:   {}", actual.bright_black());
             println!(
@@ -249,7 +249,7 @@ fn print_human(outcome: &VerifyBuildOutcome) {
             );
         }
         VerifyBuildOutcome::Reproduced { hash } => {
-            println!("{}", "✔ Reproduced".green().bold());
+            println!("{}", "[OK] Reproduced".green().bold());
             println!("  Hash: {}", hash.bright_black());
         }
     }
