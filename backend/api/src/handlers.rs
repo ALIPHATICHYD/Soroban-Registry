@@ -1409,7 +1409,7 @@ async fn resolve_call_target_contract(
         return Ok(None);
     };
 
-    dependency::resolve_contract_id(db, &identifier)
+    dependency::lookup_contract_by_identifier(db, &identifier)
         .await
         .map_err(|err| {
             ApiError::internal(format!(
@@ -4391,24 +4391,14 @@ pub async fn create_contract_version(
         );
     }
 
-    // Post-commit dependency analysis
-    let detected_deps = dependency::detect_dependencies_from_abi(&req.abi);
-    if !detected_deps.is_empty() {
-        if let Err(e) =
-            dependency::save_dependencies(&state.db, contract_uuid, &detected_deps).await
-        {
-            tracing::error!(
-                "Failed to save dependencies for version {}: {}",
-                req.version,
-                e
-            );
-        }
-        // Invalidate global graph cache
-        state
-            .cache
-            .invalidate("system", "global:dependency_graph")
-            .await;
-    }
+    // Issue #1147: publishing a version no longer touches dependencies at all.
+    //
+    // This used to scrape `type == "interface"` strings out of the submitted ABI
+    // and hand them to `save_dependencies`, whose first statement deletes every
+    // existing row for the contract. Two defects in one: dependencies were
+    // inferred from arbitrary strings, and every version publish silently wiped
+    // the operator's real declarations. Declarations now change only through
+    // POST /api/contracts/:id/dependencies.
 
     let _ = analytics::record_event(
         &state.db,
@@ -4835,14 +4825,37 @@ async fn publish_contract_inner(
 
     // Save dependencies if provided
     if !req.dependencies.is_empty() {
-        if let Err(e) =
-            dependency::save_dependencies(&state.db, contract.id, &req.dependencies).await
+        // Resolved against this contract's own network (Issue #1147): an
+        // address is only unique per (contract_id, network).
+        match dependency::save_dependencies(
+            &state.db,
+            contract.id,
+            contract.network,
+            &req.dependencies,
+        )
+        .await
         {
-            tracing::error!(
-                "Failed to save initial dependencies for contract {}: {}",
-                contract.contract_id,
-                e
-            );
+            Ok(resolutions) => {
+                let unresolved = resolutions
+                    .iter()
+                    .filter(|r| !matches!(r, dependency::DependencyResolution::Resolved(_)))
+                    .count();
+                if unresolved > 0 {
+                    tracing::info!(
+                        contract_id = %contract.contract_id,
+                        unresolved,
+                        total = resolutions.len(),
+                        "some declared dependencies were stored but not bound to a registry contract"
+                    );
+                }
+            }
+            Err(e) => {
+                tracing::error!(
+                    "Failed to save initial dependencies for contract {}: {}",
+                    contract.contract_id,
+                    e
+                );
+            }
         }
         // Invalidate global graph cache
         state
@@ -8344,7 +8357,7 @@ pub async fn get_contract_deployments(
         }
     } else {
         // Try resolving by Stellar ID
-        let uuid = dependency::resolve_contract_id(&state.db, &id)
+        let uuid = dependency::lookup_contract_by_identifier(&state.db, &id)
             .await
             .map_err(|err| {
                 ApiError::not_found(

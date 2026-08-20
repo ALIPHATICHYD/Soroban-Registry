@@ -1,5 +1,5 @@
 use anyhow::Result;
-use shared::{DependencyDeclaration, GraphEdge, GraphNode, GraphResponse};
+use shared::{DependencyDeclaration, GraphEdge, GraphNode, GraphResponse, Network};
 use sqlx::PgPool;
 use std::collections::{HashMap, HashSet, VecDeque};
 use uuid::Uuid;
@@ -80,41 +80,6 @@ fn strongly_connected_components(
     }
 
     (component_by_node, component_sizes)
-}
-
-/// Detect dependencies from a contract ABI JSON
-pub fn detect_dependencies_from_abi(abi_json: &serde_json::Value) -> Vec<DependencyDeclaration> {
-    let mut dependencies = Vec::new();
-    let mut seen = HashSet::new();
-
-    // In Soroban, external contract calls often use a 'Client' or are defined in the spec.
-    // We look for 'custom' types that might represent other contracts,
-    // or specific annotations if they exist.
-    // For now, we'll scan for common patterns.
-
-    if let Some(specs) = abi_json.as_array() {
-        for spec in specs {
-            // Look for interface/contract client definitions
-            if let Some(spec_type) = spec.get("type").and_then(|t| t.as_str()) {
-                if spec_type == "contract_spec_interface" || spec_type == "interface" {
-                    if let Some(name) = spec.get("name").and_then(|n| n.as_str()) {
-                        if seen.insert(name.to_string()) {
-                            dependencies.push(DependencyDeclaration {
-                                name: name.to_string(),
-                                version_constraint: "*".to_string(), // Default constraint
-                            });
-                        }
-                    }
-                }
-            }
-
-            // Scan function inputs/outputs for custom types that might be contract IDs?
-            // Actually, usually they are addressed by Symbol or Address.
-            // But sometimes the 'type' field in the spec itself points to another contract.
-        }
-    }
-
-    dependencies
 }
 
 /// Calculate transitive closure of dependencies (all recursive dependencies)
@@ -306,25 +271,33 @@ pub async fn build_dependency_graph(
     })
 }
 
-/// Resolve a dependency name/id to a contract UUID if it exists in the registry
-pub async fn resolve_contract_id(pool: &PgPool, identifier: &str) -> Result<Option<Uuid>> {
-    // Try UUID first
-    if let Ok(id) = Uuid::parse_str(identifier) {
-        return Ok(Some(id));
-    }
+/// Look up a contract by an opaque identifier: a registry UUID or a Stellar
+/// contract address.
+///
+/// Deliberately does **not** resolve by `contracts.name` (Issue #1147).
+/// `contracts.name` carries no UNIQUE constraint, so a name lookup silently
+/// picks an arbitrary row among duplicates. It also does not have the old
+/// unchecked `Uuid::parse_str` fast path, which returned an id for a UUID that
+/// matched no row at all.
+///
+/// This is a general read-side helper for path parameters and telemetry
+/// targets. It is **not** how a dependency edge is bound — see
+/// [`resolve_dependency_target`], which additionally requires a network.
+pub async fn lookup_contract_by_identifier(
+    pool: &PgPool,
+    identifier: &str,
+) -> Result<Option<Uuid>> {
+    let identifier = identifier.trim();
 
-    // Try contract_id (public key)
-    let id: Option<Uuid> = sqlx::query_scalar("SELECT id FROM contracts WHERE contract_id = $1")
-        .bind(identifier)
-        .fetch_optional(pool)
-        .await?;
-
-    if id.is_some() {
+    if let Ok(uuid) = Uuid::parse_str(identifier) {
+        let id: Option<Uuid> = sqlx::query_scalar("SELECT id FROM contracts WHERE id = $1")
+            .bind(uuid)
+            .fetch_optional(pool)
+            .await?;
         return Ok(id);
     }
 
-    // Try name
-    let id: Option<Uuid> = sqlx::query_scalar("SELECT id FROM contracts WHERE name = $1")
+    let id: Option<Uuid> = sqlx::query_scalar("SELECT id FROM contracts WHERE contract_id = $1")
         .bind(identifier)
         .fetch_optional(pool)
         .await?;
@@ -332,38 +305,145 @@ pub async fn resolve_contract_id(pool: &PgPool, identifier: &str) -> Result<Opti
     Ok(id)
 }
 
-/// Save dependencies for a contract, resolving them if possible
+/// Outcome of binding a declared dependency reference to a registry row.
+///
+/// An unresolved or cross-network reference is **retained, not discarded**: the
+/// operator declared something real, and dropping it would silently shrink the
+/// graph. It is simply never treated as a dependency for risk purposes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DependencyResolution {
+    /// Bound to a contract registered on the requested network.
+    Resolved(Uuid),
+    /// A syntactically valid contract address that is registered on some other
+    /// network. An explicit diagnostic, never a silent cross-network binding.
+    NetworkMismatch {
+        contract_uuid: Uuid,
+        found_on: Network,
+    },
+    /// A syntactically valid contract address that is not registered at all.
+    UnknownAddress,
+    /// Not a Stellar contract address. Free-form names are informational only.
+    NotAnAddress,
+}
+
+/// Resolve a declared dependency reference to a registry contract, scoped to a
+/// network.
+///
+/// Two rules, both required by Issue #1147:
+///
+/// - **Addresses only.** The reference must pass
+///   [`crate::validation::validate_contract_id`]. Resolving arbitrary strings
+///   against `contracts.name` bound dependencies to whatever row happened to
+///   share a name; names are not unique and are chosen by the publisher.
+/// - **Network scoped.** `contracts` is `UNIQUE(contract_id, network)`, so an
+///   address alone is ambiguous. Without the predicate a mainnet contract could
+///   be recorded as the dependency of a testnet one.
+pub async fn resolve_dependency_target(
+    pool: &PgPool,
+    target_ref: &str,
+    network: Network,
+) -> Result<DependencyResolution> {
+    let target_ref = target_ref.trim();
+
+    if crate::validation::validate_contract_id(target_ref).is_err() {
+        return Ok(DependencyResolution::NotAnAddress);
+    }
+
+    if let Some(id) = sqlx::query_scalar::<_, Uuid>(
+        "SELECT id FROM contracts WHERE contract_id = $1 AND network = $2",
+    )
+    .bind(target_ref)
+    .bind(network)
+    .fetch_optional(pool)
+    .await?
+    {
+        return Ok(DependencyResolution::Resolved(id));
+    }
+
+    // Registered, but somewhere else. Reported rather than bound.
+    if let Some((id, found_on)) = sqlx::query_as::<_, (Uuid, Network)>(
+        "SELECT id, network FROM contracts WHERE contract_id = $1 ORDER BY network LIMIT 1",
+    )
+    .bind(target_ref)
+    .fetch_optional(pool)
+    .await?
+    {
+        return Ok(DependencyResolution::NetworkMismatch {
+            contract_uuid: id,
+            found_on,
+        });
+    }
+
+    Ok(DependencyResolution::UnknownAddress)
+}
+
+/// Replace a contract's declared dependencies with `decls`.
+///
+/// The whole set is replaced because the declaration is the operator's complete
+/// statement of what this contract depends on: a dependency they removed must
+/// disappear. That is only safe because, after Issue #1147, nothing *infers*
+/// declarations — the ABI scraper that used to feed this function on every
+/// version publish is gone, so the only caller is an explicit operator action.
+///
+/// The delete and the inserts run in one transaction. Previously they did not,
+/// so a mid-loop failure left the contract with a truncated dependency set and
+/// no way to tell.
+///
+/// Returns the resolution outcome per declaration, in input order, so callers
+/// can report unresolved and cross-network references instead of silently
+/// recording NULLs.
 pub async fn save_dependencies(
     pool: &PgPool,
     contract_id: Uuid,
+    network: Network,
     decls: &[DependencyDeclaration],
-) -> Result<()> {
-    // Clear existing dependencies (optional, depends on if we want to merge or replace)
-    sqlx::query("DELETE FROM contract_static_dependencies WHERE contract_id = $1")
-        .bind(contract_id)
-        .execute(pool)
-        .await?;
-
+) -> Result<Vec<DependencyResolution>> {
+    let mut resolutions = Vec::with_capacity(decls.len());
     for decl in decls {
-        let dep_contract_id = resolve_contract_id(pool, &decl.name).await?;
+        resolutions.push(resolve_dependency_target(pool, &decl.name, network).await?);
+    }
 
-        if let Some(dep_id) = dep_contract_id {
-            if detect_cycle(pool, contract_id, dep_id)
+    for (decl, resolution) in decls.iter().zip(&resolutions) {
+        if let DependencyResolution::Resolved(dep_id) = resolution {
+            if detect_cycle(pool, contract_id, *dep_id)
                 .await
                 .unwrap_or(false)
             {
                 tracing::warn!(
-                    "Circular dependency detected: contract {} -> {}",
-                    contract_id,
-                    dep_id
+                    contract_id = %contract_id,
+                    dependency_id = %dep_id,
+                    "circular dependency declared"
                 );
             }
+        } else {
+            tracing::info!(
+                contract_id = %contract_id,
+                target_ref = %decl.name,
+                resolution = ?resolution,
+                "dependency declaration retained but not bound to a registry contract"
+            );
         }
+    }
+
+    let mut tx = pool.begin().await?;
+
+    sqlx::query("DELETE FROM contract_static_dependencies WHERE contract_id = $1")
+        .bind(contract_id)
+        .execute(&mut *tx)
+        .await?;
+
+    for (decl, resolution) in decls.iter().zip(&resolutions) {
+        let dep_contract_id = match resolution {
+            DependencyResolution::Resolved(id) => Some(*id),
+            // A cross-network match is deliberately NOT bound: recording the
+            // UUID here would make it indistinguishable from a real dependency.
+            _ => None,
+        };
 
         sqlx::query(
-            "INSERT INTO contract_static_dependencies (contract_id, dependency_name, dependency_contract_id, version_constraint) 
+            "INSERT INTO contract_static_dependencies (contract_id, dependency_name, dependency_contract_id, version_constraint)
              VALUES ($1, $2, $3, $4)
-             ON CONFLICT (contract_id, dependency_name) DO UPDATE SET 
+             ON CONFLICT (contract_id, dependency_name) DO UPDATE SET
                 dependency_contract_id = EXCLUDED.dependency_contract_id,
                 version_constraint = EXCLUDED.version_constraint"
         )
@@ -371,11 +451,13 @@ pub async fn save_dependencies(
         .bind(&decl.name)
         .bind(dep_contract_id)
         .bind(&decl.version_constraint)
-        .execute(pool)
+        .execute(&mut *tx)
         .await?;
     }
 
-    Ok(())
+    tx.commit().await?;
+
+    Ok(resolutions)
 }
 
 /// Build a localized graph around a specific contract
@@ -518,39 +600,4 @@ pub async fn build_local_graph(pool: &PgPool, root_id: Uuid, depth: u32) -> Resu
         nodes: contracts,
         edges,
     })
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use serde_json::json;
-
-    #[test]
-    fn test_detect_dependencies() {
-        let abi = json!([
-            {
-                "type": "interface",
-                "name": "TokenInterface"
-            },
-            {
-                "type": "function",
-                "name": "hello"
-            }
-        ]);
-
-        let deps = detect_dependencies_from_abi(&abi);
-        assert_eq!(deps.len(), 1);
-        assert_eq!(deps[0].name, "TokenInterface");
-    }
-
-    #[test]
-    fn test_detect_dependencies_duplicate() {
-        let abi = json!([
-            { "type": "interface", "name": "Auth" },
-            { "type": "interface", "name": "Auth" }
-        ]);
-
-        let deps = detect_dependencies_from_abi(&abi);
-        assert_eq!(deps.len(), 1);
-    }
 }

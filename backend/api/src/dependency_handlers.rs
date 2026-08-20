@@ -197,12 +197,24 @@ pub struct DeclareDependenciesRequest {
     pub dependencies: Vec<DependencyDeclaration>,
 }
 
+/// A declaration that was stored but could not be bound to a registry contract
+/// (Issue #1147). Retained rather than dropped, because the operator declared
+/// something real; reported so it is not mistaken for a resolved dependency.
+#[derive(Debug, serde::Serialize)]
+pub struct UnresolvedDependency {
+    pub target_ref: String,
+    pub reason: String,
+}
+
 /// Response for POST /api/contracts/:id/dependencies
 #[derive(Debug, serde::Serialize)]
 pub struct DeclareDependenciesResponse {
     pub contract_id: Uuid,
     pub saved: Vec<ContractDependency>,
     pub has_circular: bool,
+    /// Empty when every declaration bound to a registered contract.
+    #[serde(default)]
+    pub unresolved: Vec<UnresolvedDependency>,
 }
 
 /// POST /api/contracts/:id/dependencies
@@ -217,19 +229,16 @@ pub async fn declare_contract_dependencies(
     Path(id): Path<Uuid>,
     ValidatedJson(body): ValidatedJson<DeclareDependenciesRequest>,
 ) -> ApiResult<(StatusCode, Json<DeclareDependenciesResponse>)> {
-    // Verify contract exists.
-    let exists: bool = sqlx::query_scalar("SELECT COUNT(*) > 0 FROM contracts WHERE id = $1")
-        .bind(id)
-        .fetch_one(&state.db)
-        .await
-        .map_err(|e| db_internal_error("check contract exists", e))?;
-
-    if !exists {
-        return Err(ApiError::not_found(
-            "ContractNotFound",
-            "Contract not found",
-        ));
-    }
+    // Fetch the network alongside the existence check: a dependency reference
+    // is only meaningful within one network (Issue #1147), so the declaring
+    // contract's own network is what its targets are resolved against.
+    let network: shared::Network =
+        sqlx::query_scalar("SELECT network FROM contracts WHERE id = $1")
+            .bind(id)
+            .fetch_optional(&state.db)
+            .await
+            .map_err(|e| db_internal_error("check contract exists", e))?
+            .ok_or_else(|| ApiError::not_found("ContractNotFound", "Contract not found"))?;
 
     // Pre-check for self-referential declarations.
     let self_dep = body.dependencies.iter().any(|d| d.name == id.to_string());
@@ -241,9 +250,35 @@ pub async fn declare_contract_dependencies(
     }
 
     // Save declarations (will detect cycles against existing graph in the DB).
-    dependency::save_dependencies(&state.db, id, &body.dependencies)
+    let resolutions = dependency::save_dependencies(&state.db, id, network, &body.dependencies)
         .await
         .map_err(|e| ApiError::internal(format!("Failed to save dependencies: {e}")))?;
+
+    // Surface references that were stored but could not be bound, rather than
+    // letting them appear as a silent NULL in `dependency_contract_id`.
+    let unresolved: Vec<UnresolvedDependency> = body
+        .dependencies
+        .iter()
+        .zip(&resolutions)
+        .filter_map(|(decl, resolution)| {
+            let reason = match resolution {
+                dependency::DependencyResolution::Resolved(_) => return None,
+                dependency::DependencyResolution::NetworkMismatch { found_on, .. } => {
+                    format!("registered on {found_on}, not {network}")
+                }
+                dependency::DependencyResolution::UnknownAddress => {
+                    "no contract with this address is registered".to_string()
+                }
+                dependency::DependencyResolution::NotAnAddress => {
+                    "not a Stellar contract address".to_string()
+                }
+            };
+            Some(UnresolvedDependency {
+                target_ref: decl.name.clone(),
+                reason,
+            })
+        })
+        .collect();
 
     // Fetch stored rows for response.
     let saved: Vec<ContractDependency> = sqlx::query_as(
@@ -280,6 +315,7 @@ pub async fn declare_contract_dependencies(
             contract_id: id,
             saved,
             has_circular,
+            unresolved,
         }),
     ))
 }
