@@ -29,6 +29,8 @@ counts as a risk, and the guarantees you can rely on.
 | `max_nodes` | dependencies, dependents, graph | 1000 | Maximum nodes returned. Capped at 10000. |
 | `as_of` | dependencies, dependents, graph | now | RFC3339 instant; replays the graph as it stood then. |
 | `include_telemetry` | dependencies, dependents, graph | `false` | Include on-chain call edges alongside declared ones. |
+| `page` | graph | 1 | 1-based page of the flat `nodes` list. |
+| `per_page` | graph | 50 | Nodes per page. Capped at 200. |
 
 ### Resolving `:id`
 
@@ -209,7 +211,25 @@ Field-stable: fields may be added with serde defaults, never renamed or removed
   "max_depth": 4,
   "has_circular": true,
   "truncated": false,
-  "diagnostics": []
+  "diagnostics": [],
+  "nodes": {
+    "items": [
+      {
+        "contract_id": "CB…",
+        "resolved_id": "…uuid…",
+        "name": "B",
+        "depth": 1,
+        "edge_source": "declared",
+        "edge_state": "resolved",
+        "path": ["…root…", "…b…"],
+        "redacted": false
+      }
+    ],
+    "total": 6,
+    "page": 1,
+    "per_page": 50,
+    "pages": 1
+  }
 }
 ```
 
@@ -358,12 +378,28 @@ Findings are ordered by `(severity DESC, rule_id ASC, path ASC)`.
 
 ## Pagination
 
-Offset pagination, via the shared `page`/`per_page` parameters. This is
-defensible here only because `max_nodes` hard-caps the result set at 10000 rows.
-It is **not** justified by the total ordering: the graph mutates between
-requests, and offsetting into a full CTE costs the whole graph per page
-regardless. Cursor pagination is not available — `shared::pagination::Cursor` is
-hardcoded to `(DateTime<Utc>, Uuid)` and cannot express graph order.
+Pagination applies to **`/dependency-graph` only**, over its flat `nodes` list:
+
+```
+GET /api/contracts/:id/dependency-graph?page=2&per_page=50
+```
+
+`nodes` is a standard `PaginatedResponse` (`items`, `total`, `page`, `per_page`,
+`pages`). `per_page` defaults to 50 and is capped at 200; `page` is 1-based, and
+out-of-range values are clamped rather than rejected. A page past the end
+returns an empty `items` with `total` unchanged.
+
+The tree endpoints `/dependencies` and `/dependents` are **not** paginated,
+because a tree cannot be coherently paged — page 2 of a tree is not a tree.
+They return the whole traversal, which is already bounded by `max_nodes`. Use
+`/dependency-graph` when you want to walk the reachable set incrementally.
+
+Offset (rather than cursor) pagination is defensible here only because the
+traversal hard-caps its result set at 10000 rows. It is **not** justified by the
+total ordering: the graph mutates between requests, and offsetting into a full
+CTE costs the whole graph per page regardless. Cursor pagination is unavailable
+anyway — `shared::pagination::Cursor` is hardcoded to `(DateTime<Utc>, Uuid)`
+and cannot express graph order.
 
 ## Snapshots
 

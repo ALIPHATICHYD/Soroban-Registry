@@ -876,6 +876,124 @@ async fn a_null_interface_id_is_unknown_not_incompatible() {
         .expect("restore B's interface");
 }
 
+// ── Pagination ──────────────────────────────────────────────────────────────
+
+#[tokio::test]
+#[ignore]
+async fn the_flat_node_list_is_paginated() {
+    seed(&pool().await).await;
+    let (status, body) = get(&format!(
+        "/api/contracts/{}/dependency-graph?per_page=2&page=1",
+        contract_uuid(1)
+    ))
+    .await;
+
+    assert_eq!(status, StatusCode::OK, "body: {body}");
+    assert_eq!(body["nodes"]["items"].as_array().map(Vec::len), Some(2));
+    assert_eq!(body["nodes"]["per_page"].as_i64(), Some(2));
+    assert_eq!(body["nodes"]["page"].as_i64(), Some(1));
+    // The total counts the whole reachable set, not the page.
+    assert_eq!(
+        body["nodes"]["total"].as_i64(),
+        body["total_dependencies"].as_i64()
+    );
+}
+
+#[tokio::test]
+#[ignore]
+async fn pages_partition_the_node_set_without_gaps_or_duplicates() {
+    // The property that makes offset pagination usable here: the traversal
+    // emits a total order, so walking every page reconstructs the set exactly.
+    seed(&pool().await).await;
+
+    let (_, first) = get(&format!(
+        "/api/contracts/{}/dependency-graph?per_page=100",
+        contract_uuid(1)
+    ))
+    .await;
+    let total = first["nodes"]["total"].as_i64().expect("total") as usize;
+
+    let mut walked: Vec<String> = Vec::new();
+    for page in 1..=((total / 2) + 2) {
+        let (_, body) = get(&format!(
+            "/api/contracts/{}/dependency-graph?per_page=2&page={page}",
+            contract_uuid(1)
+        ))
+        .await;
+        let items = body["nodes"]["items"].as_array().expect("items");
+        if items.is_empty() {
+            break;
+        }
+        for item in items {
+            walked.push(serde_json::to_string(item).expect("serialize node"));
+        }
+    }
+
+    assert_eq!(walked.len(), total, "every node appears exactly once");
+    let mut deduped = walked.clone();
+    deduped.sort();
+    deduped.dedup();
+    assert_eq!(deduped.len(), walked.len(), "no node is returned twice");
+}
+
+#[tokio::test]
+#[ignore]
+async fn a_page_boundary_is_stable_across_requests() {
+    seed(&pool().await).await;
+    let path = format!(
+        "/api/contracts/{}/dependency-graph?per_page=2&page=2",
+        contract_uuid(1)
+    );
+    assert_eq!(get_text(&path).await, get_text(&path).await);
+}
+
+#[tokio::test]
+#[ignore]
+async fn a_page_past_the_end_is_empty_not_an_error() {
+    seed(&pool().await).await;
+    let (status, body) = get(&format!(
+        "/api/contracts/{}/dependency-graph?per_page=2&page=9999",
+        contract_uuid(1)
+    ))
+    .await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["nodes"]["items"].as_array().map(Vec::len), Some(0));
+    assert!(
+        body["nodes"]["total"].as_i64().unwrap() > 0,
+        "total is unaffected"
+    );
+}
+
+#[tokio::test]
+#[ignore]
+async fn per_page_is_capped_server_side() {
+    // A caller must not be able to page in the whole node cap at once.
+    seed(&pool().await).await;
+    let (_, body) = get(&format!(
+        "/api/contracts/{}/dependency-graph?per_page=100000",
+        contract_uuid(1)
+    ))
+    .await;
+    assert_eq!(body["nodes"]["per_page"].as_i64(), Some(200));
+}
+
+#[tokio::test]
+#[ignore]
+async fn a_zero_or_negative_page_is_clamped_not_rejected() {
+    seed(&pool().await).await;
+    for query in ["page=0", "page=-5", "per_page=0"] {
+        let (status, body) = get(&format!(
+            "/api/contracts/{}/dependency-graph?{query}",
+            contract_uuid(1)
+        ))
+        .await;
+        assert_eq!(status, StatusCode::OK, "{query} -> {body}");
+        assert!(body["nodes"]["page"].as_i64().unwrap() >= 1);
+        assert!(body["nodes"]["per_page"].as_i64().unwrap() >= 1);
+    }
+}
+
 // ── Determinism ─────────────────────────────────────────────────────────────
 
 #[tokio::test]

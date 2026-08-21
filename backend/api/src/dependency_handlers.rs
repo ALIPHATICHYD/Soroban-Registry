@@ -49,7 +49,19 @@ pub struct DependencyQuery {
     pub as_of: Option<chrono::DateTime<chrono::Utc>>,
     /// Include on-chain call edges alongside declared ones.
     pub include_telemetry: Option<bool>,
+    /// 1-based page for the flat node list on `/dependency-graph`.
+    pub page: Option<i64>,
+    /// Nodes per page. Capped by [`MAX_PER_PAGE`].
+    pub per_page: Option<i64>,
 }
+
+/// Upper bound on `per_page`.
+///
+/// Offset pagination is only defensible here because the traversal already
+/// hard-caps its result set (`max_nodes`, itself capped at 10000). This keeps a
+/// single page from simply re-requesting that whole cap.
+const MAX_PER_PAGE: i64 = 200;
+const DEFAULT_PER_PAGE: i64 = 50;
 
 /// GET /api/contracts/:id/dependencies
 ///
@@ -486,6 +498,30 @@ pub struct DependencyGraphSummary {
     pub truncation_reason: Option<shared::dependency_graph::TruncationReason>,
     /// Graph facts with no severity: cycles, unresolved edges, truncation.
     pub diagnostics: Vec<shared::dependency_graph::Diagnostic>,
+    /// The reachable set as a flat, paginated list.
+    ///
+    /// Flat rather than nested because a tree cannot be coherently paginated:
+    /// page 2 of a tree is not a tree. `/dependencies` returns the nested shape
+    /// whole (bounded by `max_nodes`); this is the pageable view of the same
+    /// traversal.
+    pub nodes: shared::PaginatedResponse<DependencyGraphNode>,
+}
+
+/// One reachable contract, flattened out of the traversal.
+#[derive(Debug, serde::Serialize, utoipa::ToSchema)]
+pub struct DependencyGraphNode {
+    /// The target's address, or `[redacted]` when tenancy hides it.
+    pub contract_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub resolved_id: Option<Uuid>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    pub depth: i32,
+    pub edge_source: String,
+    pub edge_state: String,
+    /// Root-to-node path.
+    pub path: Vec<Uuid>,
+    pub redacted: bool,
 }
 
 /// GET /api/contracts/:id/dependency-graph
@@ -498,7 +534,9 @@ pub struct DependencyGraphSummary {
         ("depth" = Option<u32>, Query, description = "Maximum traversal depth, capped server-side"),
         ("max_nodes" = Option<u32>, Query, description = "Maximum nodes returned, capped server-side"),
         ("as_of" = Option<String>, Query, description = "RFC3339 instant; replays the declared graph as it stood then"),
-        ("include_telemetry" = Option<bool>, Query, description = "Include on-chain call edges alongside declared ones")
+        ("include_telemetry" = Option<bool>, Query, description = "Include on-chain call edges alongside declared ones"),
+        ("page" = Option<i64>, Query, description = "1-based page of the flat node list (default 1)"),
+        ("per_page" = Option<i64>, Query, description = "Nodes per page, default 50, capped at 200")
     ),
     responses(
         (status = 200, description = "Dependency graph summary", body = DependencyGraphSummary),
@@ -544,9 +582,36 @@ pub async fn get_dependency_graph(
         .filter(|r| r.target_contract_id.is_none())
         .count();
 
+    // Offset pagination over the flat node list. The rows arrive in the
+    // traversal's total order, so a page boundary is stable for a given graph
+    // rather than depending on row arrival.
+    let per_page = query
+        .per_page
+        .unwrap_or(DEFAULT_PER_PAGE)
+        .clamp(1, MAX_PER_PAGE);
+    let page = query.page.unwrap_or(1).max(1);
+    let total = result.rows.len() as i64;
+    let offset = ((page - 1) * per_page).min(total) as usize;
+    let end = (offset + per_page as usize).min(result.rows.len());
+
+    let items: Vec<DependencyGraphNode> = result.rows[offset..end]
+        .iter()
+        .map(|row| DependencyGraphNode {
+            contract_id: display_ref(row),
+            resolved_id: row.target_contract_id.filter(|_| row.visible),
+            name: row.target_name.clone(),
+            depth: row.depth,
+            edge_source: row.edge_source.clone(),
+            edge_state: row.edge_state.clone(),
+            path: row.path.clone(),
+            redacted: !row.visible,
+        })
+        .collect();
+
     Ok(Json(DependencyGraphSummary {
         contract_id: contract.uuid,
         network: contract.network.to_string(),
+        nodes: shared::PaginatedResponse::new(items, total, page, per_page),
         total_dependencies: result.rows.len(),
         resolved,
         unresolved,
