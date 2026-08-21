@@ -2784,6 +2784,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a96887878f22d7bad8a3b6dc5b7440e0ada9a245242924394987b21cf2210a4c"
 
 [[package]]
+name = "registry_client"
+version = "0.1.0"
+dependencies = [
+ "futures-util",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+ "tokio",
+]
+
+[[package]]
 name = "rend"
 version = "0.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3394,6 +3406,7 @@ dependencies = [
  "keyring",
  "log",
  "rand 0.8.5",
+ "registry_client",
  "reqwest",
  "ripemd",
  "rustyline",
@@ -3404,6 +3417,7 @@ dependencies = [
  "sha2",
  "shared",
  "shlex",
+ "soroban-registry-client",
  "stellar-strkey 0.0.16",
  "stellar-xdr",
  "sysinfo 0.28.4",
@@ -3413,6 +3427,21 @@ dependencies = [
  "toml",
  "uuid",
  "wiremock",
+]
+
+[[package]]
+name = "soroban-registry-client"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "futures-util",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "shared",
+ "thiserror 1.0.69",
+ "tokio",
+ "uuid",
 ]
 
 [[package]]

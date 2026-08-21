@@ -3,16 +3,16 @@
 mod analytics;
 mod analyze;
 mod api_key;
-mod auth;
 mod audit_command;
+mod auth;
 mod backup;
-mod batch_ops;
 mod batch_audit;
 mod batch_deploy;
 mod batch_export;
 mod batch_import;
 mod batch_migrate;
 mod batch_notify;
+mod batch_ops;
 mod batch_register;
 mod batch_update;
 mod batch_verify;
@@ -29,14 +29,18 @@ mod contract_dependency;
 mod contract_dependency_graph;
 mod contract_deploy;
 mod contract_deprecate;
-mod contract_snapshot;
 mod contract_highlight;
+mod contract_compatibility;
 mod contract_interaction;
 mod contract_interfaces;
+mod contract_provenance;
 mod contract_register;
 mod contract_risk;
+mod contract_search;
+mod contract_snapshot;
 mod contract_update;
 mod contract_verify;
+mod contract_verify_build;
 mod contracts;
 mod conversions;
 mod coverage;
@@ -61,6 +65,7 @@ mod patch;
 mod plugins;
 mod profiler;
 mod publisher;
+mod registry;
 mod release_notes;
 mod shell;
 mod sla;
@@ -78,6 +83,7 @@ mod wizard;
 mod diagnostic;
 mod output_format;
 mod search;
+mod search_pagination;
 
 use anyhow::Result;
 use clap::{ArgAction, Parser, Subcommand, ValueEnum};
@@ -1819,6 +1825,69 @@ pub enum KeysCommands {
 /// Sub-commands for the `contract` group (#522)
 #[derive(Debug, Subcommand)]
 pub enum ContractCommands {
+    /// Search the registry, one page at a time or across every page
+    ///
+    /// Pagination is handled for you: `--all` walks pages until the result set
+    /// runs out or a safety bound is reached, and never loops on a bad
+    /// continuation token. Cursor and offset parameters cannot be combined.
+    ///
+    /// Usage: soroban-registry contract search <QUERY> [--all] [--max-items <N>]
+    ///        [--pagination <cursor|offset>] [--cursor <TOKEN> | --offset <N>]
+    Search {
+        /// Search query
+        query: String,
+
+        /// Filter by network (comma-separated: mainnet,testnet,futurenet)
+        #[arg(long)]
+        networks: Option<String>,
+
+        /// Filter by category (comma-separated: DeFi,NFT)
+        #[arg(long)]
+        category: Option<String>,
+
+        /// Filter by tag (comma-separated: defi,amm)
+        #[arg(long)]
+        tags: Option<String>,
+
+        /// Only show verified contracts
+        #[arg(long)]
+        verified_only: bool,
+
+        /// Results per page (1-100)
+        #[arg(long, default_value = "20")]
+        limit: u32,
+
+        /// Start at this row offset. Offset pagination only — cannot be
+        /// combined with --cursor.
+        #[arg(long, conflicts_with = "cursor")]
+        offset: Option<u64>,
+
+        /// Resume from a continuation token returned by a previous run. Cursor
+        /// pagination only — the token is opaque and must not be edited.
+        #[arg(long)]
+        cursor: Option<String>,
+
+        /// Pagination mode: cursor (stable, no skips or duplicates) or offset
+        /// (relevance ordered). Defaults to cursor for --all, offset otherwise.
+        #[arg(long, value_name = "MODE")]
+        pagination: Option<String>,
+
+        /// Fetch every page, up to --max-items / --max-pages
+        #[arg(long)]
+        all: bool,
+
+        /// Maximum items to fetch with --all (default 1000)
+        #[arg(long)]
+        max_items: Option<u64>,
+
+        /// Maximum pages to fetch with --all (default 100)
+        #[arg(long)]
+        max_pages: Option<u64>,
+
+        /// Output as JSON, including pagination metadata
+        #[arg(long)]
+        json: bool,
+    },
 
     /// Export a signed, offline-verifiable snapshot of a contract (#1116)
     ///
@@ -2000,6 +2069,85 @@ pub enum ContractCommands {
         /// Path to a local compiled WASM contract to inspect.
         #[arg(long)]
         wasm: String,
+
+        /// Output results as machine-readable JSON
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// Display build-provenance metadata recorded for a contract, read from
+    /// a local manifest file.
+    ///
+    /// Usage: soroban-registry contract provenance --manifest <path> [--json]
+    Provenance {
+        /// Path to a local provenance manifest (JSON) to display.
+        #[arg(long)]
+        manifest: String,
+
+        /// Output results as machine-readable JSON
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// Attempt to independently reproduce a contract's published WASM
+    /// artifact from source, and compare its hash against the expected
+    /// (registry-recorded) artifact hash.
+    ///
+    /// Usage: soroban-registry contract verify-build --manifest <path> --source-dir <dir> --expected-hash <hash> [--allow-toolchain-mismatch] [--json]
+    VerifyBuild {
+        /// Path to a local provenance manifest (JSON) describing the recorded build.
+        #[arg(long)]
+        manifest: String,
+
+        /// Directory containing the contract's source to rebuild.
+        #[arg(long)]
+        source_dir: String,
+
+        /// The registry-recorded WASM artifact hash to compare the rebuild against.
+        #[arg(long)]
+        expected_hash: String,
+
+        /// Proceed with the rebuild even if the locally installed rustc
+        /// version doesn't match the version recorded in provenance.
+        #[arg(long)]
+        allow_toolchain_mismatch: bool,
+
+        /// Output results as machine-readable JSON
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// Structurally compare two local compiled WASM artifacts and classify
+    /// ABI changes as compatible, potentially breaking, breaking, or
+    /// unknown.
+    ///
+    /// Usage: soroban-registry contract compatibility --from <wasm> --to <wasm> [--strict] [--json] [--fail-on <level>]
+    Compatibility {
+        /// Path to the earlier/baseline compiled WASM contract.
+        #[arg(long)]
+        from: String,
+
+        /// Path to the newer/candidate compiled WASM contract.
+        #[arg(long)]
+        to: String,
+
+        /// Network passphrase associated with the `--from` artifact.
+        #[arg(long)]
+        from_network_passphrase: Option<String>,
+
+        /// Network passphrase associated with the `--to` artifact.
+        #[arg(long)]
+        to_network_passphrase: Option<String>,
+
+        /// Exit non-zero when changes at or above the --fail-on threshold
+        /// are found (default threshold: potentially_breaking).
+        #[arg(long)]
+        strict: bool,
+
+        /// Minimum severity that triggers a non-zero exit under --strict:
+        /// breaking | potential | unknown
+        #[arg(long, default_value = "potential")]
+        fail_on: String,
 
         /// Output results as machine-readable JSON
         #[arg(long)]
@@ -2910,6 +3058,8 @@ async fn main() -> Result<()> {
         no_cache: cli.no_cache,
         verbose: cli.verbose,
     });
+    // The shared registry client picks up the same resolved timeout.
+    registry::init(cli.timeout);
 
     // ── Initialise logger ─────────────────────────────────────────────────────
     // -v counts; each level raises verbosity by one step.
@@ -4273,6 +4423,50 @@ pub async fn dispatch_command(
         },
         // ── Contract verify command (#522) ───────────────────────────────────
         Commands::Contract { action } => match action {
+            ContractCommands::Search {
+                query,
+                networks,
+                category,
+                tags,
+                verified_only,
+                limit,
+                offset,
+                cursor,
+                pagination,
+                all,
+                max_items,
+                max_pages,
+                json,
+            } => {
+                log::debug!(
+                    "Command: contract search | query={:?} all={} limit={} offset={:?} cursor={} pagination={:?}",
+                    query,
+                    all,
+                    limit,
+                    offset,
+                    cursor.is_some(),
+                    pagination
+                );
+                contract_search::run(
+                    &cli.api_url,
+                    search_pagination::SearchOptions {
+                        query,
+                        networks,
+                        category,
+                        tags,
+                        verified_only,
+                        limit,
+                        offset,
+                        cursor,
+                        pagination,
+                        all,
+                        max_items,
+                        max_pages,
+                        json,
+                    },
+                )
+                .await?;
+            }
             ContractCommands::Register { file, batch, json } => {
                 log::debug!(
                     "Command: contract register | file={:?} batch={} json={}",
@@ -4343,6 +4537,61 @@ pub async fn dispatch_command(
             ContractCommands::Interfaces { wasm, json } => {
                 log::debug!("Command: contract interfaces | wasm={} json={}", wasm, json);
                 contract_interfaces::run_local(&wasm, json).await?;
+            }
+            ContractCommands::Provenance { manifest, json } => {
+                log::debug!("Command: contract provenance | manifest={} json={}", manifest, json);
+                contract_provenance::run_local(&manifest, json).await?;
+            }
+            ContractCommands::VerifyBuild {
+                manifest,
+                source_dir,
+                expected_hash,
+                allow_toolchain_mismatch,
+                json,
+            } => {
+                log::debug!(
+                    "Command: contract verify-build | manifest={} source_dir={} json={}",
+                    manifest,
+                    source_dir,
+                    json
+                );
+                contract_verify_build::run(
+                    &manifest,
+                    &source_dir,
+                    &expected_hash,
+                    allow_toolchain_mismatch,
+                    json,
+                )
+                .await?;
+            }
+            ContractCommands::Compatibility {
+                from,
+                to,
+                from_network_passphrase,
+                to_network_passphrase,
+                strict,
+                fail_on,
+                json,
+            } => {
+                log::debug!(
+                    "Command: contract compatibility | from={} to={} strict={} fail_on={} json={}",
+                    from,
+                    to,
+                    strict,
+                    fail_on,
+                    json
+                );
+                let fail_on = contract_compatibility::FailOn::parse(&fail_on)?;
+                contract_compatibility::run(
+                    &from,
+                    &to,
+                    from_network_passphrase,
+                    to_network_passphrase,
+                    strict,
+                    json,
+                    fail_on,
+                )
+                .await?;
             }
             ContractCommands::Details {
                 address,
@@ -4575,7 +4824,11 @@ pub async fn dispatch_command(
                 format,
                 summary,
             } => {
-                log::debug!("Command: contract dependency | address={} depth={}", address, depth);
+                log::debug!(
+                    "Command: contract dependency | address={} depth={}",
+                    address,
+                    depth
+                );
                 let fmt = crate::output_format::validate_format(&format)
                     .unwrap_or(crate::output_format::OutputFormat::Table);
                 contract_dependency::run(&cli.api_url, &address, depth, fmt, summary).await?;

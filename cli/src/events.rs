@@ -149,7 +149,7 @@ pub async fn query_events(
         std::fs::write(path, csv)?;
         println!(
             "{} Exported {} events to {}",
-            "✓".green(),
+            "[OK]".green(),
             events.len(),
             path
         );
@@ -221,19 +221,12 @@ pub async fn inspect_event_stats(
     let output_str = match format {
         "json" => format_event_stats_json(&stats)?,
         "table" => format_event_stats_table(&stats),
-        _ => anyhow::bail!(
-            "Invalid format: {}. Use 'table' or 'json'",
-            format
-        ),
+        _ => anyhow::bail!("Invalid format: {}. Use 'table' or 'json'", format),
     };
 
     if let Some(path) = output {
         std::fs::write(path, &output_str)?;
-        println!(
-            "{} Event stats exported to {}",
-            "✓".green(),
-            path
-        );
+        println!("{} Event stats exported to {}", "[OK]".green(), path);
     } else {
         println!("{}", output_str);
     }
@@ -258,7 +251,10 @@ fn format_event_stats_json(stats: &EventStats) -> Result<String> {
 fn format_event_stats_table(stats: &EventStats) -> String {
     let mut output = String::new();
 
-    output.push_str(&format!("\n{}\n", "Contract Event Statistics".bold().cyan()));
+    output.push_str(&format!(
+        "\n{}\n",
+        "Contract Event Statistics".bold().cyan()
+    ));
     output.push_str(&format!("{}\n", "=".repeat(80).cyan()));
 
     output.push_str(&format!(
@@ -266,7 +262,11 @@ fn format_event_stats_table(stats: &EventStats) -> String {
         "Contract ID".bold(),
         stats.contract_id.bright_black()
     ));
-    output.push_str(&format!("  {}: {}\n", "Total Events".bold(), stats.total_events));
+    output.push_str(&format!(
+        "  {}: {}\n",
+        "Total Events".bold(),
+        stats.total_events
+    ));
     output.push_str(&format!(
         "  {}: {}\n",
         "Unique Topics".bold(),
@@ -316,4 +316,3 @@ fn format_event_stats_table(stats: &EventStats) -> String {
 
     output
 }
-

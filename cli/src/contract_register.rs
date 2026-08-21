@@ -409,6 +409,12 @@ async fn resolve_drafts(
             request: PublishRequest {
                 contract_id,
                 wasm_hash,
+                // Usually None: this flow registers already-deployed contracts
+                // from metadata, and a draft carrying only a `wasm_hash` has no
+                // bytes to send. When a draft does supply `wasm_path` -- which
+                // `resolve_wasm_hash` above already reads -- the artifact is
+                // inlined so the registry can scan it and derive an interface
+                // fingerprint rather than recording the contract scan-pending.
                 wasm_artifact_base64,
                 name,
                 slug,
