@@ -5,6 +5,17 @@ use serde::{Deserialize, Serialize};
 use crate::error::{Error, PaginationError, Result};
 use crate::pagination::{advance_offset, PageCursor, PaginationMode};
 
+// Request and response types the registry already defines are re-exported
+// rather than redeclared, so a consumer never has to keep a parallel copy in
+// sync with the backend.
+pub use shared::models::{
+    ConfirmOwnershipTransferRequest, Contract, ContractGetResponse, ContractSearchParams,
+    CreateOwnershipTransferRequest, CreateWebhookRequest, DependencyScanReport,
+    DeprecateContractRequest, DeprecationInfo, Network, OwnershipTransfer, OwnershipTransferLog,
+    PaginatedResponse, PublishRequest, UpdateContractMetadataRequest, WebhookConfiguration,
+};
+pub use shared::snapshot::ContractSnapshot;
+
 /// One search result, normalised across the registry's search endpoints.
 ///
 /// `GET /api/search` names the array `contracts` and `GET /api/v1/contracts/search`
@@ -516,5 +527,21 @@ mod tests {
                 .unwrap(),
             None
         );
+    }
+}
+
+#[cfg(test)]
+mod wire_compat_tests {
+    use super::*;
+
+    /// The registry omits `next_cursor` when there is no next page, so the
+    /// paginated envelope must decode without it.
+    #[test]
+    fn a_paginated_envelope_decodes_without_its_optional_fields() {
+        let page: PaginatedResponse<serde_json::Value> =
+            serde_json::from_str(r#"{"items":[],"total":0,"page":1,"per_page":20,"pages":0}"#)
+                .expect("a response without optional fields must decode");
+        assert!(page.next_cursor.is_none());
+        assert!(page.filters.is_none());
     }
 }

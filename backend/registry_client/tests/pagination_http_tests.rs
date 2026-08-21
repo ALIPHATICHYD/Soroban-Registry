@@ -1,117 +1,19 @@
 // tests/pagination_http_tests.rs
 //
-// End-to-end pagination over real HTTP: the client walks pages served by a
-// throwaway local server that mimics the registry's two search endpoints —
+// End-to-end pagination over real HTTP: the client walks pages served by the
+// fake registry in `support`, mimicking the two search endpoints —
 // `GET /api/search` (PostgreSQL, `contracts` + `next_cursor`) and
 // `GET /api/v1/contracts/search` (Elasticsearch, `results` + `total`/`offset`).
-//
-// The server is a few lines of tokio rather than a mocking framework so these
-// tests stay dependency-free and run offline.
 
-use std::sync::{Arc, Mutex};
+mod support;
+
+use std::time::Duration;
 
 use registry_client::{
-    ContractSearchRequest, PageCursor, PageLimits, PaginationMode, RegistryClient, StopReason,
+    ClientConfig, ContractSearchRequest, PageCursor, PageLimits, PaginationMode, RegistryClient,
+    RetryPolicy, StopReason,
 };
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::TcpListener;
-
-/// One canned HTTP reply.
-#[derive(Clone)]
-struct Reply {
-    status: u16,
-    body: String,
-}
-
-impl Reply {
-    fn ok(body: &str) -> Self {
-        Self {
-            status: 200,
-            body: body.to_string(),
-        }
-    }
-
-    fn error(status: u16, body: &str) -> Self {
-        Self {
-            status,
-            body: body.to_string(),
-        }
-    }
-}
-
-/// A local server that answers each request with the next canned reply and
-/// records the request lines it saw.
-struct FakeRegistry {
-    base_url: String,
-    requests: Arc<Mutex<Vec<String>>>,
-}
-
-impl FakeRegistry {
-    async fn start(replies: Vec<Reply>) -> Self {
-        let listener = TcpListener::bind("127.0.0.1:0")
-            .await
-            .expect("bind a local port");
-        let base_url = format!("http://{}", listener.local_addr().expect("local addr"));
-        let requests = Arc::new(Mutex::new(Vec::new()));
-        let recorded = Arc::clone(&requests);
-
-        tokio::spawn(async move {
-            let mut replies = replies.into_iter();
-            while let Ok((mut socket, _)) = listener.accept().await {
-                let mut head = Vec::new();
-                let mut chunk = [0_u8; 1024];
-                loop {
-                    match socket.read(&mut chunk).await {
-                        Ok(0) | Err(_) => break,
-                        Ok(read) => head.extend_from_slice(&chunk[..read]),
-                    }
-                    if head.windows(4).any(|window| window == b"\r\n\r\n") {
-                        break;
-                    }
-                }
-
-                let text = String::from_utf8_lossy(&head).to_string();
-                recorded
-                    .lock()
-                    .expect("record request")
-                    .push(text.lines().next().unwrap_or_default().to_string());
-
-                let reply = replies
-                    .next()
-                    .unwrap_or_else(|| Reply::error(500, r#"{"code":"NO_REPLY_SCRIPTED"}"#));
-                let payload = format!(
-                    "HTTP/1.1 {} {}\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
-                    reply.status,
-                    reason(reply.status),
-                    reply.body.len(),
-                    reply.body
-                );
-                let _ = socket.write_all(payload.as_bytes()).await;
-                let _ = socket.flush().await;
-            }
-        });
-
-        Self { base_url, requests }
-    }
-
-    fn client(&self) -> RegistryClient {
-        RegistryClient::new(&self.base_url).expect("build client")
-    }
-
-    fn requests(&self) -> Vec<String> {
-        self.requests.lock().expect("read requests").clone()
-    }
-}
-
-fn reason(status: u16) -> &'static str {
-    match status {
-        200 => "OK",
-        400 => "Bad Request",
-        500 => "Internal Server Error",
-        503 => "Service Unavailable",
-        _ => "Unknown",
-    }
-}
+use support::{FakeRegistry, Reply};
 
 fn hit(name: &str) -> String {
     format!(
@@ -154,7 +56,7 @@ async fn cursor_walk_follows_next_cursor_to_the_end() {
     assert_eq!(collected.pages_fetched, 2);
     assert_eq!(collected.stop_reason, StopReason::Exhausted);
 
-    let requests = registry.requests();
+    let requests = registry.request_lines();
     assert!(
         requests[0].contains("/api/search?"),
         "cursor mode uses the full-text endpoint: {}",
@@ -204,7 +106,7 @@ async fn a_rejected_cursor_surfaces_as_a_typed_error() {
     assert_eq!(err.status(), Some(400));
     assert!(err.to_string().contains("INVALID_CURSOR"));
     // The malformed token was forwarded untouched — the client never decodes one.
-    assert!(registry.requests()[0].contains("cursor=not-a-real-cursor"));
+    assert!(registry.request_lines()[0].contains("cursor=not-a-real-cursor"));
 }
 
 #[tokio::test]
@@ -266,7 +168,7 @@ async fn empty_pages_with_a_continuation_token_cannot_loop_forever() {
         "unexpected error: {err}"
     );
     assert_eq!(
-        registry.requests().len(),
+        registry.request_lines().len(),
         3,
         "the walk stops instead of requesting more"
     );
@@ -304,7 +206,7 @@ async fn offset_walk_uses_the_advanced_endpoint_and_stops_at_the_total() {
     assert_eq!(collected.total, Some(3));
     assert_eq!(collected.stop_reason, StopReason::Exhausted);
 
-    let requests = registry.requests();
+    let requests = registry.request_lines();
     assert_eq!(
         requests.len(),
         2,
@@ -349,7 +251,7 @@ async fn offset_walk_can_resume_from_a_given_offset() {
     assert_eq!(page.items.len(), 1);
     assert_eq!(page.total, Some(41));
     assert!(page.next.is_none(), "offset 40 + 1 item reaches total 41");
-    assert!(registry.requests()[0].contains("offset=40"));
+    assert!(registry.request_lines()[0].contains("offset=40"));
 }
 
 // ── Cross-cutting behaviour ───────────────────────────────────────────────────
@@ -369,8 +271,12 @@ async fn a_retried_page_is_emitted_exactly_once() {
     ])
     .await;
 
-    let mut walk = registry
-        .client()
+    let retrying =
+        RegistryClient::from_config(ClientConfig::new(registry.base_url()).with_retry_policy(
+            RetryPolicy::attempts(3).with_initial_backoff(Duration::from_millis(1)),
+        ))
+        .expect("client");
+    let mut walk = retrying
         .search_paginator(
             ContractSearchRequest::cursor("swap"),
             PageLimits::default().with_page_size(2),
@@ -390,7 +296,7 @@ async fn a_retried_page_is_emitted_exactly_once() {
         "a retried fetch is still one page"
     );
     assert_eq!(
-        registry.requests().len(),
+        registry.request_lines().len(),
         2,
         "the transient failure was retried"
     );
@@ -431,7 +337,11 @@ async fn max_items_bounds_a_full_walk_and_reports_where_it_stopped() {
         Some(PageCursor::Cursor("tok-later".to_string())),
         "the walk reports where a follow-up should resume"
     );
-    assert_eq!(registry.requests().len(), 2, "no page beyond the bound");
+    assert_eq!(
+        registry.request_lines().len(),
+        2,
+        "no page beyond the bound"
+    );
 }
 
 #[tokio::test]
@@ -466,7 +376,7 @@ async fn cancelling_between_pages_keeps_what_was_already_fetched() {
         .is_none());
     assert_eq!(walk.stop_reason(), Some(StopReason::Cancelled));
     assert_eq!(
-        registry.requests().len(),
+        registry.request_lines().len(),
         1,
         "no request is made after cancellation"
     );
@@ -486,7 +396,7 @@ async fn a_cursor_walk_cannot_be_combined_with_an_offset() {
 
     assert!(err.to_string().contains("cannot be combined"), "{err}");
     assert!(
-        registry.requests().is_empty(),
+        registry.request_lines().is_empty(),
         "the request never reaches the server"
     );
 }

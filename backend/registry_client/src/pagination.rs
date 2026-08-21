@@ -1193,7 +1193,8 @@ mod tests {
             Err(Error::Transport {
                 url: "http://registry.test/api/search".to_string(),
                 attempts: 3,
-                reason: "the request timed out".to_string(),
+                kind: crate::error::TransportKind::Connect,
+                reason: "could not connect to the registry".to_string(),
             }),
             Ok(cursor_page(&[3, 4], None, Some(4))),
         ]);

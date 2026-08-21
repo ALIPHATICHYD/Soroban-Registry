@@ -1,8 +1,12 @@
 pub mod abi;
+pub mod contract_compatibility;
+pub mod contract_spec;
 pub mod error;
+pub mod interface_fingerprint;
 pub mod logging;
 pub mod models;
 pub mod pagination;
+pub mod provenance;
 pub mod semver;
 pub mod slug;
 pub mod snapshot;

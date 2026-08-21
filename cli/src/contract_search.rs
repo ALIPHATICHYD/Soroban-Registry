@@ -10,9 +10,7 @@
 
 use anyhow::{anyhow, Context, Result};
 use colored::Colorize;
-use registry_client::{
-    ContractHit, PageCollection, PageCursor, PaginationMode, RegistryClient, StopReason,
-};
+use registry_client::{ContractHit, PageCollection, PageCursor, PaginationMode, StopReason};
 
 use crate::search_pagination::{build_limits, build_request, resolve_mode, SearchOptions};
 
@@ -21,11 +19,8 @@ pub async fn run(api_url: &str, options: SearchOptions) -> Result<()> {
     let request = build_request(&options, mode)?;
     let limits = build_limits(&options);
 
-    let token = crate::auth::access_token_for_requests(api_url).await?;
-    let client =
-        RegistryClient::with_http_client(api_url, crate::net::client()).with_bearer_token(token);
-
-    let mut walk = client
+    let mut walk = crate::registry::uncached_client(api_url)
+        .await?
         .search_paginator(request, limits)
         .map_err(|err| anyhow!("Failed to search contracts: {err}"))?;
 
@@ -203,7 +198,7 @@ fn print_pagination_footer(
     };
 
     println!(
-        "  {} {} result(s){} · {} page(s) · {} pagination",
+        "  {} {} result(s){} | {} page(s) | {} pagination",
         "Showing".bold(),
         collected.items.len(),
         of_total,
