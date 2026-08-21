@@ -8,9 +8,9 @@ contract for both.
 
 | Endpoint | Offset | Cursor |
 | --- | --- | --- |
-| `GET /api/contracts` (list) | ✅ | ✅ |
-| `GET /api/search` (full-text) | ✅ | ✅ |
-| `GET /api/v1/contracts/search` (advanced) | ✅ | ✅ (served by PostgreSQL) |
+| `GET /api/contracts` (list) | yes | yes |
+| `GET /api/search` (full-text) | yes | yes |
+| `GET /api/v1/contracts/search` (advanced) | yes | yes (served by PostgreSQL) |
 
 ## Offset pagination (default)
 
@@ -94,3 +94,102 @@ removed elsewhere in the result set.
 - **Stable iteration over a full result set** (exports, syncing, "load more"
   infinite scroll): use **cursor** pagination.
 - **Relevance-ranked results or jump-to-page UIs**: use **offset** pagination.
+
+## Client-side pagination (`soroban-registry-client`)
+
+Everything above is the HTTP contract. Consumers should not implement it by
+hand: the `soroban-registry-client` crate (`backend/registry_client`, imported
+as `registry_client`) wraps both modes in one typed abstraction, and the CLI
+uses it for search, list, metadata and publish. See
+[registry-client.md](./registry-client.md) for the rest of that crate —
+configuration, authentication, retries, idempotency and the error taxonomy.
+
+```rust
+use registry_client::{ContractSearchRequest, PageLimits, RegistryClient};
+
+let client = RegistryClient::new("http://localhost:3001")?;
+let request = ContractSearchRequest::cursor("swap").with_networks(["testnet"]);
+
+let mut walk = client.search_paginator(
+    request,
+    PageLimits::default().with_page_size(50).with_max_items(Some(1_000)),
+)?;
+
+while let Some(page) = walk.next_page().await? {
+    for hit in page.items {
+        println!("{} ({:?} of {:?})", hit.name, page.total, walk.total());
+    }
+}
+```
+
+A walk is also available as a stream: `Paginator::pages()` yields
+`RegistryPage<T>` values and `Paginator::items()` flattens them into items (pin
+the stream, e.g. with `Box::pin`, before polling it). `Paginator::collect_all()`
+returns a `PageCollection` with the items, the server total, the pages fetched,
+and why the walk stopped.
+
+### What the abstraction guarantees
+
+| Guarantee | Behaviour |
+| --- | --- |
+| Cursors stay opaque | Tokens are compared and echoed back byte-for-byte; the client never decodes or constructs one. |
+| Modes never mix | `PaginationMode` is explicit. A cursor combined with an offset is rejected before a request is sent. |
+| No infinite loops | A repeated cursor, an offset that fails to advance, or repeated empty-but-continuable pages all end the walk with a specific error. |
+| No silent wraparound | `offset + page_len` is overflow-checked on every page. |
+| Retries never duplicate | Transport retries happen inside one page fetch, and a failed fetch leaves the walk untouched, so retrying re-requests the same page. |
+| Bounds by default | `max_pages` defaults to a finite value, and `max_items` caps what a walk emits. Stopping at a bound reports the continuation to resume from. |
+| Cancellation | A `CancelToken` stops a walk between pages or mid-request, keeping the pages already emitted. |
+| Totals preserved | `total` is surfaced verbatim whenever the endpoint reports it. |
+| Ordering preserved | Items are never re-sorted, so the endpoint's ordering guarantee is what you observe. |
+
+Cursor mode talks to `GET /api/search`; offset mode talks to
+`GET /api/v1/contracts/search` (tag filters force `GET /api/search`, the only
+search endpoint that supports them).
+
+### CLI
+
+```bash
+# One page, relevance ordered (unchanged single-page behaviour)
+soroban-registry contract search swap --limit 20
+
+# Every page, cursor paginated, bounded at 1000 items
+soroban-registry contract search swap --all --max-items 1000
+
+# Explicit mode, resuming from a token a previous run printed
+soroban-registry contract search swap --pagination cursor --cursor eyJ0aW1lc3Rh…
+
+# Machine-readable output, including pagination metadata
+soroban-registry contract search swap --all --max-items 500 --json
+```
+
+`--all` is always bounded (defaults: `--max-items 1000`, `--max-pages 100`) and
+Ctrl-C stops the walk and prints what was already fetched. `--cursor` and
+`--offset` are mutually exclusive. Without `--pagination`, `--all` uses cursor
+pagination and a single page uses offset pagination.
+
+`--json` output carries a `pagination` object:
+
+```json
+{
+  "query": "swap",
+  "contracts": [],
+  "count": 1000,
+  "pagination": {
+    "mode": "cursor",
+    "page_size": 50,
+    "pages_fetched": 20,
+    "total": 4213,
+    "complete": false,
+    "stop_reason": "max_items",
+    "cancelled": false,
+    "next_cursor": "eyJ0aW1lc3Rh…",
+    "next_offset": null,
+    "max_items": 1000,
+    "max_pages": 100
+  }
+}
+```
+
+`stop_reason` is one of `exhausted`, `max_items`, `max_pages`, `cancelled`, or
+`single_page` (a search run without `--all`). When it is not `exhausted`,
+`next_cursor`/`next_offset` say where a follow-up run should resume.

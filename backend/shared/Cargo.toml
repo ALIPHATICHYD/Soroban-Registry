@@ -16,6 +16,7 @@ utoipa = { workspace = true }
 base64 = { workspace = true }
 rust_decimal = "1.35"
 sha2 = "0.10"
+ed25519-dalek = { version = "2.1", features = ["rand_core"] }
 hex = "0.4"
 wasmparser = { workspace = true }
 s3 = { package = "rust-s3", version = "0.37", features = ["blocking"] }

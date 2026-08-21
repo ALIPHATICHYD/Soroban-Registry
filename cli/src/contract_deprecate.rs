@@ -36,8 +36,10 @@ pub struct DeprecationPayload {
 /// The full request body sent to the deprecation API endpoint.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SignedDeprecationRequest {
+    /// When the contract should be considered retired.
+    pub retirement_at: String,
     /// Deprecation reason visible to consumers.
-    pub reason: String,
+    pub deprecated_reason: String,
     /// Replacement contract ID for migration.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub replacement_contract_id: Option<String>,
@@ -50,8 +52,6 @@ pub struct SignedDeprecationRequest {
     pub payload: DeprecationPayload,
     /// Base64-encoded Ed25519 signature of the payload.
     pub signature: String,
-    /// Base64-encoded Ed25519 public key of the signer.
-    pub public_key: String,
     /// Stellar address derived from the public key.
     pub signing_address: String,
 }
@@ -89,7 +89,6 @@ pub async fn run(
     let signing_key = decode_private_key(private_key)?;
     let verifying_key = signing_key.verifying_key();
     let public_key_bytes = verifying_key.to_bytes();
-    let public_key_b64 = BASE64.encode(public_key_bytes);
     let signing_address = derive_stellar_address(&public_key_bytes);
 
     // 2. Fetch current contract state so we can show a diff
@@ -97,7 +96,13 @@ pub async fn run(
 
     // 3. Show state diff and confirm
     if !yes {
-        render_state_diff(address, reason, replacement, &contract_info, &signing_address);
+        render_state_diff(
+            address,
+            reason,
+            replacement,
+            &contract_info,
+            &signing_address,
+        );
         if !prompt_confirmation()? {
             println!("{}", "Deprecation cancelled.".yellow());
             return Ok(());
@@ -106,7 +111,8 @@ pub async fn run(
 
     // 4. Build and sign the deprecation payload
     let nonce = uuid::Uuid::new_v4().to_string();
-    let timestamp = Utc::now().to_rfc3339();
+    let now = Utc::now();
+    let timestamp = now.to_rfc3339();
 
     let canonical_contract_id = contract_info
         .get("contract_id")
@@ -126,13 +132,13 @@ pub async fn run(
     let signature_b64 = BASE64.encode(signature.to_bytes());
 
     let request = SignedDeprecationRequest {
-        reason: reason.to_string(),
+        retirement_at: (now + chrono::Duration::days(i64::from(grace_period_days))).to_rfc3339(),
+        deprecated_reason: reason.to_string(),
         replacement_contract_id: replacement.map(String::from),
         migration_guide_url: migration_guide.map(String::from),
         grace_period_days,
         payload,
         signature: signature_b64,
-        public_key: public_key_b64,
         signing_address: signing_address.clone(),
     };
 
@@ -206,11 +212,7 @@ pub async fn run(
         if let Some(guide) = migration_guide {
             println!("  {}: {}", "Migration Guide".bold(), guide);
         }
-        println!(
-            "  {}: {} days",
-            "Grace Period".bold(),
-            grace_period_days
-        );
+        println!("  {}: {} days", "Grace Period".bold(), grace_period_days);
         println!(
             "  {}: {}",
             "Signed By".bold(),
@@ -330,10 +332,17 @@ pub async fn rollback(
         });
         println!("{}", serde_json::to_string_pretty(&result)?);
     } else {
-        println!("\n{}", "Contract rollback completed successfully!".green().bold());
+        println!(
+            "\n{}",
+            "Contract rollback completed successfully!".green().bold()
+        );
         println!("  {}: {}", "Contract".bold(), address.cyan());
         println!("  {}: {}", "Reason".bold(), reason);
-        println!("  {}: {}", "Signed By".bold(), signing_address.bright_magenta());
+        println!(
+            "  {}: {}",
+            "Signed By".bold(),
+            signing_address.bright_magenta()
+        );
         println!();
     }
 
@@ -427,16 +436,10 @@ fn decode_private_key(key: &str) -> Result<SigningKey> {
 
 /// Derive a Stellar-style address from a 32-byte Ed25519 public key.
 fn derive_stellar_address(public_key_bytes: &[u8; 32]) -> String {
-    use ripemd::Ripemd160;
-    use sha2::{Digest, Sha256};
-
-    let sha256_hash = Sha256::digest(public_key_bytes);
-    let ripemd_hash = Ripemd160::digest(sha256_hash);
-    let mut versioned = vec![0x00];
-    versioned.extend_from_slice(&ripemd_hash);
-    let checksum = Sha256::digest(&Sha256::digest(&versioned));
-    versioned.extend_from_slice(&checksum[..4]);
-    bs58::encode(&versioned).into_string()
+    stellar_strkey::ed25519::PublicKey(*public_key_bytes)
+        .to_string()
+        .as_str()
+        .to_owned()
 }
 
 // ── Contract info fetch ──────────────────────────────────────────────────────
@@ -496,9 +499,18 @@ fn render_state_diff(
 
     println!("\n{}", "Contract Deprecation Preview".bold().cyan());
     println!("{}", "═".repeat(50).cyan());
-    println!("  {}: {} ({})", "Contract".bold(), address.cyan(), name.dimmed());
+    println!(
+        "  {}: {} ({})",
+        "Contract".bold(),
+        address.cyan(),
+        name.dimmed()
+    );
     println!("  {}: {}", "Network".bold(), network);
-    println!("  {}: {}", "Signed By".bold(), signing_address.bright_magenta());
+    println!(
+        "  {}: {}",
+        "Signed By".bold(),
+        signing_address.bright_magenta()
+    );
 
     println!("\n  {}", "State Change:".bold().yellow());
     println!(
@@ -507,17 +519,9 @@ fn render_state_diff(
         current_status.green(),
         "deprecated".red()
     );
-    println!(
-        "    {} (none) → {}",
-        "Reason:".bold(),
-        reason
-    );
+    println!("    {} (none) → {}", "Reason:".bold(), reason);
     if let Some(repl) = replacement {
-        println!(
-            "    {} (none) → {}",
-            "Replacement:".bold(),
-            repl.cyan()
-        );
+        println!("    {} (none) → {}", "Replacement:".bold(), repl.cyan());
     }
     println!("{}\n", "═".repeat(50).cyan());
 }
@@ -545,9 +549,18 @@ fn render_rollback_preview(
 
     println!("\n{}", "Contract Rollback Preview".bold().cyan());
     println!("{}", "═".repeat(50).cyan());
-    println!("  {}: {} ({})", "Contract".bold(), address.cyan(), name.dimmed());
+    println!(
+        "  {}: {} ({})",
+        "Contract".bold(),
+        address.cyan(),
+        name.dimmed()
+    );
     println!("  {}: {}", "Network".bold(), network);
-    println!("  {}: {}", "Signed By".bold(), signing_address.bright_magenta());
+    println!(
+        "  {}: {}",
+        "Signed By".bold(),
+        signing_address.bright_magenta()
+    );
 
     println!("\n  {}", "State Change:".bold().yellow());
     println!(
@@ -556,21 +569,14 @@ fn render_rollback_preview(
         current_status.red(),
         "active".green()
     );
-    println!(
-        "    {} (none) → {}",
-        "Reason:".bold(),
-        reason
-    );
+    println!("    {} (none) → {}", "Reason:".bold(), reason);
     println!("{}\n", "═".repeat(50).cyan());
 }
 
 /// Prompt the user for yes/no confirmation.
 fn prompt_confirmation() -> Result<bool> {
     use std::io::{self, Write};
-    print!(
-        "  {} ",
-        "Proceed with deprecation? [y/N]".bold()
-    );
+    print!("  {} ", "Proceed with deprecation? [y/N]".bold());
     io::stdout().flush()?;
     let mut input = String::new();
     io::stdin().read_line(&mut input)?;
@@ -699,7 +705,10 @@ mod tests {
 
         let sig1 = sign_deprecation(&p1, &signing_key);
         let sig2 = sign_deprecation(&p2, &signing_key);
-        assert_ne!(sig1, sig2, "Different nonces must produce different signatures");
+        assert_ne!(
+            sig1, sig2,
+            "Different nonces must produce different signatures"
+        );
     }
 
     // ── Timestamp validation tests ───────────────────────────────────────
@@ -742,7 +751,11 @@ mod tests {
         let result = decode_private_key("not-valid-base64!!!");
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
-        assert!(err.contains("base64"), "Error should mention base64: {}", err);
+        assert!(
+            err.contains("base64"),
+            "Error should mention base64: {}",
+            err
+        );
     }
 
     #[test]
@@ -751,7 +764,11 @@ mod tests {
         let result = decode_private_key(&too_short);
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
-        assert!(err.contains("32 bytes"), "Error should mention key length: {}", err);
+        assert!(
+            err.contains("32 bytes"),
+            "Error should mention key length: {}",
+            err
+        );
     }
 
     // ── Stellar address derivation ───────────────────────────────────────
@@ -763,7 +780,8 @@ mod tests {
         let addr1 = derive_stellar_address(&bytes);
         let addr2 = derive_stellar_address(&bytes);
         assert_eq!(addr1, addr2);
-        assert!(!addr1.is_empty());
+        assert!(addr1.starts_with('G'));
+        assert_eq!(addr1.len(), 56);
     }
 
     #[test]
@@ -792,26 +810,25 @@ mod tests {
         let (signing_key, verifying_key) = generate_test_keypair();
         let payload = make_payload("CTEST", "ser-nonce");
         let sig = sign_deprecation(&payload, &signing_key);
-        let pub_key = BASE64.encode(verifying_key.to_bytes());
         let address = derive_stellar_address(&verifying_key.to_bytes());
 
         let request = SignedDeprecationRequest {
-            reason: "end of life".to_string(),
+            retirement_at: "2030-01-01T00:00:00Z".to_string(),
+            deprecated_reason: "end of life".to_string(),
             replacement_contract_id: Some("CNEW".to_string()),
             migration_guide_url: Some("https://example.com/migrate".to_string()),
             grace_period_days: 30,
             payload,
             signature: sig,
-            public_key: pub_key,
             signing_address: address,
         };
 
         let json = serde_json::to_value(&request).unwrap();
-        assert_eq!(json["reason"], "end of life");
+        assert_eq!(json["deprecated_reason"], "end of life");
+        assert_eq!(json["retirement_at"], "2030-01-01T00:00:00Z");
         assert_eq!(json["replacement_contract_id"], "CNEW");
         assert_eq!(json["grace_period_days"], 30);
         assert!(json["signature"].is_string());
-        assert!(json["public_key"].is_string());
         assert!(json["signing_address"].is_string());
         assert!(json["payload"]["contract_id"].is_string());
     }
