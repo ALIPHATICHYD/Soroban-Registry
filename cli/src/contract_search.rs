@@ -158,12 +158,12 @@ fn print_human(
 
     for hit in &collected.items {
         let verified = if hit.is_verified {
-            " ✓ verified".green().to_string()
+            " [verified]".green().to_string()
         } else {
             String::new()
         };
         let deprecated = if hit.is_deprecated {
-            " ⚠ deprecated".yellow().to_string()
+            " [deprecated]".yellow().to_string()
         } else {
             String::new()
         };
