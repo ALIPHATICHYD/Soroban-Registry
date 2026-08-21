@@ -1409,7 +1409,7 @@ async fn resolve_call_target_contract(
         return Ok(None);
     };
 
-    dependency::resolve_contract_id(db, &identifier)
+    dependency::lookup_contract_by_identifier(db, &identifier)
         .await
         .map_err(|err| {
             ApiError::internal(format!(
@@ -4391,24 +4391,14 @@ pub async fn create_contract_version(
         );
     }
 
-    // Post-commit dependency analysis
-    let detected_deps = dependency::detect_dependencies_from_abi(&req.abi);
-    if !detected_deps.is_empty() {
-        if let Err(e) =
-            dependency::save_dependencies(&state.db, contract_uuid, &detected_deps).await
-        {
-            tracing::error!(
-                "Failed to save dependencies for version {}: {}",
-                req.version,
-                e
-            );
-        }
-        // Invalidate global graph cache
-        state
-            .cache
-            .invalidate("system", "global:dependency_graph")
-            .await;
-    }
+    // Issue #1147: publishing a version no longer touches dependencies at all.
+    //
+    // This used to scrape `type == "interface"` strings out of the submitted ABI
+    // and hand them to `save_dependencies`, whose first statement deletes every
+    // existing row for the contract. Two defects in one: dependencies were
+    // inferred from arbitrary strings, and every version publish silently wiped
+    // the operator's real declarations. Declarations now change only through
+    // POST /api/contracts/:id/dependencies.
 
     let _ = analytics::record_event(
         &state.db,
@@ -4655,7 +4645,10 @@ async fn publish_contract_inner(
     req: PublishRequest,
 ) -> ApiResult<Json<Contract>> {
     let publisher_id = actor.publisher_id()?;
-    let artifact_scan = match req.wasm_artifact_base64.as_deref() {
+    // The decoded artifact serves two consumers (Issue #1147): the existing
+    // scanner, and the interface fingerprint persisted on the row. Decode once.
+    let artifact = req.wasm_artifact_base64.as_deref();
+    let (artifact_scan, interface_id, interface_algorithm) = match artifact {
         Some(encoded) => {
             let bytes = BASE64.decode(encoded).map_err(|_| {
                 ApiError::bad_request(
@@ -4663,12 +4656,19 @@ async fn publish_contract_inner(
                     "wasm_artifact_base64 must be valid base64",
                 )
             })?;
-            crate::wasm_scanner::scan(&bytes, &req.wasm_hash)
+            let scan = crate::wasm_scanner::scan(&bytes, &req.wasm_hash);
+            let (interface_id, algorithm) =
+                crate::interface_id::derive_columns(&bytes, &req.contract_id);
+            (scan, interface_id, algorithm)
         }
-        None => crate::wasm_scanner::WasmScanResult {
-            status: "pending",
-            findings: vec!["artifact_not_supplied".to_string()],
-        },
+        None => (
+            crate::wasm_scanner::WasmScanResult {
+                status: "pending",
+                findings: vec!["artifact_not_supplied".to_string()],
+            },
+            None,
+            None,
+        ),
     };
     let wasm_hash = req.wasm_hash.clone();
 
@@ -4728,8 +4728,8 @@ async fn publish_contract_inner(
     let slug = generate_unique_slug(&state.db, &req.name, &req.network, req.slug.clone()).await?;
 
     let insert_result = sqlx::query_as::<_, Contract>(
-        "INSERT INTO contracts (contract_id, wasm_hash, name, slug, description, publisher_id, network, category, tags, logical_id, network_configs, visibility, artifact_scan_status, artifact_scan_findings)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, CASE WHEN $12 = 'passed' THEN 'public'::visibility_type ELSE 'private'::visibility_type END, $12, $13)
+        "INSERT INTO contracts (contract_id, wasm_hash, name, slug, description, publisher_id, network, category, tags, logical_id, network_configs, visibility, artifact_scan_status, artifact_scan_findings, interface_id, interface_algorithm)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, CASE WHEN $12 = 'passed' THEN 'public'::visibility_type ELSE 'private'::visibility_type END, $12, $13, $14, $15)
          RETURNING *",
     )
     .bind(&req.contract_id)
@@ -4745,6 +4745,8 @@ async fn publish_contract_inner(
     .bind(&network_configs)
     .bind(artifact_scan.status)
     .bind(json!(artifact_scan.findings))
+    .bind(&interface_id)
+    .bind(interface_algorithm)
     .fetch_one(&state.db)
     .await;
 
@@ -4823,14 +4825,37 @@ async fn publish_contract_inner(
 
     // Save dependencies if provided
     if !req.dependencies.is_empty() {
-        if let Err(e) =
-            dependency::save_dependencies(&state.db, contract.id, &req.dependencies).await
+        // Resolved against this contract's own network (Issue #1147): an
+        // address is only unique per (contract_id, network).
+        match dependency::save_dependencies(
+            &state.db,
+            contract.id,
+            contract.network,
+            &req.dependencies,
+        )
+        .await
         {
-            tracing::error!(
-                "Failed to save initial dependencies for contract {}: {}",
-                contract.contract_id,
-                e
-            );
+            Ok(resolutions) => {
+                let unresolved = resolutions
+                    .iter()
+                    .filter(|r| !matches!(r, dependency::DependencyResolution::Resolved(_)))
+                    .count();
+                if unresolved > 0 {
+                    tracing::info!(
+                        contract_id = %contract.contract_id,
+                        unresolved,
+                        total = resolutions.len(),
+                        "some declared dependencies were stored but not bound to a registry contract"
+                    );
+                }
+            }
+            Err(e) => {
+                tracing::error!(
+                    "Failed to save initial dependencies for contract {}: {}",
+                    contract.contract_id,
+                    e
+                );
+            }
         }
         // Invalidate global graph cache
         state
@@ -5637,64 +5662,6 @@ pub async fn get_trust_score() -> impl IntoResponse {
 }
 
 #[allow(dead_code)]
-#[utoipa::path(
-    get,
-    path = "/api/contracts/{id}/dependencies",
-    params(
-        ("id" = String, Path, description = "Contract UUID")
-    ),
-    responses(
-        (status = 200, description = "List of direct dependencies", body = Object),
-        (status = 404, description = "Contract not found")
-    ),
-    tag = "Graphs"
-)]
-pub async fn get_contract_dependencies(
-    State(state): State<AppState>,
-    Path(id): Path<String>,
-) -> ApiResult<Json<Value>> {
-    let contract_uuid = Uuid::parse_str(&id)
-        .map_err(|_| ApiError::bad_request("InvalidContractId", format!("Invalid ID: {}", id)))?;
-
-    let deps: Vec<shared::ContractDependency> =
-        sqlx::query_as("SELECT * FROM contract_dependencies WHERE contract_id = $1")
-            .bind(contract_uuid)
-            .fetch_all(&state.db)
-            .await
-            .map_err(|e| db_internal_error("get_contract_dependencies", e))?;
-
-    Ok(Json(json!({ "dependencies": deps })))
-}
-
-#[utoipa::path(
-    get,
-    path = "/api/contracts/{id}/dependents",
-    params(
-        ("id" = String, Path, description = "Contract UUID")
-    ),
-    responses(
-        (status = 200, description = "List of direct dependents", body = Object),
-        (status = 404, description = "Contract not found")
-    ),
-    tag = "Graphs"
-)]
-pub async fn get_contract_dependents(
-    State(state): State<AppState>,
-    Path(id): Path<String>,
-) -> ApiResult<Json<Value>> {
-    let contract_uuid = Uuid::parse_str(&id)
-        .map_err(|_| ApiError::bad_request("InvalidContractId", format!("Invalid ID: {}", id)))?;
-
-    let dependents: Vec<shared::ContractDependency> =
-        sqlx::query_as("SELECT * FROM contract_dependencies WHERE dependency_contract_id = $1")
-            .bind(contract_uuid)
-            .fetch_all(&state.db)
-            .await
-            .map_err(|e| db_internal_error("get_contract_dependents", e))?;
-
-    Ok(Json(json!({ "dependents": dependents })))
-}
-
 #[utoipa::path(
     get,
     path = "/api/contracts/graph",
@@ -8332,7 +8299,7 @@ pub async fn get_contract_deployments(
         }
     } else {
         // Try resolving by Stellar ID
-        let uuid = dependency::resolve_contract_id(&state.db, &id)
+        let uuid = dependency::lookup_contract_by_identifier(&state.db, &id)
             .await
             .map_err(|err| {
                 ApiError::not_found(
