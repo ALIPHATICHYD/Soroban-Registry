@@ -18,6 +18,7 @@ mod batch_update;
 mod batch_verify;
 mod cache;
 mod cached_http;
+mod category;
 mod cicd;
 mod codegen;
 mod commands;
@@ -1165,6 +1166,17 @@ pub enum Commands {
     External(Vec<String>),
 }
 
+/// Sub-commands for the `publisher` group (#1124).
+#[derive(Debug, Subcommand)]
+pub enum PublisherCommands {
+    /// Diagnose local publisher setup (config, session, signing key, API reachability)
+    Doctor {
+        /// Output the diagnostic report as machine-readable JSON
+        #[arg(long)]
+        json: bool,
+    },
+}
+
 /// Sub-commands for the `network` group
 #[derive(Debug, Subcommand)]
 pub enum NetworkCommands {
@@ -1819,6 +1831,40 @@ pub enum KeysCommands {
         /// Maximum entries to show
         #[arg(long, default_value = "20")]
         limit: usize,
+    },
+}
+
+/// Sub-commands for `contract category`.
+#[derive(Debug, Subcommand)]
+pub enum CategoryCommands {
+    /// List all categories with descriptions and contract counts
+    List {
+        /// Scope contract counts to a single network (mainnet | testnet | futurenet)
+        #[arg(long)]
+        network: Option<String>,
+
+        /// Output format for stdout: table, json, csv, yaml
+        #[arg(long, default_value = "table")]
+        format: String,
+
+        /// Also write the category list to a file: csv or json
+        #[arg(long)]
+        export: Option<String>,
+    },
+
+    /// Show detailed per-category statistics (counts, recent, trending)
+    Stats {
+        /// Scope statistics to a single network (mainnet | testnet | futurenet)
+        #[arg(long)]
+        network: Option<String>,
+
+        /// Output format for stdout: table, json, csv, yaml
+        #[arg(long, default_value = "table")]
+        format: String,
+
+        /// Also write the statistics to a file: csv or json
+        #[arg(long)]
+        export: Option<String>,
     },
 }
 
@@ -4833,6 +4879,35 @@ pub async fn dispatch_command(
                     .unwrap_or(crate::output_format::OutputFormat::Table);
                 contract_dependency::run(&cli.api_url, &address, depth, fmt, summary).await?;
             }
+            ContractCommands::Category { action } => match action {
+                CategoryCommands::List {
+                    network,
+                    format,
+                    export,
+                } => {
+                    log::debug!(
+                        "Command: contract category list | network={:?} format={}",
+                        network,
+                        format
+                    );
+                    let fmt = crate::output_format::validate_format(&format)?;
+                    category::list(&cli.api_url, network.as_deref(), fmt, export.as_deref()).await?;
+                }
+                CategoryCommands::Stats {
+                    network,
+                    format,
+                    export,
+                } => {
+                    log::debug!(
+                        "Command: contract category stats | network={:?} format={}",
+                        network,
+                        format
+                    );
+                    let fmt = crate::output_format::validate_format(&format)?;
+                    category::stats(&cli.api_url, network.as_deref(), fmt, export.as_deref())
+                        .await?;
+                }
+            },
             ContractCommands::Update {
                 address,
                 name,

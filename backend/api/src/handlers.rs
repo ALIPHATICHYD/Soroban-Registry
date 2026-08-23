@@ -25,22 +25,21 @@ use sha2::{Digest, Sha256};
 use shared::models::SourceFormat;
 use shared::{
     pagination::Cursor, AdvancedSearchRequest, AnalyticsEventType, AuditActionType,
-    ChangePublisherRequest, Contract, ContractAuditLog, ContractDeploymentHistory,
-    ContractExportAcceptedResponse, ContractExportFormat, ContractExportJobStatus,
-    ContractExportMetadata, ContractExportRequest, ContractExportStatusResponse,
-    ContractGetResponse, ContractInteractionResponse, ContractMetadataExportEnvelope,
-    ContractMetadataExportRecord, ContractSearchParams, ContractSource, ContractVersion,
-    CreateContractVersionRequest, CreateInteractionBatchRequest, CreateInteractionRequest,
-    DeploymentHistoryQueryParams, FavoriteSearch, FieldOperator, GraphResponse,
-    InteractionTimeSeriesPoint, InteractionTimeSeriesResponse, InteractionsListResponse,
-    InteractionsQueryParams, Network, NetworkConfig, NetworkEndpoints, NetworkHealth,
-    NetworkHealthResponse, NetworkInfo, NetworkListResponse, NetworkStatus,
-    PaginatedAuditsResponse, PaginatedResponse, PublishRequest, Publisher, QueryCondition,
-    QueryNode, QueryOperator, SaveFavoriteSearchRequest, SearchSuggestion,
+    ChangePublisherRequest, ConfirmOwnershipTransferRequest, Contract, ContractAuditLog,
+    ContractDeploymentHistory, ContractExportAcceptedResponse, ContractExportFormat,
+    ContractExportJobStatus, ContractExportMetadata, ContractExportRequest,
+    ContractExportStatusResponse, ContractGetResponse, ContractInteractionResponse,
+    ContractMetadataExportEnvelope, ContractMetadataExportRecord, ContractSearchParams,
+    ContractSource, ContractVersion, CreateContractVersionRequest, CreateInteractionBatchRequest,
+    CreateInteractionRequest, CreateOwnershipTransferRequest, DeploymentHistoryQueryParams,
+    FavoriteSearch, FieldOperator, GraphResponse, InteractionTimeSeriesPoint,
+    InteractionTimeSeriesResponse, InteractionsListResponse, InteractionsQueryParams, Network,
+    NetworkConfig, NetworkEndpoints, NetworkHealth, NetworkHealthResponse, NetworkInfo,
+    NetworkListResponse, NetworkStatus, OwnershipTransfer, OwnershipTransferLog,
+    OwnershipTransferStatus, PaginatedAuditsResponse, PaginatedResponse, PublishRequest, Publisher,
+    QueryCondition, QueryNode, QueryOperator, SaveFavoriteSearchRequest, SearchSuggestion,
     SearchSuggestionsResponse, SemVer, TrendingParams, UpdateContractMetadataRequest,
     UpdateContractStatusRequest, VerifyRequest,
-    CreateOwnershipTransferRequest, ConfirmOwnershipTransferRequest, OwnershipTransfer,
-    OwnershipTransferLog, OwnershipTransferStatus,
 };
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -4764,11 +4763,14 @@ async fn publish_contract_inner(
                     ));
                 }
                 if e.constraint() == Some("contracts_wasm_hash_key") {
-                    let existing: Contract = sqlx::query_as("SELECT * FROM contracts WHERE wasm_hash = $1")
-                        .bind(&wasm_hash)
-                        .fetch_one(&state.db)
-                        .await
-                        .map_err(|e2| db_internal_error("fetch existing canonical contract", e2))?;
+                    let existing: Contract =
+                        sqlx::query_as("SELECT * FROM contracts WHERE wasm_hash = $1")
+                            .bind(&wasm_hash)
+                            .fetch_one(&state.db)
+                            .await
+                            .map_err(|e2| {
+                                db_internal_error("fetch existing canonical contract", e2)
+                            })?;
 
                     return Err(ApiError::conflict(
                         "DuplicateContractContent",
@@ -6639,12 +6641,10 @@ async fn resolve_publisher_by_id(
     conn: &mut sqlx::PgConnection,
     publisher_id: Uuid,
 ) -> Result<Option<TransferParty>, sqlx::Error> {
-    sqlx::query_as::<_, TransferParty>(
-        "SELECT id, stellar_address FROM publishers WHERE id = $1",
-    )
-    .bind(publisher_id)
-    .fetch_optional(conn)
-    .await
+    sqlx::query_as::<_, TransferParty>("SELECT id, stellar_address FROM publishers WHERE id = $1")
+        .bind(publisher_id)
+        .fetch_optional(conn)
+        .await
 }
 
 /// Translate a unique-violation on the transfer table into the specific 409 it means.
@@ -6725,26 +6725,26 @@ pub async fn create_ownership_transfer(
         ));
     }
 
-    let mut tx = state.db.begin().await.map_err(|err| {
-        db_internal_error("begin ownership transfer creation transaction", err)
-    })?;
+    let mut tx =
+        state.db.begin().await.map_err(|err| {
+            db_internal_error("begin ownership transfer creation transaction", err)
+        })?;
 
     // Lock `contracts` first. Serialising two concurrent initiations on the contract row
     // means the loser observes the winner's committed transfer instead of racing it, and
     // keeping this lock ahead of `ownership_transfers` matches the order used by
     // `confirm_ownership_transfer`.
-    let contract: Contract =
-        sqlx::query_as("SELECT * FROM contracts WHERE id = $1 FOR UPDATE")
-            .bind(contract_uuid)
-            .fetch_optional(&mut *tx)
-            .await
-            .map_err(|err| db_internal_error("lock contract for ownership transfer", err))?
-            .ok_or_else(|| {
-                ApiError::not_found(
-                    "ContractNotFound",
-                    format!("No contract found with ID: {}", id),
-                )
-            })?;
+    let contract: Contract = sqlx::query_as("SELECT * FROM contracts WHERE id = $1 FOR UPDATE")
+        .bind(contract_uuid)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(|err| db_internal_error("lock contract for ownership transfer", err))?
+        .ok_or_else(|| {
+            ApiError::not_found(
+                "ContractNotFound",
+                format!("No contract found with ID: {}", id),
+            )
+        })?;
 
     actor.require_contract_owner(contract.publisher_id)?;
     let actor_id = actor.publisher_id()?;
