@@ -623,7 +623,15 @@ pub fn contract_routes() -> Router<AppState> {
         )
         .route(
             "/api/contracts/:id/dependents",
-            get(handlers::get_contract_dependents),
+            get(dependency_handlers::get_contract_dependents),
+        )
+        .route(
+            "/api/contracts/:id/dependency-graph",
+            get(dependency_handlers::get_dependency_graph),
+        )
+        .route(
+            "/api/contracts/:id/dependency-risk",
+            get(dependency_handlers::get_dependency_risk),
         )
         .route(
             "/api/contracts/:id/impact",

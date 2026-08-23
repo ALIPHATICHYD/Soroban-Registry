@@ -27,6 +27,7 @@ mod completion;
 mod config;
 mod contract_audit;
 mod contract_dependency;
+mod contract_dependency_graph;
 mod contract_deploy;
 mod contract_deprecate;
 mod contract_highlight;
@@ -64,6 +65,7 @@ mod package_signing;
 mod patch;
 mod plugins;
 mod profiler;
+mod publisher;
 mod registry;
 mod release_notes;
 mod shell;
@@ -1153,7 +1155,7 @@ pub enum Commands {
         action: EnvCommands,
     },
 
-    /// Publisher account tools
+    /// Publisher environment diagnostics
     Publisher {
         #[command(subcommand)]
         action: PublisherCommands,
@@ -2330,10 +2332,79 @@ pub enum ContractCommands {
         summary: bool,
     },
 
-    /// List and inspect contract categories
-    Category {
-        #[command(subcommand)]
-        action: CategoryCommands,
+    /// List what a contract depends on (#1147)
+    ///
+    /// Usage: soroban-registry contract dependencies <ADDRESS> [--network <NET>]
+    ///        [--transitive] [--depth N] [--json]
+    ///
+    /// A bare contract address registered on more than one network is ambiguous;
+    /// pass --network to disambiguate.
+    Dependencies {
+        /// On-chain contract address or registry UUID
+        address: String,
+        /// Stellar network (mainnet | testnet | futurenet)
+        #[arg(long)]
+        network: Option<String>,
+        /// Walk the whole dependency closure, not just direct edges
+        #[arg(long)]
+        transitive: bool,
+        /// Maximum traversal depth (capped server-side)
+        #[arg(long)]
+        depth: Option<u32>,
+        /// Include on-chain call edges alongside declared ones
+        #[arg(long)]
+        include_telemetry: bool,
+        /// Print the registry response as JSON
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// List what depends on a contract (#1147)
+    ///
+    /// Usage: soroban-registry contract dependents <ADDRESS> [--network <NET>]
+    ///        [--transitive] [--depth N] [--json]
+    Dependents {
+        /// On-chain contract address or registry UUID
+        address: String,
+        /// Stellar network (mainnet | testnet | futurenet)
+        #[arg(long)]
+        network: Option<String>,
+        /// Walk the whole dependent closure, not just direct edges
+        #[arg(long)]
+        transitive: bool,
+        /// Maximum traversal depth (capped server-side)
+        #[arg(long)]
+        depth: Option<u32>,
+        /// Include on-chain call edges alongside declared ones
+        #[arg(long)]
+        include_telemetry: bool,
+        /// Print the registry response as JSON
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// Report direct and inherited risk across a contract's dependencies (#1147)
+    ///
+    /// Usage: soroban-registry contract dependency-risk <ADDRESS> [--network <NET>]
+    ///        [--depth N] [--fail-on low|medium|high|critical] [--json]
+    ///
+    /// Each finding carries the shortest dependency path that reaches it.
+    /// With --fail-on, exits 1 when the overall risk meets or exceeds the level.
+    DependencyRisk {
+        /// On-chain contract address or registry UUID
+        address: String,
+        /// Stellar network (mainnet | testnet | futurenet)
+        #[arg(long)]
+        network: Option<String>,
+        /// Maximum traversal depth (capped server-side)
+        #[arg(long)]
+        depth: Option<u32>,
+        /// Exit 1 when overall risk meets or exceeds this level
+        #[arg(long)]
+        fail_on: Option<String>,
+        /// Print the registry response as JSON
+        #[arg(long)]
+        json: bool,
     },
 
     /// Update contract metadata after registration (#828)
@@ -2655,6 +2726,19 @@ pub enum EnvCommands {
     Switch {
         /// Environment name to activate
         environment: String,
+    },
+}
+
+/// Sub-commands for the `publisher` group
+#[derive(Debug, Subcommand)]
+pub enum PublisherCommands {
+    /// Diagnose the local publishing environment (config, session, signing key, connectivity)
+    ///
+    /// Usage: soroban-registry publisher doctor [--json]
+    Doctor {
+        /// Output results as machine-readable JSON
+        #[arg(long)]
+        json: bool,
     },
 }
 
@@ -4700,6 +4784,86 @@ pub async fn dispatch_command(
                 log::debug!("Command: contract interaction | address={}", address);
                 contract_interaction::run(&cli.api_url, &address, limit, json).await?;
             }
+            ContractCommands::Dependencies {
+                address,
+                network,
+                transitive,
+                depth,
+                include_telemetry,
+                json,
+            } => {
+                log::debug!(
+                    "Command: contract dependencies | address={} network={:?} transitive={}",
+                    address,
+                    network,
+                    transitive
+                );
+                let opts = contract_dependency_graph::GraphOptions {
+                    network,
+                    depth,
+                    transitive,
+                    include_telemetry,
+                    json,
+                };
+                contract_dependency_graph::dependencies(&cli.api_url, &address, &opts).await?;
+            }
+            ContractCommands::Dependents {
+                address,
+                network,
+                transitive,
+                depth,
+                include_telemetry,
+                json,
+            } => {
+                log::debug!(
+                    "Command: contract dependents | address={} network={:?} transitive={}",
+                    address,
+                    network,
+                    transitive
+                );
+                let opts = contract_dependency_graph::GraphOptions {
+                    network,
+                    depth,
+                    transitive,
+                    include_telemetry,
+                    json,
+                };
+                contract_dependency_graph::dependents(&cli.api_url, &address, &opts).await?;
+            }
+            ContractCommands::DependencyRisk {
+                address,
+                network,
+                depth,
+                fail_on,
+                json,
+            } => {
+                log::debug!(
+                    "Command: contract dependency-risk | address={} network={:?} fail_on={:?}",
+                    address,
+                    network,
+                    fail_on
+                );
+                let threshold = fail_on
+                    .as_deref()
+                    .map(contract_dependency_graph::Severity::parse)
+                    .transpose()?;
+                let opts = contract_dependency_graph::GraphOptions {
+                    network,
+                    depth,
+                    // Risk is only meaningful over the closure: a direct-only
+                    // report would omit exactly the inherited findings this
+                    // command exists to surface.
+                    transitive: true,
+                    include_telemetry: false,
+                    json,
+                };
+                let breached =
+                    contract_dependency_graph::risk(&cli.api_url, &address, &opts, threshold)
+                        .await?;
+                if breached {
+                    std::process::exit(1);
+                }
+            }
             ContractCommands::Dependency {
                 address,
                 depth,
@@ -5377,6 +5541,12 @@ pub async fn dispatch_command(
             EnvCommands::Switch { environment } => {
                 log::debug!("Command: env switch | environment={}", environment);
                 env::switch_env(&environment)?;
+            }
+        },
+        Commands::Publisher { action } => match action {
+            PublisherCommands::Doctor { json } => {
+                log::debug!("Command: publisher doctor | json={}", json);
+                publisher::doctor(&cli.api_url, json).await?;
             }
         },
     }

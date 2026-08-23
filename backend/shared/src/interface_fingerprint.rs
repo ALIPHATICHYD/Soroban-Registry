@@ -14,7 +14,7 @@
 
 use crate::contract_spec::{
     ScSpecEntry, ScSpecEventDataFormat, ScSpecEventParamLocationV0, ScSpecTypeDef,
-    ScSpecUdtUnionCaseV0,
+    ScSpecUdtUnionCaseV0, SpecParseError,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -269,6 +269,185 @@ pub fn fingerprint_spec(entries: &[ScSpecEntry]) -> InterfaceFingerprint {
         types,
         events,
         errors,
+    }
+}
+
+/// Why a WASM artifact yielded no interface fingerprint.
+///
+/// None of these are errors in the "the caller did something wrong" sense: a
+/// contract may legitimately ship without a spec section. Callers persisting an
+/// interface id should record "unknown", not reject the artifact.
+#[derive(Debug, Clone, PartialEq)]
+pub enum FingerprintWasmError {
+    /// The module embeds no [`crate::wasm::CONTRACT_SPEC_SECTION`] custom section.
+    NoSpecSection,
+    /// The section is present but is not a well-formed spec.
+    MalformedSpec(SpecParseError),
+    /// The section parsed but declares nothing. Fingerprinting an empty spec
+    /// would give every such contract the same id and make "the interfaces
+    /// match" a meaningless statement, so it is reported instead.
+    EmptySpec,
+}
+
+impl std::fmt::Display for FingerprintWasmError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::NoSpecSection => write!(
+                f,
+                "no {} section: this module embeds no Soroban contract spec",
+                crate::wasm::CONTRACT_SPEC_SECTION
+            ),
+            Self::MalformedSpec(err) => write!(
+                f,
+                "malformed {} section: {err}",
+                crate::wasm::CONTRACT_SPEC_SECTION
+            ),
+            Self::EmptySpec => write!(
+                f,
+                "empty {} section: no interface to identify",
+                crate::wasm::CONTRACT_SPEC_SECTION
+            ),
+        }
+    }
+}
+
+impl std::error::Error for FingerprintWasmError {}
+
+/// Derive an [`InterfaceFingerprint`] straight from WASM bytes.
+///
+/// Composes [`crate::wasm::extract_contract_spec_bytes`],
+/// [`crate::contract_spec::parse_contract_spec`], and [`fingerprint_spec`].
+/// Every step is pure and offline — **no WASM is executed**; the module is only
+/// walked for custom sections, and the section is read by a dependency-free XDR
+/// reader. That matters because artifacts are untrusted input.
+pub fn fingerprint_wasm(wasm_bytes: &[u8]) -> Result<InterfaceFingerprint, FingerprintWasmError> {
+    let spec_bytes = crate::wasm::extract_contract_spec_bytes(wasm_bytes)
+        .ok_or(FingerprintWasmError::NoSpecSection)?;
+
+    let entries = crate::contract_spec::parse_contract_spec(&spec_bytes)
+        .map_err(FingerprintWasmError::MalformedSpec)?;
+
+    if entries.is_empty() {
+        return Err(FingerprintWasmError::EmptySpec);
+    }
+
+    Ok(fingerprint_spec(&entries))
+}
+
+#[cfg(test)]
+mod wasm_tests {
+    use super::*;
+
+    /// Minimal valid WASM module header, no custom sections.
+    const EMPTY_MODULE: &[u8] = &[0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00];
+
+    #[test]
+    fn module_without_spec_section_has_no_fingerprint() {
+        assert!(matches!(
+            fingerprint_wasm(EMPTY_MODULE),
+            Err(FingerprintWasmError::NoSpecSection)
+        ));
+    }
+
+    #[test]
+    fn garbage_bytes_never_panic() {
+        for bytes in [b"".as_slice(), b"not wasm".as_slice(), &[0xff; 64]] {
+            assert!(fingerprint_wasm(bytes).is_err());
+        }
+    }
+
+    #[test]
+    fn spec_section_is_fingerprinted_with_the_published_algorithm() {
+        let wasm = wasm_with_spec_section(&function_entry_xdr("transfer"));
+        let fp = fingerprint_wasm(&wasm).expect("spec section should fingerprint");
+        assert_eq!(fp.algorithm, ALGORITHM);
+        assert_eq!(fp.interface_id.len(), 64, "expected hex sha256");
+        assert_eq!(fp.functions.len(), 1);
+        assert_eq!(fp.functions[0].name, "transfer");
+    }
+
+    #[test]
+    fn different_interfaces_get_different_ids() {
+        let a = fingerprint_wasm(&wasm_with_spec_section(&function_entry_xdr("transfer"))).unwrap();
+        let b = fingerprint_wasm(&wasm_with_spec_section(&function_entry_xdr("burn"))).unwrap();
+        assert_ne!(a.interface_id, b.interface_id);
+    }
+
+    #[test]
+    fn identical_interfaces_get_identical_ids() {
+        let a = fingerprint_wasm(&wasm_with_spec_section(&function_entry_xdr("transfer"))).unwrap();
+        let b = fingerprint_wasm(&wasm_with_spec_section(&function_entry_xdr("transfer"))).unwrap();
+        assert_eq!(a.interface_id, b.interface_id);
+    }
+
+    #[test]
+    fn empty_spec_section_is_not_an_interface() {
+        let wasm = wasm_with_spec_section(&[]);
+        assert!(matches!(
+            fingerprint_wasm(&wasm),
+            Err(FingerprintWasmError::EmptySpec)
+        ));
+    }
+
+    #[test]
+    fn malformed_spec_section_is_reported_not_panicked() {
+        // A valid FunctionV0 discriminant followed by a truncated body.
+        let wasm = wasm_with_spec_section(&[0, 0, 0, 0]);
+        assert!(matches!(
+            fingerprint_wasm(&wasm),
+            Err(FingerprintWasmError::MalformedSpec(_))
+        ));
+    }
+
+    // ── Fixtures ────────────────────────────────────────────────────────────
+
+    /// XDR for `ScSpecEntry::FunctionV0` with no doc, no inputs, no outputs.
+    /// Hand-encoded so these tests stay free of `stellar-xdr`, which this crate
+    /// deliberately does not depend on.
+    fn function_entry_xdr(name: &str) -> Vec<u8> {
+        let mut out = 0u32.to_be_bytes().to_vec(); // discriminant: FunctionV0
+        out.extend_from_slice(&xdr_string("")); // doc
+        out.extend_from_slice(&xdr_string(name)); // name
+        out.extend_from_slice(&0u32.to_be_bytes()); // inputs: empty vec
+        out.extend_from_slice(&0u32.to_be_bytes()); // outputs: empty vec
+        out
+    }
+
+    /// XDR variable-length string: 4-byte big-endian length, bytes, zero pad to 4.
+    fn xdr_string(value: &str) -> Vec<u8> {
+        let bytes = value.as_bytes();
+        let mut out = (bytes.len() as u32).to_be_bytes().to_vec();
+        out.extend_from_slice(bytes);
+        out.resize(out.len() + (4 - bytes.len() % 4) % 4, 0);
+        out
+    }
+
+    fn wasm_with_spec_section(payload: &[u8]) -> Vec<u8> {
+        let name = crate::wasm::CONTRACT_SPEC_SECTION.as_bytes();
+        let mut body = leb128(name.len() as u64);
+        body.extend_from_slice(name);
+        body.extend_from_slice(payload);
+
+        let mut out = EMPTY_MODULE.to_vec();
+        out.push(0); // custom section id
+        out.extend_from_slice(&leb128(body.len() as u64));
+        out.extend_from_slice(&body);
+        out
+    }
+
+    fn leb128(mut value: u64) -> Vec<u8> {
+        let mut out = Vec::new();
+        loop {
+            let mut byte = (value & 0x7f) as u8;
+            value >>= 7;
+            if value != 0 {
+                byte |= 0x80;
+            }
+            out.push(byte);
+            if value == 0 {
+                return out;
+            }
+        }
     }
 }
 

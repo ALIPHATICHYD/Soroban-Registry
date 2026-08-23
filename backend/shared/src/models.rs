@@ -3653,7 +3653,7 @@ pub struct CollaborativeReviewDetails {
 // ADVANCED CONTRACT DEPENDENCIES (issue #417)
 // ═══════════════════════════════════════════════════════════════════════════
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct DependencyNode {
     pub contract_id: String,
     pub resolved_id: Option<Uuid>,
@@ -3665,7 +3665,7 @@ pub struct DependencyNode {
     pub visualization_hints: serde_json::Value,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct DependencyResponse {
     pub root: DependencyNode,
     pub total_dependencies: usize,
@@ -4407,8 +4407,22 @@ pub enum ScanStatus {
 }
 
 /// Security issue severity
+// Copy/Eq/Ord/Hash so severities can be compared, counted, and used as map keys
+// by the dependency risk combinator (Issue #1147) without cloning. The variant
+// order below IS the severity order; do not reorder it.
 #[derive(
-    Debug, Clone, Serialize, Deserialize, sqlx::Type, utoipa::ToSchema, PartialEq, PartialOrd,
+    Debug,
+    Clone,
+    Copy,
+    Serialize,
+    Deserialize,
+    sqlx::Type,
+    utoipa::ToSchema,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
 )]
 #[sqlx(type_name = "issue_severity_type", rename_all = "lowercase")]
 pub enum IssueSeverity {
