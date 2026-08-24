@@ -903,12 +903,14 @@ struct LedgerEntryResponse {
 mod tests {
     use super::*;
 
+    // Strkeys carry a CRC16 checksum, so a correctly-shaped 56-character string is not
+    // enough -- these are real encodings of the same 32-byte key.
     fn valid_contract_id() -> String {
-        format!("C{}", "A".repeat(55))
+        "CA7QYNF7SOWQ3GLR2BGMZEHXAVIRZA4KVWLTJJFC7MGXUA74P7UJUWDA".to_string()
     }
 
     fn valid_stellar_address() -> String {
-        format!("G{}", "A".repeat(55))
+        "GA7QYNF7SOWQ3GLR2BGMZEHXAVIRZA4KVWLTJJFC7MGXUA74P7UJVSGZ".to_string()
     }
 
     #[test]
