@@ -89,7 +89,11 @@ fn test_doctor_missing_key_file() {
     let dir = tempdir().unwrap();
     let config_dir = dir.path().join(".soroban-registry");
     fs::create_dir_all(&config_dir).unwrap();
-    fs::write(config_dir.join("config.toml"), "[defaults]\nnetwork = \"testnet\"\n").unwrap();
+    fs::write(
+        config_dir.join("config.toml"),
+        "[defaults]\nnetwork = \"testnet\"\n",
+    )
+    .unwrap();
     write_legacy_api_key(&config_dir, "fake_token");
 
     let output = Command::new(get_binary_path())

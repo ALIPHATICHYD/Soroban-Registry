@@ -31,10 +31,10 @@ fn test_snapshot_lifecycle() {
     let _pub_key_file = dir.path().join("trust.pub");
 
     // Generate keys (assuming we just need some valid Ed25519 string)
-    // Actually we need to call keygen. But wait, we can just use the tool if it exists, 
+    // Actually we need to call keygen. But wait, we can just use the tool if it exists,
     // or hardcode a keypair for testing.
     // To avoid dependency on keygen in the CLI if not available, we can mock or hardcode.
-    
+
     // Basic test to verify that the CLI command parses correctly
     // The registry URL is a dummy URL, so it will fail to connect, but the CLI parsing should pass.
     let output = Command::new(get_binary_path())
@@ -51,5 +51,8 @@ fn test_snapshot_lifecycle() {
     let stderr = String::from_utf8_lossy(&output.stderr);
     let _stdout = String::from_utf8_lossy(&output.stdout);
     // As long as it is a connection error and not a clap parse error, we're good for this basic integration test.
-    assert!(!stderr.contains("error: unrecognized subcommand"), "CLI should recognize snapshot subcommand");
+    assert!(
+        !stderr.contains("error: unrecognized subcommand"),
+        "CLI should recognize snapshot subcommand"
+    );
 }

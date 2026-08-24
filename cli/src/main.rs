@@ -26,12 +26,12 @@ mod compare;
 mod completion;
 mod config;
 mod contract_audit;
+mod contract_compatibility;
 mod contract_dependency;
 mod contract_dependency_graph;
 mod contract_deploy;
 mod contract_deprecate;
 mod contract_highlight;
-mod contract_compatibility;
 mod contract_interaction;
 mod contract_interfaces;
 mod contract_provenance;
@@ -84,8 +84,8 @@ mod wizard;
 mod diagnostic;
 mod output_format;
 mod search;
-mod snapshot;
 mod search_pagination;
+mod snapshot;
 
 use anyhow::Result;
 use clap::{ArgAction, Parser, Subcommand, ValueEnum};
@@ -4713,7 +4713,11 @@ pub async fn dispatch_command(
                 contract_interfaces::run_local(&wasm, json).await?;
             }
             ContractCommands::Provenance { manifest, json } => {
-                log::debug!("Command: contract provenance | manifest={} json={}", manifest, json);
+                log::debug!(
+                    "Command: contract provenance | manifest={} json={}",
+                    manifest,
+                    json
+                );
                 contract_provenance::run_local(&manifest, json).await?;
             }
             ContractCommands::VerifyBuild {
@@ -5019,7 +5023,8 @@ pub async fn dispatch_command(
                         format
                     );
                     let fmt = crate::output_format::validate_format(&format)?;
-                    category::list(&cli.api_url, network.as_deref(), fmt, export.as_deref()).await?;
+                    category::list(&cli.api_url, network.as_deref(), fmt, export.as_deref())
+                        .await?;
                 }
                 CategoryCommands::Stats {
                     network,
@@ -5751,11 +5756,22 @@ pub async fn dispatch_command(
                 snapshot::export(&cli.api_url, &output).await?;
             }
             SnapshotCommands::Sign { snapshot_file, key } => {
-                log::debug!("Command: snapshot sign | file={} key={}", snapshot_file, key);
+                log::debug!(
+                    "Command: snapshot sign | file={} key={}",
+                    snapshot_file,
+                    key
+                );
                 snapshot::sign(&snapshot_file, &key).await?;
             }
-            SnapshotCommands::Verify { snapshot_file, trust_key } => {
-                log::debug!("Command: snapshot verify | file={} trust_key={}", snapshot_file, trust_key);
+            SnapshotCommands::Verify {
+                snapshot_file,
+                trust_key,
+            } => {
+                log::debug!(
+                    "Command: snapshot verify | file={} trust_key={}",
+                    snapshot_file,
+                    trust_key
+                );
                 snapshot::verify(&snapshot_file, &trust_key).await?;
             }
             SnapshotCommands::Inspect { snapshot_file } => {

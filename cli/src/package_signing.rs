@@ -224,7 +224,9 @@ async fn verify_from_registry(
     if signatures.is_empty() {
         println!(
             "{}",
-            "\n[ERR] No signatures found for this package".yellow().bold()
+            "\n[ERR] No signatures found for this package"
+                .yellow()
+                .bold()
         );
         return Ok(());
     }
@@ -246,7 +248,9 @@ async fn verify_from_registry(
             } else {
                 println!(
                     "{}",
-                    format!("\n[WARN] Signature status: {}", status).yellow().bold()
+                    format!("\n[WARN] Signature status: {}", status)
+                        .yellow()
+                        .bold()
                 );
             }
 
@@ -475,7 +479,10 @@ pub fn generate_keypair() -> Result<()> {
     let public_b64 = BASE64.encode(public_bytes);
     let stellar_address = derive_stellar_address(&public_bytes);
 
-    println!("{}", "\n[OK] Keypair generated successfully!".green().bold());
+    println!(
+        "{}",
+        "\n[OK] Keypair generated successfully!".green().bold()
+    );
     println!();
     println!("  {} (keep this secret!):", "Private Key".bold().red());
     println!("  {}", secret_b64.bright_red());

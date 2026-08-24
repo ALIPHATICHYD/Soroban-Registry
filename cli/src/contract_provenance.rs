@@ -47,7 +47,11 @@ pub fn load_provenance(manifest_path: &str) -> Result<BuildProvenance> {
         anyhow::bail!(
             "Provenance manifest at {} is invalid:\n{}",
             manifest_path,
-            errors.iter().map(|e| format!("  - {e}")).collect::<Vec<_>>().join("\n")
+            errors
+                .iter()
+                .map(|e| format!("  - {e}"))
+                .collect::<Vec<_>>()
+                .join("\n")
         );
     }
 
@@ -86,7 +90,10 @@ fn print_human(manifest_path: &str, provenance: &BuildProvenance) {
         ReproducibilityStatus::BuildFailed => "build failed".red().bold(),
     };
     println!("  Status: {}", status_label);
-    if matches!(provenance.reproducibility.status, ReproducibilityStatus::NotChecked) {
+    if matches!(
+        provenance.reproducibility.status,
+        ReproducibilityStatus::NotChecked
+    ) {
         println!(
             "  {} Run `soroban-registry contract verify-build` to attempt an independent rebuild.",
             "Hint:".dimmed()
