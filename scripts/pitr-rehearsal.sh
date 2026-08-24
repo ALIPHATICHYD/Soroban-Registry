@@ -102,6 +102,11 @@ initdb -D "$primary_dir" --auth=trust --username=postgres >/dev/null
 cat >> "$primary_dir/postgresql.conf" <<CONF
 port = $port
 listen_addresses = 'localhost'
+# Keep the socket inside the rehearsal directory. The compiled-in default on
+# Debian and Ubuntu is /var/run/postgresql, which only the postgres user can
+# write to, so an unprivileged run (a CI runner, a developer laptop) would fail
+# to start the postmaster at all.
+unix_socket_directories = '$workdir'
 wal_level = replica
 archive_mode = on
 # Copy to a temporary name and rename into place: a rename is atomic, so
@@ -168,6 +173,7 @@ rm -f "$restored_dir/postmaster.pid"
 
 cat >> "$restored_dir/postgresql.conf" <<CONF
 port = $((port + 1))
+unix_socket_directories = '$workdir'
 archive_mode = off
 restore_command = 'cp $archive_dir/%f %p'
 recovery_target_time = '$recovery_target'

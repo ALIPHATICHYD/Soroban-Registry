@@ -55,14 +55,16 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y postgresql postgresql-contrib
-          echo "/usr/lib/postgresql/16/bin" >> "$GITHUB_PATH"
+          # Take whichever major version apt installed rather than pinning one.
+          server_bin=$(ls -d /usr/lib/postgresql/*/bin | sort -V | tail -1)
+          echo "$server_bin" >> "$GITHUB_PATH"
+          "$server_bin/initdb" --version
 
       - name: Rehearse recovery to a point in time
-        # The runner's postgres user owns the binaries; the rehearsal builds its
-        # own throwaway cluster and cleans up after itself.
-        run: |
-          sudo -u postgres env "PATH=$PATH" \
-            ./scripts/pitr-rehearsal.sh --json
+        # Runs as the runner user, which owns the checkout. initdb refuses to run
+        # as root, not as an unprivileged user, so there is nothing to sudo to -
+        # and sudoing to postgres would lose access to the workspace.
+        run: ./scripts/pitr-rehearsal.sh --json
 
   compose-config:
     name: Validate the backup stack
@@ -70,9 +72,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Validate compose files
+        # Every variable the compose files mark required with :?. There is no
+        # .env on a runner, and `docker compose` silently reads one when it
+        # exists, so validating locally without --env-file can pass while CI
+        # fails on exactly this.
         env:
           POSTGRES_PASSWORD: validation-only
           REPMGR_PASSWORD: validation-only
+          PGPOOL_ADMIN_PASSWORD: validation-only
+          GRAFANA_ADMIN_PASSWORD: validation-only
         run: |
-          docker compose -f docker-compose.yml config --quiet
-          docker compose -f docker-compose.backup.yml config --quiet
+          docker compose --env-file /dev/null -f docker-compose.yml config --quiet
+          docker compose --env-file /dev/null -f docker-compose.backup.yml config --quiet
