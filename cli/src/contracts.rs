@@ -2,7 +2,6 @@ use crate::output_format::{self, OutputFormat};
 use anyhow::{Context, Result};
 use colored::Colorize;
 use serde_json::json;
-use std::cmp::Ordering;
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ContractListItem {

@@ -1,7 +1,7 @@
 use anyhow::{bail, Context, Result};
 use chrono::Utc;
 use colored::Colorize;
-use ed25519_dalek::{Signer, SigningKey, Verifier};
+use ed25519_dalek::{Signer, Verifier};
 use serde_json::json;
 use shared::models::{SnapshotPayload, SignedSnapshot, Contract, ContractVersion};
 use std::fs;

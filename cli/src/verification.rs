@@ -1,6 +1,5 @@
 use crate::net::RequestBuilderExt;
-use anyhow::{Context, Result};
-use chrono::{DateTime, Utc};
+use anyhow::Result;
 use colored::Colorize;
 use serde_json::{json, Value};
 use std::fs;
@@ -64,7 +63,7 @@ async fn submit_verification(
     }
 
     let project_path = Path::new(path);
-    let mut contract_id = id;
+    let contract_id = id;
 
     // Try to detect contract ID from project if not provided
     if contract_id.is_none() {

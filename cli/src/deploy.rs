@@ -1,7 +1,6 @@
 use crate::wizard::{confirm, detect_soroban, mask_secret, prompt, prompt_with_validation};
 use anyhow::{Context, Result};
 use colored::Colorize;
-use serde_json::json;
 use std::path::Path;
 use std::process::Command;
 
@@ -117,7 +116,7 @@ fn simulate_deployment(
 }
 
 pub fn deploy_to_network(wasm: &str, network: &str, signer: &str) -> Result<String> {
-    let mut args = vec![
+    let args = vec![
         "contract",
         "deploy",
         "--wasm",

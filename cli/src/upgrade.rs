@@ -1,8 +1,7 @@
-use crate::wizard::{confirm, prompt, prompt_with_validation};
+use crate::wizard::{confirm, prompt};
 use anyhow::{Context, Result};
 use colored::Colorize;
 use semver::Version;
-use std::fs;
 use std::path::Path;
 
 pub mod version {

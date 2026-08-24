@@ -1,5 +1,5 @@
 use crate::commands::Network;
-use anyhow::{Context, Result};
+use anyhow::Result;
 use colored::Colorize;
 use std::path::Path;
 use std::process::Command;
