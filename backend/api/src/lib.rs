@@ -109,6 +109,7 @@ pub mod contract_ref;
 pub mod db_monitoring;
 pub mod db_pool;
 pub mod db_resilience;
+pub mod db_transaction;
 pub mod dependency;
 pub mod dependency_graph;
 pub mod dependency_risk;

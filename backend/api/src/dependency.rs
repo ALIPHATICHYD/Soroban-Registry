@@ -398,6 +398,28 @@ pub async fn save_dependencies(
     network: Network,
     decls: &[DependencyDeclaration],
 ) -> Result<Vec<DependencyResolution>> {
+    let mut tx = pool.begin().await?;
+    let resolutions = save_dependencies_in_tx(&mut tx, pool, contract_id, network, decls).await?;
+    tx.commit().await?;
+    Ok(resolutions)
+}
+
+/// Same as [`save_dependencies`] but performs the dependency-edge writes on a
+/// caller-provided transaction (issue #1164).
+///
+/// Publishing a contract writes the contract record, its audit entry, and its
+/// dependency edges as one unit, so the edges must commit (or roll back)
+/// together with the rest of the publish instead of in a transaction of their
+/// own. The resolution/cycle reads deliberately stay on `pool`: they look up
+/// *other, already-committed* contracts in the registry, so they do not need
+/// to be part of the new contract's atomic unit.
+pub async fn save_dependencies_in_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    pool: &PgPool,
+    contract_id: Uuid,
+    network: Network,
+    decls: &[DependencyDeclaration],
+) -> Result<Vec<DependencyResolution>> {
     let mut resolutions = Vec::with_capacity(decls.len());
     for decl in decls {
         resolutions.push(resolve_dependency_target(pool, &decl.name, network).await?);
@@ -425,11 +447,9 @@ pub async fn save_dependencies(
         }
     }
 
-    let mut tx = pool.begin().await?;
-
     sqlx::query("DELETE FROM contract_static_dependencies WHERE contract_id = $1")
         .bind(contract_id)
-        .execute(&mut *tx)
+        .execute(&mut **tx)
         .await?;
 
     for (decl, resolution) in decls.iter().zip(&resolutions) {
@@ -451,13 +471,11 @@ pub async fn save_dependencies(
         .bind(&decl.name)
         .bind(dep_contract_id)
         .bind(&decl.version_constraint)
-        .execute(&mut *tx)
+        .execute(&mut **tx)
         .await?;
     }
 
-    write_canonical_edges(&mut tx, contract_id, network, decls, &resolutions).await?;
-
-    tx.commit().await?;
+    write_canonical_edges(tx, contract_id, network, decls, &resolutions).await?;
 
     Ok(resolutions)
 }

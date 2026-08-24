@@ -1,0 +1,25 @@
+name: Transaction Boundaries
+
+# Enforces that no handler performs more than one pool write outside
+# db_transaction::with_transaction (issue #1164). Multi-table write handlers
+# (publish, ownership transfer, deprecation, ...) must mutate state inside a
+# single transaction so an audit entry can never exist without its state
+# change, or vice versa.
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+jobs:
+  check-transaction-boundaries:
+    name: Flag handlers with >1 write outside with_transaction
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run transaction-boundary lint
+        run: |
+          python3 scripts/check-transaction-boundaries.py \
+            --baseline scripts/transaction-boundary-baseline.txt

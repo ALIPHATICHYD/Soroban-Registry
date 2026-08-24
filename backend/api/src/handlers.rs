@@ -1423,7 +1423,18 @@ async fn record_contract_interaction(
     input: ContractInteractionInsert<'_>,
 ) -> Result<Uuid, sqlx::Error> {
     let mut tx = db.begin().await?;
+    let interaction_id = record_contract_interaction_in_tx(&mut tx, input).await?;
+    tx.commit().await?;
+    Ok(interaction_id)
+}
 
+/// Same as [`record_contract_interaction`] but runs on a caller-provided
+/// transaction, so the interaction rows commit (or roll back) together with the
+/// rest of the handler's multi-table change (issue #1164).
+async fn record_contract_interaction_in_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    input: ContractInteractionInsert<'_>,
+) -> Result<Uuid, sqlx::Error> {
     let interaction_id: Uuid = sqlx::query_scalar(
         r#"
         INSERT INTO contract_interactions
@@ -1445,7 +1456,7 @@ async fn record_contract_interaction(
     .bind(input.timestamp)
     .bind(input.network)
     .bind(input.timestamp)
-    .fetch_one(&mut *tx)
+    .fetch_one(&mut **tx)
     .await?;
 
     sqlx::query(
@@ -1463,7 +1474,7 @@ async fn record_contract_interaction(
     .bind(input.interaction_type)
     .bind(input.network)
     .bind(input.timestamp.date_naive())
-    .execute(&mut *tx)
+    .execute(&mut **tx)
     .await?;
 
     if input.interaction_type == "invoke" {
@@ -1484,13 +1495,11 @@ async fn record_contract_interaction(
                 .bind(target_contract_id)
                 .bind(input.network)
                 .bind(input.timestamp.date_naive())
-                .execute(&mut *tx)
+                .execute(&mut **tx)
                 .await?;
             }
         }
     }
-
-    tx.commit().await?;
 
     Ok(interaction_id)
 }
@@ -4726,118 +4735,134 @@ async fn publish_contract_inner(
 
     let slug = generate_unique_slug(&state.db, &req.name, &req.network, req.slug.clone()).await?;
 
-    let insert_result = sqlx::query_as::<_, Contract>(
-        "INSERT INTO contracts (contract_id, wasm_hash, name, slug, description, publisher_id, network, category, tags, logical_id, network_configs, visibility, artifact_scan_status, artifact_scan_findings, interface_id, interface_algorithm)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, CASE WHEN $12 = 'passed' THEN 'public'::visibility_type ELSE 'private'::visibility_type END, $12, $13, $14, $15)
-         RETURNING *",
-    )
-    .bind(&req.contract_id)
-    .bind(&wasm_hash)
-    .bind(&req.name)
-    .bind(&slug)
-    .bind(&req.description)
-    .bind(publisher_id)
-    .bind(&req.network)
-    .bind(&req.category)
-    .bind(&req.tags)
-    .bind(Option::<Uuid>::None as Option<Uuid>)
-    .bind(&network_configs)
-    .bind(artifact_scan.status)
-    .bind(json!(artifact_scan.findings))
-    .bind(&interface_id)
-    .bind(interface_algorithm)
-    .fetch_one(&state.db)
-    .await;
+    // Everything below mutates state, so it runs inside a single transaction:
+    // the contract record, its verification task, the logical_id backfill, the
+    // dependency edges, the audit entry, and the publish interaction all commit
+    // or roll back together (issue #1164). A mid-publish crash can no longer
+    // leave an audit entry with no matching contract, or a contract whose
+    // dependency edges disagree with the rest of the record.
+    let has_dependencies = !req.dependencies.is_empty();
+    let publisher_address = req.publisher_address.clone();
+    let is_cicd = req.is_cicd;
+    // Owned captures for the transaction closure: the closure's future must be
+    // `'static`-capable, so clone the pool and extract the IP up front instead
+    // of borrowing `state`/`headers`.
+    let db = state.db.clone();
+    let ip_address = extract_ip_address(headers);
 
-    let contract = match insert_result {
-        Ok(c) => c,
-        Err(err) => {
-            if let sqlx::Error::Database(ref e) = err {
-                if e.constraint() == Some("contracts_contract_id_network_key") {
-                    return Err(ApiError::conflict(
-                        "ContractAlreadyRegistered",
-                        format!(
-                            "Contract {} is already registered for network {}",
-                            req.contract_id, req.network
-                        ),
-                    ));
-                }
-                if e.constraint() == Some("contracts_wasm_hash_key") {
-                    let existing: Contract =
-                        sqlx::query_as("SELECT * FROM contracts WHERE wasm_hash = $1")
-                            .bind(&wasm_hash)
-                            .fetch_one(&state.db)
-                            .await
-                            .map_err(|e2| {
-                                db_internal_error("fetch existing canonical contract", e2)
-                            })?;
+    let contract = crate::db_transaction::with_transaction(&state.db, |tx| {
+        Box::pin(async move {
+            let insert_result = sqlx::query_as::<_, Contract>(
+                "INSERT INTO contracts (contract_id, wasm_hash, name, slug, description, publisher_id, network, category, tags, logical_id, network_configs, visibility, artifact_scan_status, artifact_scan_findings, interface_id, interface_algorithm)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, CASE WHEN $12 = 'passed' THEN 'public'::visibility_type ELSE 'private'::visibility_type END, $12, $13, $14, $15)
+                 RETURNING *",
+            )
+            .bind(&req.contract_id)
+            .bind(&wasm_hash)
+            .bind(&req.name)
+            .bind(&slug)
+            .bind(&req.description)
+            .bind(publisher_id)
+            .bind(&req.network)
+            .bind(&req.category)
+            .bind(&req.tags)
+            .bind(Option::<Uuid>::None as Option<Uuid>)
+            .bind(&network_configs)
+            .bind(artifact_scan.status)
+            .bind(json!(artifact_scan.findings))
+            .bind(&interface_id)
+            .bind(interface_algorithm)
+            .fetch_one(&mut **tx)
+            .await;
 
-                    return Err(ApiError::conflict(
-                        "DuplicateContractContent",
-                        "A contract with identical WASM content already exists.",
-                    )
-                    .with_details(serde_json::json!({
-                        "existing_contract": {
-                            "id": existing.id,
-                            "contract_id": existing.contract_id,
-                            "slug": existing.slug,
-                            "network": existing.network.to_string(),
-                            "wasm_hash": existing.wasm_hash,
-                            "published_at": existing.created_at,
+            let contract = match insert_result {
+                Ok(c) => c,
+                Err(err) => {
+                    if let sqlx::Error::Database(ref e) = err {
+                        if e.constraint() == Some("contracts_contract_id_network_key") {
+                            return Err(ApiError::conflict(
+                                "ContractAlreadyRegistered",
+                                format!(
+                                    "Contract {} is already registered for network {}",
+                                    req.contract_id, req.network
+                                ),
+                            ));
                         }
-                    })));
+                        if e.constraint() == Some("contracts_wasm_hash_key") {
+                            let existing: Contract =
+                                sqlx::query_as("SELECT * FROM contracts WHERE wasm_hash = $1")
+                                    .bind(&wasm_hash)
+                                    .fetch_one(&mut **tx)
+                                    .await
+                                    .map_err(|e2| {
+                                        db_internal_error("fetch existing canonical contract", e2)
+                                    })?;
+
+                            return Err(ApiError::conflict(
+                                "DuplicateContractContent",
+                                "A contract with identical WASM content already exists.",
+                            )
+                            .with_details(serde_json::json!({
+                                "existing_contract": {
+                                    "id": existing.id,
+                                    "contract_id": existing.contract_id,
+                                    "slug": existing.slug,
+                                    "network": existing.network.to_string(),
+                                    "wasm_hash": existing.wasm_hash,
+                                    "published_at": existing.created_at,
+                                }
+                            })));
+                        }
+                    }
+                    return Err(db_internal_error("create contract", err));
                 }
-            }
-            return Err(db_internal_error("create contract", err));
-        }
-    };
+            };
 
-    // Create verification task for the validator network (Issue # validator network)
-    let _ = sqlx::query(
-        "INSERT INTO verification_tasks (contract_id, wasm_hash, status) VALUES ($1, $2, 'pending') ON CONFLICT DO NOTHING"
-    )
-    .bind(contract.id)
-    .bind(&wasm_hash)
-    .execute(&state.db)
-    .await;
+            // Create verification task for the validator network — part of the
+            // same atomic unit as the contract record.
+            sqlx::query(
+                "INSERT INTO verification_tasks (contract_id, wasm_hash, status) VALUES ($1, $2, 'pending') ON CONFLICT DO NOTHING"
+            )
+            .bind(contract.id)
+            .bind(&wasm_hash)
+            .execute(&mut **tx)
+            .await
+            .map_err(|err| db_internal_error("create verification task", err))?;
 
-    // Set logical_id = id so this row is its own logical contract (Issue #43)
-    let _ = sqlx::query("UPDATE contracts SET logical_id = id WHERE id = $1")
-        .bind(contract.id)
-        .execute(&state.db)
-        .await;
+            // Set logical_id = id so this row is its own logical contract (Issue #43)
+            sqlx::query("UPDATE contracts SET logical_id = id WHERE id = $1")
+                .bind(contract.id)
+                .execute(&mut **tx)
+                .await
+                .map_err(|err| db_internal_error("set contract logical_id", err))?;
 
-    let contract: Contract = sqlx::query_as("SELECT * FROM contracts WHERE id = $1")
-        .bind(contract.id)
-        .fetch_one(&state.db)
-        .await
-        .map_err(|err| db_internal_error("fetch contract after insert", err))?;
+            let contract: Contract = sqlx::query_as("SELECT * FROM contracts WHERE id = $1")
+                .bind(contract.id)
+                .fetch_one(&mut **tx)
+                .await
+                .map_err(|err| db_internal_error("fetch contract after insert", err))?;
 
-    // Backfill contract metadata cache for immediate reads
-    if let Ok(contract_json) = serde_json::to_string(&contract) {
-        let _ = state
-            .cache
-            .put_contract_meta(&contract.contract_id, contract_json.clone())
-            .await;
-        let _ = state
-            .cache
-            .put_contract_meta(&contract.id.to_string(), contract_json)
-            .await;
-    }
+            // Save dependencies if provided — the edges commit with the contract
+            // (Issue #1147, #1164). Resolved against this contract's own network:
+            // an address is only unique per (contract_id, network).
+            if !req.dependencies.is_empty() {
+                let resolutions = dependency::save_dependencies_in_tx(
+                    tx,
+                    &db,
+                    contract.id,
+                    contract.network,
+                    &req.dependencies,
+                )
+                .await
+                .map_err(|err| {
+                    tracing::error!(
+                        "Failed to save initial dependencies for contract {}: {}",
+                        contract.contract_id,
+                        err
+                    );
+                    ApiError::internal("Failed to save contract dependencies")
+                })?;
 
-    // Save dependencies if provided
-    if !req.dependencies.is_empty() {
-        // Resolved against this contract's own network (Issue #1147): an
-        // address is only unique per (contract_id, network).
-        match dependency::save_dependencies(
-            &state.db,
-            contract.id,
-            contract.network,
-            &req.dependencies,
-        )
-        .await
-        {
-            Ok(resolutions) => {
                 let unresolved = resolutions
                     .iter()
                     .filter(|r| !matches!(r, dependency::DependencyResolution::Resolved(_)))
@@ -4851,61 +4876,76 @@ async fn publish_contract_inner(
                     );
                 }
             }
-            Err(e) => {
-                tracing::error!(
-                    "Failed to save initial dependencies for contract {}: {}",
-                    contract.contract_id,
-                    e
-                );
-            }
-        }
+
+            let creation_changes = json!({
+                "contract_id": { "before": Value::Null, "after": contract.contract_id },
+                "name": { "before": Value::Null, "after": contract.name },
+                "slug": { "before": Value::Null, "after": contract.slug },
+                "description": { "before": Value::Null, "after": contract.description },
+                "publisher_id": { "before": Value::Null, "after": contract.publisher_id },
+                "network": { "before": Value::Null, "after": contract.network.to_string() },
+                "is_verified": { "before": Value::Null, "after": contract.is_verified },
+                "category": { "before": Value::Null, "after": contract.category },
+                "tags": { "before": Value::Null, "after": contract.tags }
+            });
+
+            write_contract_audit_log(
+                &mut **tx,
+                AuditActionType::ContractPublished,
+                contract.id,
+                publisher_id,
+                creation_changes,
+                &ip_address,
+            )
+            .await
+            .map_err(|err| db_internal_error("write contract_created audit log", err))?;
+
+            record_contract_interaction_in_tx(
+                tx,
+                ContractInteractionInsert {
+                    contract_id: contract.id,
+                    target_contract_id: None,
+                    account: Some(&req.publisher_address),
+                    interaction_type: "publish_success",
+                    transaction_hash: None,
+                    method: None,
+                    parameters: None,
+                    return_value: None,
+                    timestamp: chrono::Utc::now(),
+                    network: &contract.network,
+                },
+            )
+            .await
+            .map_err(|err| db_internal_error("record publish_success interaction", err))?;
+
+            Ok(contract)
+        })
+    })
+    .await?;
+
+    // ── Post-commit side effects ──────────────────────────────────────────
+    // Caches, events, analytics, and webhooks are not part of the publish's
+    // atomic unit: they are best-effort and must not roll back with it.
+
+    // Backfill contract metadata cache for immediate reads
+    if let Ok(contract_json) = serde_json::to_string(&contract) {
+        let _ = state
+            .cache
+            .put_contract_meta(&contract.contract_id, contract_json.clone())
+            .await;
+        let _ = state
+            .cache
+            .put_contract_meta(&contract.id.to_string(), contract_json)
+            .await;
+    }
+
+    if has_dependencies {
         // Invalidate global graph cache
         state
             .cache
             .invalidate("system", "global:dependency_graph")
             .await;
     }
-
-    let creation_changes = json!({
-        "contract_id": { "before": Value::Null, "after": contract.contract_id },
-        "name": { "before": Value::Null, "after": contract.name },
-        "slug": { "before": Value::Null, "after": contract.slug },
-        "description": { "before": Value::Null, "after": contract.description },
-        "publisher_id": { "before": Value::Null, "after": contract.publisher_id },
-        "network": { "before": Value::Null, "after": contract.network.to_string() },
-        "is_verified": { "before": Value::Null, "after": contract.is_verified },
-        "category": { "before": Value::Null, "after": contract.category },
-        "tags": { "before": Value::Null, "after": contract.tags }
-    });
-
-    write_contract_audit_log(
-        &state.db,
-        AuditActionType::ContractPublished,
-        contract.id,
-        publisher_id,
-        creation_changes,
-        &extract_ip_address(headers),
-    )
-    .await
-    .map_err(|err| db_internal_error("write contract_created audit log", err))?;
-
-    record_contract_interaction(
-        &state.db,
-        ContractInteractionInsert {
-            contract_id: contract.id,
-            target_contract_id: None,
-            account: Some(&req.publisher_address),
-            interaction_type: "publish_success",
-            transaction_hash: None,
-            method: None,
-            parameters: None,
-            return_value: None,
-            timestamp: chrono::Utc::now(),
-            network: &contract.network,
-        },
-    )
-    .await
-    .map_err(|err| db_internal_error("record publish_success interaction", err))?;
 
     let _ = analytics::record_event(
         &state.db,
@@ -4920,12 +4960,9 @@ async fn publish_contract_inner(
 
     state
         .contract_events
-        .publish(ContractEventEnvelope::deployed(
-            &contract,
-            Some(req.publisher_address.clone()),
-        ));
+        .publish(ContractEventEnvelope::deployed(&contract, Some(publisher_address)));
 
-    if req.is_cicd {
+    if is_cicd {
         crate::events::emit_cicd_pipeline(
             &state,
             contract.contract_id.clone(),
@@ -6725,171 +6762,185 @@ pub async fn create_ownership_transfer(
         ));
     }
 
-    let mut tx =
-        state.db.begin().await.map_err(|err| {
-            db_internal_error("begin ownership transfer creation transaction", err)
-        })?;
+    // The transfer row, its audit entry, and its history rows must move as one
+    // unit, so the whole phase-1 flow runs inside a single transaction
+    // (issue #1164).
+    let transfer_row = crate::db_transaction::with_transaction(&state.db, |tx| {
+        Box::pin(async move {
+            // Lock `contracts` first. Serialising two concurrent initiations on the contract row
+            // means the loser observes the winner's committed transfer instead of racing it, and
+            // keeping this lock ahead of `ownership_transfers` matches the order used by
+            // `confirm_ownership_transfer`.
+            let contract: Contract =
+                sqlx::query_as("SELECT * FROM contracts WHERE id = $1 FOR UPDATE")
+                    .bind(contract_uuid)
+                    .fetch_optional(&mut **tx)
+                    .await
+                    .map_err(|err| {
+                        db_internal_error("lock contract for ownership transfer", err)
+                    })?
+                    .ok_or_else(|| {
+                        ApiError::not_found(
+                            "ContractNotFound",
+                            format!("No contract found with ID: {}", id),
+                        )
+                    })?;
 
-    // Lock `contracts` first. Serialising two concurrent initiations on the contract row
-    // means the loser observes the winner's committed transfer instead of racing it, and
-    // keeping this lock ahead of `ownership_transfers` matches the order used by
-    // `confirm_ownership_transfer`.
-    let contract: Contract = sqlx::query_as("SELECT * FROM contracts WHERE id = $1 FOR UPDATE")
-        .bind(contract_uuid)
-        .fetch_optional(&mut *tx)
-        .await
-        .map_err(|err| db_internal_error("lock contract for ownership transfer", err))?
-        .ok_or_else(|| {
-            ApiError::not_found(
-                "ContractNotFound",
-                format!("No contract found with ID: {}", id),
+            actor.require_contract_owner(contract.publisher_id)?;
+            let actor_id = actor.publisher_id()?;
+
+            let recipient = resolve_publisher_by_address(&mut **tx, &req.to_publisher_address)
+                .await
+                .map_err(|err| db_internal_error("resolve transfer recipient", err))?
+                .ok_or_else(|| {
+                    ApiError::not_found(
+                        "PublisherNotFound",
+                        format!(
+                            "No publisher is registered for address: {}",
+                            req.to_publisher_address
+                        ),
+                    )
+                })?;
+
+            if recipient.id == actor_id {
+                return Err(ApiError::bad_request(
+                    "SelfTransfer",
+                    "a contract cannot be transferred to its current publisher",
+                ));
+            }
+
+            // Reported explicitly rather than letting the unique index surface it, so the caller
+            // gets an actionable message. The index below is still the authority under concurrency.
+            let live_exists: bool = sqlx::query_scalar(
+                "SELECT EXISTS(
+                     SELECT 1 FROM ownership_transfers
+                     WHERE contract_id = $1 AND status IN ('pending', 'confirmed')
+                 )",
             )
-        })?;
+            .bind(contract_uuid)
+            .fetch_one(&mut **tx)
+            .await
+            .map_err(|err| db_internal_error("check for a live ownership transfer", err))?;
 
-    actor.require_contract_owner(contract.publisher_id)?;
-    let actor_id = actor.publisher_id()?;
+            if live_exists {
+                return Err(ApiError::conflict(
+                    "DuplicateTransfer",
+                    "a pending ownership transfer already exists for this contract",
+                ));
+            }
 
-    let recipient = resolve_publisher_by_address(&mut tx, &req.to_publisher_address)
-        .await
-        .map_err(|err| db_internal_error("resolve transfer recipient", err))?
-        .ok_or_else(|| {
-            ApiError::not_found(
-                "PublisherNotFound",
-                format!(
-                    "No publisher is registered for address: {}",
-                    req.to_publisher_address
-                ),
+            // Built from values the server resolved, never from the request body, and stored
+            // verbatim so the signature can be re-checked later without reconstructing it.
+            let payload = transfer::initiate_payload(
+                contract_uuid,
+                actor.stellar_address(),
+                &recipient.stellar_address,
+                req.expires_at_unix,
+                &req.nonce,
+                req.signed_at_unix,
+            );
+
+            transfer::verify_transfer_signature(actor.stellar_address(), &payload, &req.signature)?;
+
+            let signed_at = DateTime::from_timestamp(req.signed_at_unix, 0).ok_or_else(|| {
+                ApiError::bad_request(
+                    "InvalidSignedAt",
+                    "signed_at_unix is not a representable unix timestamp",
+                )
+            })?;
+
+            let transfer_row = sqlx::query_as::<_, OwnershipTransfer>(
+                "INSERT INTO ownership_transfers (
+                     contract_id, from_publisher_id, to_publisher_id,
+                     from_confirmation, to_confirmation, status, expires_at, created_by,
+                     signature_algorithm, request_nonce, from_signature,
+                     from_signer_address, from_signed_at, from_signed_payload
+                 )
+                 VALUES ($1, $2, $3, TRUE, FALSE, 'pending', $4, $2, $5, $6, $7, $8, $9, $10)
+                 RETURNING *",
             )
-        })?;
+            .bind(contract_uuid)
+            .bind(actor_id)
+            .bind(recipient.id)
+            .bind(expires_at)
+            .bind(algorithm)
+            .bind(&req.nonce)
+            .bind(&req.signature)
+            .bind(actor.stellar_address())
+            .bind(signed_at)
+            .bind(&payload)
+            .fetch_one(&mut **tx)
+            .await
+            .map_err(|err| map_transfer_conflict("create ownership transfer", err))?;
 
-    if recipient.id == actor_id {
-        return Err(ApiError::bad_request(
-            "SelfTransfer",
-            "a contract cannot be transferred to its current publisher",
-        ));
-    }
+            let ip_address = extract_ip_address(&headers);
 
-    // Reported explicitly rather than letting the unique index surface it, so the caller
-    // gets an actionable message. The index below is still the authority under concurrency.
-    let live_exists: bool = sqlx::query_scalar(
-        "SELECT EXISTS(
-             SELECT 1 FROM ownership_transfers
-             WHERE contract_id = $1 AND status IN ('pending', 'confirmed')
-         )",
-    )
-    .bind(contract_uuid)
-    .fetch_one(&mut *tx)
-    .await
-    .map_err(|err| db_internal_error("check for a live ownership transfer", err))?;
+            write_contract_audit_log(
+                &mut **tx,
+                AuditActionType::OwnershipTransferred,
+                contract_uuid,
+                actor_id,
+                json!({
+                    "action": "transfer_request_created",
+                    "transfer_id": transfer_row.id,
+                    "from_publisher_id": actor_id,
+                    "from_signer_address": actor.stellar_address(),
+                    "to_publisher_id": recipient.id,
+                    "to_publisher_address": recipient.stellar_address,
+                    "expires_at": expires_at,
+                }),
+                &ip_address,
+            )
+            .await
+            .map_err(|err| db_internal_error("write transfer created audit log", err))?;
 
-    if live_exists {
-        return Err(ApiError::conflict(
-            "DuplicateTransfer",
-            "a pending ownership transfer already exists for this contract",
-        ));
-    }
+            write_ownership_transfer_log(
+                &mut **tx,
+                transfer_row.id,
+                Some(actor_id),
+                "publisher",
+                "transfer_request_created",
+                Some(json!({
+                    "from_publisher_id": actor_id,
+                    "from_signer_address": actor.stellar_address(),
+                    "to_publisher_id": recipient.id,
+                    "to_publisher_address": recipient.stellar_address,
+                    "expires_at": expires_at,
+                    "request_nonce": req.nonce,
+                    "signature_algorithm": algorithm,
+                    "signed_payload": payload,
+                })),
+            )
+            .await
+            .map_err(|err| db_internal_error("write transfer created log", err))?;
 
-    // Built from values the server resolved, never from the request body, and stored
-    // verbatim so the signature can be re-checked later without reconstructing it.
-    let payload = transfer::initiate_payload(
-        contract_uuid,
-        actor.stellar_address(),
-        &recipient.stellar_address,
-        req.expires_at_unix,
-        &req.nonce,
-        req.signed_at_unix,
-    );
-
-    transfer::verify_transfer_signature(actor.stellar_address(), &payload, &req.signature)?;
-
-    let signed_at = DateTime::from_timestamp(req.signed_at_unix, 0).ok_or_else(|| {
-        ApiError::bad_request(
-            "InvalidSignedAt",
-            "signed_at_unix is not a representable unix timestamp",
-        )
-    })?;
-
-    let transfer_row = sqlx::query_as::<_, OwnershipTransfer>(
-        "INSERT INTO ownership_transfers (
-             contract_id, from_publisher_id, to_publisher_id,
-             from_confirmation, to_confirmation, status, expires_at, created_by,
-             signature_algorithm, request_nonce, from_signature,
-             from_signer_address, from_signed_at, from_signed_payload
-         )
-         VALUES ($1, $2, $3, TRUE, FALSE, 'pending', $4, $2, $5, $6, $7, $8, $9, $10)
-         RETURNING *",
-    )
-    .bind(contract_uuid)
-    .bind(actor_id)
-    .bind(recipient.id)
-    .bind(expires_at)
-    .bind(algorithm)
-    .bind(&req.nonce)
-    .bind(&req.signature)
-    .bind(actor.stellar_address())
-    .bind(signed_at)
-    .bind(&payload)
-    .fetch_one(&mut *tx)
-    .await
-    .map_err(|err| map_transfer_conflict("create ownership transfer", err))?;
-
-    let ip_address = extract_ip_address(&headers);
-
-    write_contract_audit_log(
-        &mut *tx,
-        AuditActionType::OwnershipTransferred,
-        contract_uuid,
-        actor_id,
-        json!({
-            "action": "transfer_request_created",
-            "transfer_id": transfer_row.id,
-            "from_publisher_id": actor_id,
-            "from_signer_address": actor.stellar_address(),
-            "to_publisher_id": recipient.id,
-            "to_publisher_address": recipient.stellar_address,
-            "expires_at": expires_at,
-        }),
-        &ip_address,
-    )
-    .await
-    .map_err(|err| db_internal_error("write transfer created audit log", err))?;
-
-    write_ownership_transfer_log(
-        &mut *tx,
-        transfer_row.id,
-        Some(actor_id),
-        "publisher",
-        "transfer_request_created",
-        Some(json!({
-            "from_publisher_id": actor_id,
-            "from_signer_address": actor.stellar_address(),
-            "to_publisher_id": recipient.id,
-            "to_publisher_address": recipient.stellar_address,
-            "expires_at": expires_at,
-            "request_nonce": req.nonce,
-            "signature_algorithm": algorithm,
-            "signed_payload": payload,
-        })),
-    )
-    .await
-    .map_err(|err| db_internal_error("write transfer created log", err))?;
-
-    tx.commit()
-        .await
-        .map_err(|err| db_internal_error("commit ownership transfer creation", err))?;
+            Ok(transfer_row)
+        })
+    })
+    .await?;
 
     tracing::info!(
         target: "ownership_transfer",
         transfer_id = %transfer_row.id,
         contract_id = %contract_uuid,
-        from_publisher_id = %actor_id,
-        to_publisher_id = %recipient.id,
-        expires_at = %expires_at,
+        from_publisher_id = %transfer_row.from_publisher_id,
+        to_publisher_id = %transfer_row.to_publisher_id,
+        expires_at = %transfer_row.expires_at,
         "ownership transfer initiated and sender signature verified"
     );
 
     state.cache.invalidate_contracts().await;
     Ok(Json(transfer_row))
+}
+
+/// What the confirmation transaction committed, so the handler can respond
+/// correctly. The `Expired` variant exists because expiry is a *committed* state
+/// change that still produces an error response: the row must not stay `pending`
+/// forever just because the request was answered with a 409.
+enum TransferConfirmOutcome {
+    Completed(OwnershipTransfer),
+    Rejected(OwnershipTransfer),
+    Expired,
 }
 
 /// Phase 2: the recipient accepts (or either party rejects) by signing the decision.
@@ -6940,371 +6991,378 @@ pub async fn confirm_ownership_transfer(
                 )
             })?;
 
-    let mut tx = state
-        .db
-        .begin()
-        .await
-        .map_err(|err| db_internal_error("begin ownership transfer confirmation", err))?;
+    // The state change, audit entry, and history rows are one atomic unit
+    // (issue #1164): an acceptance cannot move ownership without its audit
+    // trail, and a rejection cannot be recorded without its history row.
+    let (outcome, actor_id) = crate::db_transaction::with_transaction(&state.db, |tx| {
+        Box::pin(async move {
+            // Same lock order as `create_ownership_transfer`: contracts, then ownership_transfers.
+            let locked_owner: Uuid =
+                sqlx::query_scalar("SELECT publisher_id FROM contracts WHERE id = $1 FOR UPDATE")
+                    .bind(contract_id)
+                    .fetch_optional(&mut **tx)
+                    .await
+                    .map_err(|err| {
+                        db_internal_error("lock contract for transfer confirmation", err)
+                    })?
+                    .ok_or_else(|| {
+                        ApiError::not_found(
+                            "ContractNotFound",
+                            "the contract this transfer refers to no longer exists",
+                        )
+                    })?;
 
-    // Same lock order as `create_ownership_transfer`: contracts, then ownership_transfers.
-    let locked_owner: Uuid =
-        sqlx::query_scalar("SELECT publisher_id FROM contracts WHERE id = $1 FOR UPDATE")
-            .bind(contract_id)
-            .fetch_optional(&mut *tx)
-            .await
-            .map_err(|err| db_internal_error("lock contract for transfer confirmation", err))?
-            .ok_or_else(|| {
-                ApiError::not_found(
-                    "ContractNotFound",
-                    "the contract this transfer refers to no longer exists",
+            let transfer_row: OwnershipTransfer =
+                sqlx::query_as("SELECT * FROM ownership_transfers WHERE id = $1 FOR UPDATE")
+                    .bind(transfer_uuid)
+                    .fetch_optional(&mut **tx)
+                    .await
+                    .map_err(|err| db_internal_error("lock ownership transfer", err))?
+                    .ok_or_else(|| {
+                        ApiError::not_found(
+                            "TransferNotFound",
+                            format!("No ownership transfer found with ID: {}", id),
+                        )
+                    })?;
+
+            actor.require_transfer_action(
+                transfer_row.from_publisher_id,
+                transfer_row.to_publisher_id,
+                req.accept,
+            )?;
+            let actor_id = actor.publisher_id()?;
+            let is_recipient = actor_id == transfer_row.to_publisher_id;
+
+            // Expiry is applied here, under the row lock, and the write is committed even
+            // though the response is an error; otherwise the expiry would roll back with
+            // the 409 and the row would stay `pending` forever. Same shape as
+            // `multisig_handlers::sign_proposal`. The closure returns `Ok(Expired)` so
+            // `with_transaction` commits the expiry and its history row; the handler then
+            // maps that committed outcome to the 409 response below.
+            if transfer_row.status.is_live() && transfer_row.expires_at <= now {
+                sqlx::query(
+                    "UPDATE ownership_transfers
+                     SET status = 'expired', completed_at = NOW()
+                     WHERE id = $1 AND status IN ('pending', 'confirmed')",
+                )
+                .bind(transfer_uuid)
+                .execute(&mut **tx)
+                .await
+                .map_err(|err| db_internal_error("expire ownership transfer", err))?;
+
+                write_ownership_transfer_log(
+                    &mut **tx,
+                    transfer_uuid,
+                    None,
+                    "system",
+                    "transfer_expired",
+                    Some(json!({
+                        "reason": "Transfer request passed its expiry without a verified acceptance",
+                        "observed_by_publisher_id": actor_id,
+                    })),
+                )
+                .await
+                .map_err(|err| db_internal_error("write expired transfer log", err))?;
+
+                return Ok((TransferConfirmOutcome::Expired, actor_id));
+            }
+
+            if transfer_row.status != OwnershipTransferStatus::Pending {
+                return Err(ApiError::conflict(
+                    "TransferNotPending",
+                    format!(
+                        "transfer is already in '{}' status and cannot be confirmed",
+                        transfer_row.status
+                    ),
+                ));
+            }
+
+            let request_nonce = transfer_row.request_nonce.clone().ok_or_else(|| {
+                // Only reachable for rows predating #1094; the migration expired all of those.
+                ApiError::conflict(
+                    "UnsignedTransfer",
+                    "this transfer predates signature-anchored confirmation and cannot be completed",
                 )
             })?;
 
-    let transfer_row: OwnershipTransfer =
-        sqlx::query_as("SELECT * FROM ownership_transfers WHERE id = $1 FOR UPDATE")
-            .bind(transfer_uuid)
-            .fetch_optional(&mut *tx)
-            .await
-            .map_err(|err| db_internal_error("lock ownership transfer", err))?
-            .ok_or_else(|| {
-                ApiError::not_found(
-                    "TransferNotFound",
-                    format!("No ownership transfer found with ID: {}", id),
+            let sender = resolve_publisher_by_id(&mut **tx, transfer_row.from_publisher_id)
+                .await
+                .map_err(|err| db_internal_error("resolve transfer sender", err))?
+                .ok_or_else(|| ApiError::internal("the sending publisher no longer exists"))?;
+
+            let recipient = resolve_publisher_by_id(&mut **tx, transfer_row.to_publisher_id)
+                .await
+                .map_err(|err| db_internal_error("resolve transfer recipient", err))?
+                .ok_or_else(|| ApiError::internal("the receiving publisher no longer exists"))?;
+
+            let payload = transfer::decision_payload(
+                decision,
+                transfer_uuid,
+                transfer_row.contract_id,
+                &sender.stellar_address,
+                &recipient.stellar_address,
+                &request_nonce,
+                &req.nonce,
+                req.signed_at_unix,
+            );
+
+            // Verified before any state change, so a forged signature mutates nothing.
+            transfer::verify_transfer_signature(actor.stellar_address(), &payload, &req.signature)?;
+
+            let ip_address = extract_ip_address(&headers);
+
+            if req.accept {
+                // Single-shot: the guard carries every precondition, so exactly one caller can
+                // move a transfer out of `pending` (I2), and the expiry check is evaluated here
+                // under the lock rather than trusted from the earlier read (I3).
+                let completed: OwnershipTransfer = sqlx::query_as(
+                    "UPDATE ownership_transfers
+                     SET status = 'completed',
+                         to_confirmation = TRUE,
+                         confirmed_at = NOW(),
+                         completed_at = NOW(),
+                         decision_nonce = $2,
+                         decision_signature = $3,
+                         decision_signer_address = $4,
+                         decision_signed_at = $5,
+                         decision_signed_payload = $6,
+                         decision_by = $7,
+                         signature_algorithm = $8
+                     WHERE id = $1
+                       AND status = 'pending'
+                       AND from_confirmation = TRUE
+                       AND to_confirmation = FALSE
+                       AND expires_at > NOW()
+                     RETURNING *",
                 )
-            })?;
+                .bind(transfer_uuid)
+                .bind(&req.nonce)
+                .bind(&req.signature)
+                .bind(actor.stellar_address())
+                .bind(signed_at)
+                .bind(&payload)
+                .bind(actor_id)
+                .bind(algorithm)
+                .fetch_optional(&mut **tx)
+                .await
+                .map_err(|err| map_transfer_conflict("complete ownership transfer", err))?
+                .ok_or_else(|| {
+                    ApiError::conflict(
+                        "TransferNoLongerAcceptable",
+                        "this transfer was already decided or expired before the acceptance was applied",
+                    )
+                })?;
 
-    actor.require_transfer_action(
-        transfer_row.from_publisher_id,
-        transfer_row.to_publisher_id,
-        req.accept,
-    )?;
-    let actor_id = actor.publisher_id()?;
-    let is_recipient = actor_id == transfer_row.to_publisher_id;
+                // Compare-and-swap on the owner we locked. If anything moved ownership in the
+                // meantime -- notably the `PATCH /publisher` bypass -- this affects zero rows and
+                // the whole transaction rolls back rather than overwriting an owner the sender
+                // never consented to hand off from.
+                let moved = sqlx::query(
+                    "UPDATE contracts
+                     SET publisher_id = $2, updated_at = NOW()
+                     WHERE id = $1 AND publisher_id = $3",
+                )
+                .bind(transfer_row.contract_id)
+                .bind(recipient.id)
+                .bind(transfer_row.from_publisher_id)
+                .execute(&mut **tx)
+                .await
+                .map_err(|err| db_internal_error("move contract ownership", err))?;
 
-    // Expiry is applied here, under the row lock, and the write is committed even though
-    // the response is an error; otherwise the expiry would roll back with the 409 and the
-    // row would stay `pending` forever. Same shape as `multisig_handlers::sign_proposal`.
-    if transfer_row.status.is_live() && transfer_row.expires_at <= now {
-        sqlx::query(
-            "UPDATE ownership_transfers
-             SET status = 'expired', completed_at = NOW()
-             WHERE id = $1 AND status IN ('pending', 'confirmed')",
-        )
-        .bind(transfer_uuid)
-        .execute(&mut *tx)
-        .await
-        .map_err(|err| db_internal_error("expire ownership transfer", err))?;
+                if moved.rows_affected() == 0 {
+                    tracing::warn!(
+                        target: "ownership_transfer",
+                        transfer_id = %transfer_uuid,
+                        contract_id = %transfer_row.contract_id,
+                        expected_owner = %transfer_row.from_publisher_id,
+                        actual_owner = %locked_owner,
+                        "refused to complete ownership transfer: contract owner changed since the request"
+                    );
+                    return Err(ApiError::conflict(
+                        "OwnershipChangedConcurrently",
+                        "the contract's publisher changed after this transfer was requested; \
+                         the transfer was not applied",
+                    ));
+                }
 
-        write_ownership_transfer_log(
-            &mut *tx,
-            transfer_uuid,
-            None,
-            "system",
-            "transfer_expired",
-            Some(json!({
-                "reason": "Transfer request passed its expiry without a verified acceptance",
-                "observed_by_publisher_id": actor_id,
-            })),
-        )
-        .await
-        .map_err(|err| db_internal_error("write expired transfer log", err))?;
+                write_contract_audit_log(
+                    &mut **tx,
+                    AuditActionType::OwnershipTransferred,
+                    transfer_row.contract_id,
+                    actor_id,
+                    json!({
+                        "action": "transfer_completed",
+                        "transfer_id": transfer_uuid,
+                        "publisher_id": {
+                            "before": transfer_row.from_publisher_id,
+                            "after": recipient.id,
+                        },
+                        "from_signer_address": sender.stellar_address,
+                        "decision_signer_address": actor.stellar_address(),
+                    }),
+                    &ip_address,
+                )
+                .await
+                .map_err(|err| db_internal_error("write completed transfer audit log", err))?;
 
-        tx.commit()
-            .await
-            .map_err(|err| db_internal_error("commit ownership transfer expiry", err))?;
+                write_ownership_transfer_log(
+                    &mut **tx,
+                    transfer_uuid,
+                    Some(actor_id),
+                    "publisher",
+                    "transfer_completed",
+                    Some(json!({
+                        "from_publisher_id": transfer_row.from_publisher_id,
+                        "to_publisher_id": recipient.id,
+                        "contract_id": transfer_row.contract_id,
+                        "decision_nonce": req.nonce,
+                        "decision_signer_address": actor.stellar_address(),
+                        "signature_algorithm": algorithm,
+                        "signed_payload": payload,
+                    })),
+                )
+                .await
+                .map_err(|err| db_internal_error("write completed transfer log", err))?;
 
-        tracing::info!(
-            target: "ownership_transfer",
-            transfer_id = %transfer_uuid,
-            "ownership transfer expired on access"
-        );
+                return Ok((TransferConfirmOutcome::Completed(completed), actor_id));
+            }
 
-        return Err(ApiError::conflict(
-            "TransferExpired",
-            "this ownership transfer request has expired",
-        ));
-    }
-
-    if transfer_row.status != OwnershipTransferStatus::Pending {
-        return Err(ApiError::conflict(
-            "TransferNotPending",
-            format!(
-                "transfer is already in '{}' status and cannot be confirmed",
-                transfer_row.status
-            ),
-        ));
-    }
-
-    let request_nonce = transfer_row.request_nonce.clone().ok_or_else(|| {
-        // Only reachable for rows predating #1094; the migration expired all of those.
-        ApiError::conflict(
-            "UnsignedTransfer",
-            "this transfer predates signature-anchored confirmation and cannot be completed",
-        )
-    })?;
-
-    let sender = resolve_publisher_by_id(&mut tx, transfer_row.from_publisher_id)
-        .await
-        .map_err(|err| db_internal_error("resolve transfer sender", err))?
-        .ok_or_else(|| ApiError::internal("the sending publisher no longer exists"))?;
-
-    let recipient = resolve_publisher_by_id(&mut tx, transfer_row.to_publisher_id)
-        .await
-        .map_err(|err| db_internal_error("resolve transfer recipient", err))?
-        .ok_or_else(|| ApiError::internal("the receiving publisher no longer exists"))?;
-
-    let payload = transfer::decision_payload(
-        decision,
-        transfer_uuid,
-        transfer_row.contract_id,
-        &sender.stellar_address,
-        &recipient.stellar_address,
-        &request_nonce,
-        &req.nonce,
-        req.signed_at_unix,
-    );
-
-    // Verified before any state change, so a forged signature mutates nothing.
-    transfer::verify_transfer_signature(actor.stellar_address(), &payload, &req.signature)?;
-
-    let ip_address = extract_ip_address(&headers);
-
-    if req.accept {
-        // Single-shot: the guard carries every precondition, so exactly one caller can
-        // move a transfer out of `pending` (I2), and the expiry check is evaluated here
-        // under the lock rather than trusted from the earlier read (I3).
-        let completed: OwnershipTransfer = sqlx::query_as(
-            "UPDATE ownership_transfers
-             SET status = 'completed',
-                 to_confirmation = TRUE,
-                 confirmed_at = NOW(),
-                 completed_at = NOW(),
-                 decision_nonce = $2,
-                 decision_signature = $3,
-                 decision_signer_address = $4,
-                 decision_signed_at = $5,
-                 decision_signed_payload = $6,
-                 decision_by = $7,
-                 signature_algorithm = $8
-             WHERE id = $1
-               AND status = 'pending'
-               AND from_confirmation = TRUE
-               AND to_confirmation = FALSE
-               AND expires_at > NOW()
-             RETURNING *",
-        )
-        .bind(transfer_uuid)
-        .bind(&req.nonce)
-        .bind(&req.signature)
-        .bind(actor.stellar_address())
-        .bind(signed_at)
-        .bind(&payload)
-        .bind(actor_id)
-        .bind(algorithm)
-        .fetch_optional(&mut *tx)
-        .await
-        .map_err(|err| map_transfer_conflict("complete ownership transfer", err))?
-        .ok_or_else(|| {
-            ApiError::conflict(
-                "TransferNoLongerAcceptable",
-                "this transfer was already decided or expired before the acceptance was applied",
+            let rejected: OwnershipTransfer = sqlx::query_as(
+                "UPDATE ownership_transfers
+                 SET status = 'rejected',
+                     completed_at = NOW(),
+                     decision_nonce = $2,
+                     decision_signature = $3,
+                     decision_signer_address = $4,
+                     decision_signed_at = $5,
+                     decision_signed_payload = $6,
+                     decision_by = $7,
+                     signature_algorithm = $8
+                 WHERE id = $1 AND status = 'pending'
+                 RETURNING *",
             )
-        })?;
+            .bind(transfer_uuid)
+            .bind(&req.nonce)
+            .bind(&req.signature)
+            .bind(actor.stellar_address())
+            .bind(signed_at)
+            .bind(&payload)
+            .bind(actor_id)
+            .bind(algorithm)
+            .fetch_optional(&mut **tx)
+            .await
+            .map_err(|err| map_transfer_conflict("reject ownership transfer", err))?
+            .ok_or_else(|| {
+                ApiError::conflict(
+                    "TransferNotPending",
+                    "this transfer was already decided before the rejection was applied",
+                )
+            })?;
 
-        // Compare-and-swap on the owner we locked. If anything moved ownership in the
-        // meantime -- notably the `PATCH /publisher` bypass -- this affects zero rows and
-        // the whole transaction rolls back rather than overwriting an owner the sender
-        // never consented to hand off from.
-        let moved = sqlx::query(
-            "UPDATE contracts
-             SET publisher_id = $2, updated_at = NOW()
-             WHERE id = $1 AND publisher_id = $3",
-        )
-        .bind(transfer_row.contract_id)
-        .bind(recipient.id)
-        .bind(transfer_row.from_publisher_id)
-        .execute(&mut *tx)
-        .await
-        .map_err(|err| db_internal_error("move contract ownership", err))?;
+            write_contract_audit_log(
+                &mut **tx,
+                AuditActionType::OwnershipTransferred,
+                transfer_row.contract_id,
+                actor_id,
+                json!({
+                    "action": "transfer_rejected",
+                    "transfer_id": transfer_uuid,
+                    "rejected_by": if is_recipient { "recipient" } else { "sender" },
+                    "from_publisher_id": transfer_row.from_publisher_id,
+                    "to_publisher_id": transfer_row.to_publisher_id,
+                    "decision_signer_address": actor.stellar_address(),
+                }),
+                &ip_address,
+            )
+            .await
+            .map_err(|err| db_internal_error("write rejected transfer audit log", err))?;
 
-        if moved.rows_affected() == 0 {
-            tracing::warn!(
+            write_ownership_transfer_log(
+                &mut **tx,
+                transfer_uuid,
+                Some(actor_id),
+                "publisher",
+                "transfer_rejected",
+                Some(json!({
+                    "rejected_by": if is_recipient { "recipient" } else { "sender" },
+                    "from_publisher_id": transfer_row.from_publisher_id,
+                    "to_publisher_id": transfer_row.to_publisher_id,
+                    "contract_id": transfer_row.contract_id,
+                    "decision_nonce": req.nonce,
+                    "decision_signer_address": actor.stellar_address(),
+                    "signature_algorithm": algorithm,
+                    "signed_payload": payload,
+                })),
+            )
+            .await
+            .map_err(|err| db_internal_error("write rejected transfer log", err))?;
+
+            Ok((TransferConfirmOutcome::Rejected(rejected), actor_id))
+        })
+    })
+    .await?;
+
+    match outcome {
+        TransferConfirmOutcome::Expired => {
+            tracing::info!(
                 target: "ownership_transfer",
                 transfer_id = %transfer_uuid,
-                contract_id = %transfer_row.contract_id,
-                expected_owner = %transfer_row.from_publisher_id,
-                actual_owner = %locked_owner,
-                "refused to complete ownership transfer: contract owner changed since the request"
+                "ownership transfer expired on access"
             );
+
             return Err(ApiError::conflict(
-                "OwnershipChangedConcurrently",
-                "the contract's publisher changed after this transfer was requested; \
-                 the transfer was not applied",
+                "TransferExpired",
+                "this ownership transfer request has expired",
             ));
         }
+        TransferConfirmOutcome::Completed(completed) => {
+            tracing::info!(
+                target: "ownership_transfer",
+                transfer_id = %transfer_uuid,
+                contract_id = %completed.contract_id,
+                from_publisher_id = %completed.from_publisher_id,
+                to_publisher_id = %completed.to_publisher_id,
+                "ownership transfer completed: both signatures verified, ownership moved"
+            );
 
-        write_contract_audit_log(
-            &mut *tx,
-            AuditActionType::OwnershipTransferred,
-            transfer_row.contract_id,
-            actor_id,
-            json!({
-                "action": "transfer_completed",
-                "transfer_id": transfer_uuid,
-                "publisher_id": {
-                    "before": transfer_row.from_publisher_id,
-                    "after": recipient.id,
-                },
-                "from_signer_address": sender.stellar_address,
-                "decision_signer_address": actor.stellar_address(),
-            }),
-            &ip_address,
-        )
-        .await
-        .map_err(|err| db_internal_error("write completed transfer audit log", err))?;
+            // ── Emit ownership.transferred webhook (best-effort, issue #1110) ──────
+            // Notify the new owner, who now holds the contract.
+            //
+            // Emitted after the commit, not before it as in the pre-#1094 flow. The transfer
+            // is now transactional, and this handler can still fail after the ownership write
+            // (the compare-and-swap above returns a conflict and rolls everything back), so
+            // emitting inside the transaction would announce transfers that never happened.
+            // A webhook is not rollback-able once sent.
+            crate::webhook_events::emit_webhook_event(
+                &state.db,
+                completed.to_publisher_id,
+                crate::webhook_events::EVENT_OWNERSHIP_TRANSFERRED,
+                json!({
+                    "contract_id": completed.contract_id,
+                    "transfer_id": transfer_uuid,
+                    "from_publisher_id": completed.from_publisher_id,
+                    "to_publisher_id": completed.to_publisher_id,
+                    "completed_at": completed.completed_at,
+                }),
+            )
+            .await;
 
-        write_ownership_transfer_log(
-            &mut *tx,
-            transfer_uuid,
-            Some(actor_id),
-            "publisher",
-            "transfer_completed",
-            Some(json!({
-                "from_publisher_id": transfer_row.from_publisher_id,
-                "to_publisher_id": recipient.id,
-                "contract_id": transfer_row.contract_id,
-                "decision_nonce": req.nonce,
-                "decision_signer_address": actor.stellar_address(),
-                "signature_algorithm": algorithm,
-                "signed_payload": payload,
-            })),
-        )
-        .await
-        .map_err(|err| db_internal_error("write completed transfer log", err))?;
+            state.cache.invalidate_contracts().await;
+            Ok(Json(completed))
+        }
+        TransferConfirmOutcome::Rejected(rejected) => {
+            tracing::info!(
+                target: "ownership_transfer",
+                transfer_id = %transfer_uuid,
+                contract_id = %rejected.contract_id,
+                rejected_by_publisher_id = %actor_id,
+                "ownership transfer rejected with a verified signature"
+            );
 
-        tx.commit()
-            .await
-            .map_err(|err| db_internal_error("commit ownership transfer completion", err))?;
-
-        tracing::info!(
-            target: "ownership_transfer",
-            transfer_id = %transfer_uuid,
-            contract_id = %transfer_row.contract_id,
-            from_publisher_id = %transfer_row.from_publisher_id,
-            to_publisher_id = %recipient.id,
-            "ownership transfer completed: both signatures verified, ownership moved"
-        );
-
-        // ── Emit ownership.transferred webhook (best-effort, issue #1110) ──────
-        // Notify the new owner, who now holds the contract.
-        //
-        // Emitted after the commit, not before it as in the pre-#1094 flow. The transfer
-        // is now transactional, and this handler can still fail after the ownership write
-        // (the compare-and-swap above returns a conflict and rolls everything back), so
-        // emitting inside the transaction would announce transfers that never happened.
-        // A webhook is not rollback-able once sent.
-        crate::webhook_events::emit_webhook_event(
-            &state.db,
-            recipient.id,
-            crate::webhook_events::EVENT_OWNERSHIP_TRANSFERRED,
-            json!({
-                "contract_id": transfer_row.contract_id,
-                "transfer_id": transfer_uuid,
-                "from_publisher_id": transfer_row.from_publisher_id,
-                "to_publisher_id": recipient.id,
-                "completed_at": completed.completed_at,
-            }),
-        )
-        .await;
-
-        state.cache.invalidate_contracts().await;
-        return Ok(Json(completed));
+            state.cache.invalidate_contracts().await;
+            Ok(Json(rejected))
+        }
     }
-
-    let rejected: OwnershipTransfer = sqlx::query_as(
-        "UPDATE ownership_transfers
-         SET status = 'rejected',
-             completed_at = NOW(),
-             decision_nonce = $2,
-             decision_signature = $3,
-             decision_signer_address = $4,
-             decision_signed_at = $5,
-             decision_signed_payload = $6,
-             decision_by = $7,
-             signature_algorithm = $8
-         WHERE id = $1 AND status = 'pending'
-         RETURNING *",
-    )
-    .bind(transfer_uuid)
-    .bind(&req.nonce)
-    .bind(&req.signature)
-    .bind(actor.stellar_address())
-    .bind(signed_at)
-    .bind(&payload)
-    .bind(actor_id)
-    .bind(algorithm)
-    .fetch_optional(&mut *tx)
-    .await
-    .map_err(|err| map_transfer_conflict("reject ownership transfer", err))?
-    .ok_or_else(|| {
-        ApiError::conflict(
-            "TransferNotPending",
-            "this transfer was already decided before the rejection was applied",
-        )
-    })?;
-
-    write_contract_audit_log(
-        &mut *tx,
-        AuditActionType::OwnershipTransferred,
-        transfer_row.contract_id,
-        actor_id,
-        json!({
-            "action": "transfer_rejected",
-            "transfer_id": transfer_uuid,
-            "rejected_by": if is_recipient { "recipient" } else { "sender" },
-            "from_publisher_id": transfer_row.from_publisher_id,
-            "to_publisher_id": transfer_row.to_publisher_id,
-            "decision_signer_address": actor.stellar_address(),
-        }),
-        &ip_address,
-    )
-    .await
-    .map_err(|err| db_internal_error("write rejected transfer audit log", err))?;
-
-    write_ownership_transfer_log(
-        &mut *tx,
-        transfer_uuid,
-        Some(actor_id),
-        "publisher",
-        "transfer_rejected",
-        Some(json!({
-            "rejected_by": if is_recipient { "recipient" } else { "sender" },
-            "from_publisher_id": transfer_row.from_publisher_id,
-            "to_publisher_id": transfer_row.to_publisher_id,
-            "contract_id": transfer_row.contract_id,
-            "decision_nonce": req.nonce,
-            "decision_signer_address": actor.stellar_address(),
-            "signature_algorithm": algorithm,
-            "signed_payload": payload,
-        })),
-    )
-    .await
-    .map_err(|err| db_internal_error("write rejected transfer log", err))?;
-
-    tx.commit()
-        .await
-        .map_err(|err| db_internal_error("commit ownership transfer rejection", err))?;
-
-    tracing::info!(
-        target: "ownership_transfer",
-        transfer_id = %transfer_uuid,
-        contract_id = %transfer_row.contract_id,
-        rejected_by_publisher_id = %actor_id,
-        "ownership transfer rejected with a verified signature"
-    );
-
-    state.cache.invalidate_contracts().await;
-    Ok(Json(rejected))
 }
 
 pub async fn get_ownership_transfer(
