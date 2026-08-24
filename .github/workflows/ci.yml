@@ -27,6 +27,7 @@ jobs:
               - 'backend/**/*.rs'
               - 'backend/Cargo.toml'
               - 'backend/Cargo.lock'
+              - 'cli/imported/**'
               - 'soroban-registry/**/*.rs'
               - 'soroban-registry/Cargo.toml'
               - 'soroban-registry/Cargo.lock'
@@ -34,6 +35,43 @@ jobs:
               - 'frontend/**'
 
   # Rust backend checks removed: fmt, clippy, test, build (not having effect)
+
+  artifact-reproducibility:
+    name: WASM artifact reproducibility boundary
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install pinned Rust toolchain
+        run: |
+          rustup show
+          rustup target add wasm32-unknown-unknown
+      - name: Cache Cargo artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: backend
+      - name: Compare canonical double-build fixtures
+        run: |
+          set -euo pipefail
+          CARGO_TARGET_DIR="${RUNNER_TEMP}/fixture-build-one" \
+            cargo build --locked --manifest-path cli/imported/Cargo.toml \
+              --release --target wasm32-unknown-unknown
+          CARGO_TARGET_DIR="${RUNNER_TEMP}/fixture-build-two" \
+            cargo build --locked --manifest-path cli/imported/Cargo.toml \
+              --release --target wasm32-unknown-unknown
+          cargo run --manifest-path backend/Cargo.toml -p shared \
+            --example compare_canonical_wasm -- \
+            "${RUNNER_TEMP}/fixture-build-one/wasm32-unknown-unknown/release/hello_world.wasm" \
+            "${RUNNER_TEMP}/fixture-build-two/wasm32-unknown-unknown/release/hello_world.wasm"
+
+      - name: Run artifact-boundary regressions
+        working-directory: backend
+        run: |
+          cargo test -p shared wasm::tests
+          cargo test -p shared interface_fingerprint::wasm_tests
+          cargo test -p verifier artifact_verification
+          cargo check -p api --lib
 
   # Frontend checks removed: lint, test, build (push) — not running in CI
 

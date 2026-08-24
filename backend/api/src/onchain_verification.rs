@@ -92,6 +92,10 @@ pub struct OnChainVerificationResult {
     /// Structured failure reasons collected during verification.
     /// Empty when verification passes; contains at least one entry on failure.
     pub failure_reasons: Vec<OnChainFailureReason>,
+    /// Raw contract code used as source-verification evidence. It is never
+    /// serialized into API responses or the verification cache.
+    #[serde(skip)]
+    pub(crate) deployed_wasm: Option<Vec<u8>>,
 }
 
 impl OnChainVerificationResult {
@@ -219,6 +223,7 @@ impl OnChainVerifier {
                     abi_matches_deployed_contract: false,
                     warnings,
                     failure_reasons,
+                    deployed_wasm: None,
                 };
                 cache
                     .put_verification(
@@ -360,6 +365,7 @@ impl OnChainVerifier {
             abi_matches_deployed_contract,
             warnings,
             failure_reasons,
+            deployed_wasm: on_chain_code_bytes,
         };
 
         cache
@@ -374,6 +380,33 @@ impl OnChainVerifier {
             )
             .await;
 
+        Ok(result)
+    }
+
+    /// Run the on-chain checks and retain the fetched contract bytes for the
+    /// source verifier. Cached public results are hydrated with a fresh code
+    /// lookup because artifact bytes are intentionally excluded from cache.
+    pub(crate) async fn verify_contract_with_artifact(
+        &self,
+        cache: &CacheLayer,
+        contract: &Contract,
+        abi_json: Option<&str>,
+    ) -> Result<OnChainVerificationResult, RegistryError> {
+        let mut result = self.verify_contract(cache, contract, abi_json).await?;
+        if result.deployed_wasm.is_none() {
+            if let Some(wasm_hash) = result.on_chain_wasm_hash.as_deref() {
+                let config = NetworkConfig::from_env(&contract.network);
+                match self.fetch_contract_code_entry(&config, wasm_hash).await {
+                    Ok(Some((bytes, _))) => result.deployed_wasm = Some(bytes),
+                    Ok(None) => result.warnings.push(
+                        "On-chain contract code was unavailable for source comparison".to_string(),
+                    ),
+                    Err(err) => result.warnings.push(format!(
+                        "On-chain contract code could not be refreshed for source comparison: {err}"
+                    )),
+                }
+            }
+        }
         Ok(result)
     }
 
