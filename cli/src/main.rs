@@ -2630,6 +2630,98 @@ pub enum ContractCommands {
         #[arg(long)]
         json: bool,
     },
+
+    /// Manage contract event notifications and alerts (#838)
+    Notification {
+        #[command(subcommand)]
+        action: NotificationCommands,
+    },
+}
+
+/// Sub-commands for `contract notification`
+#[derive(Debug, Subcommand)]
+pub enum NotificationCommands {
+    /// Subscribe to alerts for a contract address
+    Subscribe {
+        /// On-chain contract address
+        address: String,
+
+        /// Alert types (comma-separated): updates, audits, security, deployments
+        #[arg(long, default_value = "updates,security")]
+        alerts: String,
+
+        /// Notification channels (comma-separated): email, webhook, cli
+        #[arg(long, default_value = "cli")]
+        channels: String,
+
+        /// Notification frequency: instant, daily, weekly
+        #[arg(long, default_value = "instant")]
+        frequency: String,
+
+        /// Filter by networks (comma-separated, e.g. mainnet,testnet)
+        #[arg(long, default_value = "")]
+        networks: String,
+
+        /// Filter by categories (comma-separated, e.g. defi,token)
+        #[arg(long, default_value = "")]
+        categories: String,
+
+        /// Email address or webhook URL for the chosen channel
+        #[arg(long)]
+        target: Option<String>,
+    },
+
+    /// Unsubscribe from alerts for a contract address
+    Unsubscribe {
+        /// On-chain contract address
+        address: String,
+    },
+
+    /// List active notification rules
+    List {
+        /// Filter by contract address (omit to list all)
+        address: Option<String>,
+
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// Update an existing notification rule
+    Configure {
+        /// On-chain contract address
+        address: String,
+
+        /// New alert types (comma-separated)
+        #[arg(long)]
+        alerts: Option<String>,
+
+        /// New channels (comma-separated)
+        #[arg(long)]
+        channels: Option<String>,
+
+        /// New frequency: instant, daily, weekly
+        #[arg(long)]
+        frequency: Option<String>,
+
+        /// New network filter (comma-separated)
+        #[arg(long)]
+        networks: Option<String>,
+
+        /// New category filter (comma-separated)
+        #[arg(long)]
+        categories: Option<String>,
+
+        /// New email address or webhook URL
+        #[arg(long)]
+        target: Option<String>,
+    },
+
+    /// Send a test alert for a subscribed contract
+    Test {
+        /// On-chain contract address
+        address: String,
+    },
 }
 
 /// Sub-commands for the `api-key` group (#842)
@@ -5109,6 +5201,74 @@ pub async fn dispatch_command(
                     json,
                 )
                 .await?;
+            }
+            ContractCommands::Notification { action } => {
+                /// Splits a comma-separated argument, dropping empty entries so
+                /// `--alerts ""` means "none" rather than one empty alert type.
+                fn split_list(value: &str) -> Vec<String> {
+                    value
+                        .split(',')
+                        .map(|item| item.trim().to_string())
+                        .filter(|item| !item.is_empty())
+                        .collect()
+                }
+
+                match action {
+                    NotificationCommands::Subscribe {
+                        address,
+                        alerts,
+                        channels,
+                        frequency,
+                        networks,
+                        categories,
+                        target,
+                    } => {
+                        log::debug!("Command: contract notification subscribe | address={address}");
+                        notification::subscribe(
+                            &address,
+                            split_list(&alerts),
+                            split_list(&channels),
+                            &frequency,
+                            split_list(&networks),
+                            split_list(&categories),
+                            target,
+                        )?;
+                    }
+                    NotificationCommands::Unsubscribe { address } => {
+                        log::debug!(
+                            "Command: contract notification unsubscribe | address={address}"
+                        );
+                        notification::unsubscribe(&address)?;
+                    }
+                    NotificationCommands::List { address, json } => {
+                        log::debug!("Command: contract notification list");
+                        notification::list(address.as_deref(), json)?;
+                    }
+                    NotificationCommands::Configure {
+                        address,
+                        alerts,
+                        channels,
+                        frequency,
+                        networks,
+                        categories,
+                        target,
+                    } => {
+                        log::debug!("Command: contract notification configure | address={address}");
+                        notification::configure(
+                            &address,
+                            alerts.as_deref().map(split_list),
+                            channels.as_deref().map(split_list),
+                            frequency,
+                            networks.as_deref().map(split_list),
+                            categories.as_deref().map(split_list),
+                            target,
+                        )?;
+                    }
+                    NotificationCommands::Test { address } => {
+                        log::debug!("Command: contract notification test | address={address}");
+                        notification::test_notification(&address)?;
+                    }
+                }
             }
         },
         Commands::ApiKey { action } => match action {
