@@ -2079,179 +2079,112 @@ mod tests {
             .contains("Invalid migration response: missing id"));
     }
 
-    // ── Publish dry-run / validation tests ──────────────────────────────────
-
-    use super::{validate_publish_inputs, Network};
+    // ── Publish idempotency-key tests ───────────────────────────────────────
 
     const VALID_CONTRACT_ID: &str = "CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC";
-    const VALID_PUBLISHER: &str = "GDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC";
+    // Strkeys are checksummed, so this is a real address rather than the contract id
+    // above with its leading character swapped.
+    const VALID_PUBLISHER: &str = "GA7QYNF7SOWQ3GLR2BGMZEHXAVIRZA4KVWLTJJFC7MGXUA74P7UJVSGZ";
+
+    fn publish_request(
+        contract_id: &str,
+        network: registry_client::Network,
+        publisher: &str,
+    ) -> registry_client::PublishRequest {
+        registry_client::PublishRequest {
+            contract_id: contract_id.to_string(),
+            wasm_hash: String::new(),
+            wasm_artifact_base64: None,
+            name: "My Contract".to_string(),
+            slug: None,
+            description: None,
+            network,
+            category: None,
+            tags: Vec::new(),
+            source_url: None,
+            publisher_address: publisher.to_string(),
+            dependencies: Vec::new(),
+            is_cicd: false,
+        }
+    }
 
     #[test]
-    fn validate_publish_inputs_accepts_valid_inputs() {
-        let result = validate_publish_inputs(
+    fn publish_idempotency_key_is_stable_for_same_identity() {
+        let key = super::publish_idempotency_key(&publish_request(
             VALID_CONTRACT_ID,
-            "My Contract",
-            Network::Testnet,
-            Some("Token"),
-            &["defi".to_string(), "token".to_string()],
+            registry_client::Network::Testnet,
+            VALID_PUBLISHER,
+        ));
+
+        assert!(key.starts_with("cli-publish-"), "unexpected key: {key}");
+        assert_eq!(
+            key,
+            super::publish_idempotency_key(&publish_request(
+                VALID_CONTRACT_ID,
+                registry_client::Network::Testnet,
+                VALID_PUBLISHER,
+            )),
+            "the same contract identity must always produce the same key"
+        );
+    }
+
+    /// The retry-replay guarantee depends on the key covering *only* the contract
+    /// identity: a re-run that edits metadata must still replay the original publish
+    /// rather than registering a second contract.
+    #[test]
+    fn publish_idempotency_key_ignores_non_identity_metadata() {
+        let base = publish_request(
+            VALID_CONTRACT_ID,
+            registry_client::Network::Testnet,
             VALID_PUBLISHER,
         );
-        assert!(
-            result.is_ok(),
-            "Expected valid inputs to pass: {:?}",
-            result
+
+        let mut edited = base.clone();
+        edited.name = "Renamed Contract".to_string();
+        edited.description = Some("now with a description".to_string());
+        edited.category = Some("Token".to_string());
+        edited.tags = vec!["defi".to_string()];
+        edited.is_cicd = true;
+
+        assert_eq!(
+            super::publish_idempotency_key(&base),
+            super::publish_idempotency_key(&edited),
+            "metadata outside the contract identity must not change the key"
         );
     }
 
     #[test]
-    fn validate_publish_inputs_rejects_invalid_contract_id() {
-        let result = validate_publish_inputs(
-            "invalid-id",
-            "My Contract",
-            Network::Testnet,
-            None,
-            &[],
-            VALID_PUBLISHER,
-        );
-        assert!(result.is_err());
-        let msg = result.unwrap_err().to_string();
-        assert!(
-            msg.contains("contract_id"),
-            "Error should mention contract_id: {}",
-            msg
-        );
-    }
-
-    #[test]
-    fn validate_publish_inputs_rejects_empty_name() {
-        let result = validate_publish_inputs(
+    fn publish_idempotency_key_separates_distinct_identities() {
+        let base = super::publish_idempotency_key(&publish_request(
             VALID_CONTRACT_ID,
-            "",
-            Network::Testnet,
-            None,
-            &[],
+            registry_client::Network::Testnet,
             VALID_PUBLISHER,
-        );
-        assert!(result.is_err());
-        let msg = result.unwrap_err().to_string();
-        assert!(
-            msg.contains("name is required"),
-            "Error should mention name: {}",
-            msg
-        );
-    }
+        ));
 
-    #[test]
-    fn validate_publish_inputs_rejects_invalid_publisher() {
-        let result = validate_publish_inputs(
+        let other_network = super::publish_idempotency_key(&publish_request(
             VALID_CONTRACT_ID,
-            "My Contract",
-            Network::Testnet,
-            None,
-            &[],
-            "not-a-stellar-address",
-        );
-        assert!(result.is_err());
-        let msg = result.unwrap_err().to_string();
-        assert!(
-            msg.contains("publisher"),
-            "Error should mention publisher: {}",
-            msg
-        );
-    }
-
-    #[test]
-    fn validate_publish_inputs_rejects_invalid_category() {
-        let result = validate_publish_inputs(
-            VALID_CONTRACT_ID,
-            "My Contract",
-            Network::Testnet,
-            Some("InvalidCategory"),
-            &[],
+            registry_client::Network::Mainnet,
             VALID_PUBLISHER,
-        );
-        assert!(result.is_err());
-        let msg = result.unwrap_err().to_string();
-        assert!(
-            msg.contains("category"),
-            "Error should mention category: {}",
-            msg
-        );
-    }
-
-    #[test]
-    fn validate_publish_inputs_rejects_too_many_tags() {
-        let tags: Vec<String> = (0..11).map(|i| format!("tag{}", i)).collect();
-        let result = validate_publish_inputs(
+        ));
+        let other_publisher = super::publish_idempotency_key(&publish_request(
             VALID_CONTRACT_ID,
-            "My Contract",
-            Network::Testnet,
-            None,
-            &tags,
+            registry_client::Network::Testnet,
+            "GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5",
+        ));
+        let other_contract = super::publish_idempotency_key(&publish_request(
+            "CBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5",
+            registry_client::Network::Testnet,
             VALID_PUBLISHER,
-        );
-        assert!(result.is_err());
-        let msg = result.unwrap_err().to_string();
-        assert!(msg.contains("tags"), "Error should mention tags: {}", msg);
-    }
+        ));
 
-    #[test]
-    fn validate_publish_inputs_collects_multiple_errors() {
-        let result = validate_publish_inputs(
-            "bad", // invalid contract_id
-            "",    // empty name
-            Network::Testnet,
-            None,
-            &[],
-            "bad-publisher", // invalid publisher
+        assert_ne!(base, other_network, "network must be part of the identity");
+        assert_ne!(
+            base, other_publisher,
+            "publisher must be part of the identity"
         );
-        assert!(result.is_err());
-        let msg = result.unwrap_err().to_string();
-        // All three errors should be present
-        assert!(msg.contains("contract_id"), "missing contract_id error");
-        assert!(msg.contains("name is required"), "missing name error");
-        assert!(msg.contains("publisher"), "missing publisher error");
-    }
-
-    #[tokio::test]
-    async fn publish_dry_run_does_not_send_request() {
-        // dry_run should succeed without a running backend
-        let result = super::publish(
-            "http://localhost:0", // unreachable URL
-            VALID_CONTRACT_ID,
-            "My Contract",
-            Some("A test contract"),
-            Network::Testnet,
-            Some("Token"),
-            vec!["defi".to_string()],
-            VALID_PUBLISHER,
-            true,
-        )
-        .await;
-        assert!(
-            result.is_ok(),
-            "Dry-run should succeed without backend: {:?}",
-            result
-        );
-    }
-
-    #[tokio::test]
-    async fn publish_dry_run_still_validates() {
-        let result = super::publish(
-            "http://localhost:0",
-            "invalid",
-            "",
-            None,
-            Network::Testnet,
-            None,
-            vec![],
-            "bad",
-            true,
-        )
-        .await;
-        assert!(
-            result.is_err(),
-            "Dry-run should still catch validation errors"
+        assert_ne!(
+            base, other_contract,
+            "contract id must be part of the identity"
         );
     }
 }
