@@ -35,7 +35,7 @@ impl Query {
             .await?;
 
         let rows: Vec<shared::models::Contract> =
-            sqlx::query_as("SELECT * FROM contracts ORDER BY created_at DESC LIMIT $1 OFFSET $2")
+            sqlx::query_as("SELECT * FROM contracts ORDER BY created_at DESC, id ASC LIMIT $1 OFFSET $2")
                 .bind(limit)
                 .bind(offset)
                 .fetch_all(&state.db)
@@ -99,7 +99,7 @@ impl Query {
     async fn publishers(&self, ctx: &Context<'_>) -> Result<Vec<PublisherType>> {
         let state = ctx.data::<AppState>()?;
         let rows: Vec<shared::models::Publisher> =
-            sqlx::query_as("SELECT * FROM publishers ORDER BY created_at DESC")
+            sqlx::query_as("SELECT * FROM publishers ORDER BY created_at DESC, id ASC")
                 .fetch_all(&state.db)
                 .await?;
         Ok(rows.into_iter().map(PublisherType::from).collect())
@@ -109,7 +109,7 @@ impl Query {
     async fn organizations(&self, ctx: &Context<'_>) -> Result<Vec<OrganizationType>> {
         let state = ctx.data::<AppState>()?;
         let rows: Vec<shared::models::Organization> = sqlx::query_as(
-            "SELECT * FROM organizations WHERE is_private = false ORDER BY created_at DESC",
+            "SELECT * FROM organizations WHERE is_private = false ORDER BY created_at DESC, id ASC",
         )
         .fetch_all(&state.db)
         .await?;
