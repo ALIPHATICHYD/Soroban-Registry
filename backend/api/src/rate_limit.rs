@@ -90,6 +90,17 @@ const DEFAULT_SEARCH_ANON_LIMIT: u32 = 100;
 /// Default authenticated search limit per window (500 queries).
 const DEFAULT_SEARCH_AUTH_LIMIT: u32 = 500;
 
+// Issue #1112: dedicated bucket for the dependency-scan re-scan trigger.
+// The endpoint requires contract ownership, so anonymous callers are always
+// rejected downstream by auth — this bucket exists to stop a compromised or
+// careless authenticated client from hammering the endpoint across many
+// contracts. It complements (does not replace) the per-contract cooldown
+// enforced in `dependency_vulnerability_handlers::trigger_dependency_scan`.
+/// Default anonymous dependency-rescan limit per window.
+const DEFAULT_RESCAN_ANON_LIMIT: u32 = 5;
+/// Default authenticated dependency-rescan limit per window.
+const DEFAULT_RESCAN_AUTH_LIMIT: u32 = 20;
+
 /// Issue #727 — tiered limits over the configured window.
 const FREE_TIER_LIMIT: u32 = 1_000;
 const PRO_TIER_LIMIT: u32 = 10_000;
@@ -190,9 +201,7 @@ impl RateLimitState {
             config: std::sync::Arc::new(config),
             buckets: std::sync::Arc::new(Mutex::new(HashMap::new())),
             bypass_window_count: std::sync::Arc::new(AtomicU64::new(0)),
-            bypass_window_start_ms: std::sync::Arc::new(AtomicU64::new(
-                now_unix_millis(),
-            )),
+            bypass_window_start_ms: std::sync::Arc::new(AtomicU64::new(now_unix_millis())),
             bypass_spike_threshold,
         }
     }
@@ -475,6 +484,36 @@ impl RateLimitState {
             );
         }
 
+        // Issue #1112: dependency re-scan trigger — POST /api/contracts/:id/dependency-scan.
+        // Dedicated bucket so re-scan spam does not consume the general write quota
+        // (or crowd out unrelated writes); pairs with the per-contract cooldown
+        // enforced in the handler itself.
+        if is_dependency_scan_endpoint(request.method(), path) {
+            if let Some(token) = extract_auth_token(request) {
+                let limit = self.config.rescan_auth_limit;
+                let burst = self.config.burst_limit_for_limit(limit);
+                return (
+                    limit,
+                    burst,
+                    BucketKey {
+                        client_key: format!("rescan:auth:{token}"),
+                    },
+                    tier,
+                );
+            }
+            let ip = extract_client_ip(request);
+            let limit = self.config.rescan_anon_limit;
+            let burst = self.config.burst_limit_for_limit(limit);
+            return (
+                limit,
+                burst,
+                BucketKey {
+                    client_key: format!("rescan:anon:{ip}"),
+                },
+                tier,
+            );
+        }
+
         // Issue #1045: search/list endpoints — GET /api/contracts, /api/v1/contracts/search, etc.
         // Dedicated bucket prevents aggressive scraping from consuming the general read quota.
         if is_search_endpoint(request.method(), path) {
@@ -585,6 +624,9 @@ struct RateLimitConfig {
     /// and GET /api/contracts (search/list).
     search_anon_limit: u32,
     search_auth_limit: u32,
+    /// Issue #1112: per-endpoint limit for POST /api/contracts/:id/dependency-scan.
+    rescan_anon_limit: u32,
+    rescan_auth_limit: u32,
 }
 
 impl RateLimitConfig {
@@ -629,6 +671,16 @@ impl RateLimitConfig {
             DEFAULT_SEARCH_AUTH_LIMIT,
         );
 
+        // Issue #1112: per-endpoint limit for the dependency re-scan trigger.
+        let rescan_anon_limit = env_u32(
+            "RATE_LIMIT_RESCAN_ANON_PER_WINDOW",
+            DEFAULT_RESCAN_ANON_LIMIT,
+        );
+        let rescan_auth_limit = env_u32(
+            "RATE_LIMIT_RESCAN_AUTH_PER_WINDOW",
+            DEFAULT_RESCAN_AUTH_LIMIT,
+        );
+
         tracing::info!(
             anonymous_limit,
             auth_limit,
@@ -640,7 +692,9 @@ impl RateLimitConfig {
             publish_auth_limit,
             search_anon_limit,
             search_auth_limit,
-            "Rate limiter configured (issue #891/#727/#1045: per-IP/API-key/endpoint quotas)"
+            rescan_anon_limit,
+            rescan_auth_limit,
+            "Rate limiter configured (issue #891/#727/#1045/#1112: per-IP/API-key/endpoint quotas)"
         );
 
         Self {
@@ -658,6 +712,8 @@ impl RateLimitConfig {
             publish_auth_limit,
             search_anon_limit,
             search_auth_limit,
+            rescan_anon_limit,
+            rescan_auth_limit,
         }
     }
 
@@ -678,6 +734,8 @@ impl RateLimitConfig {
             publish_auth_limit: DEFAULT_PUBLISH_AUTH_LIMIT,
             search_anon_limit: DEFAULT_SEARCH_ANON_LIMIT,
             search_auth_limit: DEFAULT_SEARCH_AUTH_LIMIT,
+            rescan_anon_limit: DEFAULT_RESCAN_ANON_LIMIT,
+            rescan_auth_limit: DEFAULT_RESCAN_AUTH_LIMIT,
         }
     }
 
@@ -704,6 +762,8 @@ impl RateLimitConfig {
             publish_auth_limit: DEFAULT_PUBLISH_AUTH_LIMIT,
             search_anon_limit: DEFAULT_SEARCH_ANON_LIMIT,
             search_auth_limit: DEFAULT_SEARCH_AUTH_LIMIT,
+            rescan_anon_limit: DEFAULT_RESCAN_ANON_LIMIT,
+            rescan_auth_limit: DEFAULT_RESCAN_AUTH_LIMIT,
         }
     }
 
@@ -735,6 +795,40 @@ impl RateLimitConfig {
             publish_auth_limit,
             search_anon_limit,
             search_auth_limit,
+            rescan_anon_limit: DEFAULT_RESCAN_ANON_LIMIT,
+            rescan_auth_limit: DEFAULT_RESCAN_AUTH_LIMIT,
+        }
+    }
+
+    /// Constructor used by dependency-rescan endpoint tests with explicit limits.
+    #[cfg(test)]
+    #[allow(clippy::too_many_arguments)]
+    fn for_tests_with_rescan_limits(
+        anonymous_limit: u32,
+        auth_limit: u32,
+        write_anonymous_limit: u32,
+        write_auth_limit: u32,
+        rescan_anon_limit: u32,
+        rescan_auth_limit: u32,
+        window: Duration,
+    ) -> Self {
+        Self {
+            anonymous_limit,
+            auth_limit,
+            write_anonymous_limit,
+            write_auth_limit,
+            window,
+            enterprise_limit: 100_000,
+            burst_window: Duration::from_secs(BURST_WINDOW_SECONDS),
+            per_api_key_limits: HashMap::new(),
+            trusted_client_ips: HashSet::new(),
+            trusted_api_keys: HashSet::new(),
+            publish_anon_limit: DEFAULT_PUBLISH_ANON_LIMIT,
+            publish_auth_limit: DEFAULT_PUBLISH_AUTH_LIMIT,
+            search_anon_limit: DEFAULT_SEARCH_ANON_LIMIT,
+            search_auth_limit: DEFAULT_SEARCH_AUTH_LIMIT,
+            rescan_anon_limit,
+            rescan_auth_limit,
         }
     }
 
@@ -1088,6 +1182,18 @@ fn is_search_endpoint(method: &Method, path: &str) -> bool {
         || path == "/api/contracts/suggestions"
         || path == "/api/v1/contracts/trending"
         || path == "/contracts"
+}
+
+/// Issue #1112: Detect the dependency-scan re-scan trigger endpoint —
+/// POST /api/contracts/:id/dependency-scan.
+///
+/// The GET variant of this path (fetching the scan report) is unrestricted
+/// read traffic and falls through to the general read/search limits; only
+/// the POST (which re-runs the scan) gets a dedicated write-style bucket.
+fn is_dependency_scan_endpoint(method: &Method, path: &str) -> bool {
+    *method == Method::POST
+        && path.starts_with("/api/contracts/")
+        && path.ends_with("/dependency-scan")
 }
 
 fn extract_page_size(query: Option<&str>) -> Option<u32> {
@@ -2180,6 +2286,228 @@ mod tests {
         // Not publish: wrong path
         assert!(!is_publish_endpoint(&Method::POST, "/api/contracts/abc"));
         assert!(!is_publish_endpoint(&Method::POST, "/api/v1/contracts"));
+    }
+
+    // ── Issue #1112: dependency-scan re-scan trigger bucket tests ────────────
+
+    #[test]
+    fn is_dependency_scan_endpoint_detects_post_only() {
+        assert!(is_dependency_scan_endpoint(
+            &Method::POST,
+            "/api/contracts/11111111-1111-1111-1111-111111111111/dependency-scan"
+        ));
+        // Not rescan: wrong method (GET fetches the report, not a trigger).
+        assert!(!is_dependency_scan_endpoint(
+            &Method::GET,
+            "/api/contracts/11111111-1111-1111-1111-111111111111/dependency-scan"
+        ));
+        // Not rescan: unrelated suffix / path.
+        assert!(!is_dependency_scan_endpoint(
+            &Method::POST,
+            "/api/contracts/11111111-1111-1111-1111-111111111111/package-dependencies"
+        ));
+        assert!(!is_dependency_scan_endpoint(&Method::POST, "/api/contracts"));
+    }
+
+    /// Build an app with separate limits for the dependency-scan bucket.
+    fn test_app_rescan_limits(
+        general_write: u32,
+        rescan_anon: u32,
+        rescan_auth: u32,
+        window: Duration,
+    ) -> Router<()> {
+        let config = RateLimitConfig::for_tests_with_rescan_limits(
+            1000,
+            1000,
+            general_write,
+            general_write,
+            rescan_anon,
+            rescan_auth,
+            window,
+        );
+        let limiter = RateLimitState::new(config);
+        Router::new()
+            .route(
+                "/api/contracts/:id/dependency-scan",
+                post(|| async { "scanned" }),
+            )
+            .route("/other", post(|| async { "other write" }))
+            .layer(middleware::from_fn_with_state(
+                limiter,
+                rate_limit_middleware,
+            ))
+    }
+
+    /// A second re-scan-trigger request from the same client is blocked at
+    /// the dedicated rescan limit, independent of the much higher general
+    /// write quota.
+    ///
+    /// Uses a single-slot (limit=1) bucket rather than a larger number:
+    /// `burst_limit_for_limit` derives a *burst* (1-minute) cap from the
+    /// configured limit as `ceil(limit * 1.2 / 60)`, which only exceeds 1
+    /// once the configured limit is over 50 — so any smaller limit is, in
+    /// practice, a single-slot bucket within a rapid-fire test regardless of
+    /// the nominal value configured. limit=1 keeps the assertion unambiguous.
+    #[tokio::test]
+    async fn rescan_burst_traffic_blocked_at_rescan_limit() {
+        let app = test_app_rescan_limits(100, 1, 10, Duration::from_secs(60));
+        let ip = "198.51.100.90";
+        let path = "/api/contracts/22222222-2222-2222-2222-222222222222/dependency-scan";
+
+        let first = call(
+            &app,
+            Request::builder()
+                .uri(path)
+                .method("POST")
+                .header("x-forwarded-for", ip)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+        assert_ne!(
+            first.status(),
+            StatusCode::TOO_MANY_REQUESTS,
+            "first rescan request should be allowed"
+        );
+
+        let limited = call(
+            &app,
+            Request::builder()
+                .uri(path)
+                .method("POST")
+                .header("x-forwarded-for", ip)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(
+            limited.status(),
+            StatusCode::TOO_MANY_REQUESTS,
+            "second rescan from same client must be rate-limited"
+        );
+        assert!(
+            limited.headers().contains_key(RETRY_AFTER),
+            "429 response must include Retry-After header"
+        );
+    }
+
+    /// The authenticated rescan bucket is keyed separately from the
+    /// anonymous one: exhausting the anonymous slot for an IP does not block
+    /// an authenticated request from that same IP, and the authenticated
+    /// bucket enforces its own limit independently.
+    #[tokio::test]
+    async fn authenticated_rescan_bucket_is_independent_of_anonymous_bucket() {
+        let app = test_app_rescan_limits(100, 1, 1, Duration::from_secs(60));
+        let ip = "203.0.113.77";
+        let path = "/api/contracts/33333333-3333-3333-3333-333333333333/dependency-scan";
+
+        // Exhaust the anonymous slot.
+        call(
+            &app,
+            Request::builder()
+                .uri(path)
+                .method("POST")
+                .header("x-forwarded-for", ip)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+        let anon_blocked = call(
+            &app,
+            Request::builder()
+                .uri(path)
+                .method("POST")
+                .header("x-forwarded-for", ip)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(anon_blocked.status(), StatusCode::TOO_MANY_REQUESTS);
+
+        // An authenticated request from the same IP still succeeds — separate bucket.
+        let auth_ok = call(
+            &app,
+            Request::builder()
+                .uri(path)
+                .method("POST")
+                .header("x-forwarded-for", ip)
+                .header("authorization", "Bearer rescan-token")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+        assert_ne!(
+            auth_ok.status(),
+            StatusCode::TOO_MANY_REQUESTS,
+            "authenticated rescan must not be blocked by the anonymous bucket"
+        );
+
+        // But the authenticated bucket enforces its own limit too.
+        let auth_blocked = call(
+            &app,
+            Request::builder()
+                .uri(path)
+                .method("POST")
+                .header("x-forwarded-for", ip)
+                .header("authorization", "Bearer rescan-token")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(
+            auth_blocked.status(),
+            StatusCode::TOO_MANY_REQUESTS,
+            "second authenticated rescan must be blocked once its slot is used"
+        );
+    }
+
+    /// The rescan bucket is independent of the general write bucket — spamming
+    /// rescan does not block unrelated writes and vice versa.
+    #[tokio::test]
+    async fn rescan_limit_independent_of_general_write_limit() {
+        let app = test_app_rescan_limits(100, 1, 10, Duration::from_secs(60));
+        let ip = "192.0.2.66";
+        let path = "/api/contracts/44444444-4444-4444-4444-444444444444/dependency-scan";
+
+        // Exhaust the anon rescan slot.
+        call(
+            &app,
+            Request::builder()
+                .uri(path)
+                .method("POST")
+                .header("x-forwarded-for", ip)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+        let rescan_blocked = call(
+            &app,
+            Request::builder()
+                .uri(path)
+                .method("POST")
+                .header("x-forwarded-for", ip)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(rescan_blocked.status(), StatusCode::TOO_MANY_REQUESTS);
+
+        // An unrelated write endpoint is still available under the general quota.
+        let other_ok = call(
+            &app,
+            Request::builder()
+                .uri("/other")
+                .method("POST")
+                .header("x-forwarded-for", ip)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+        assert_ne!(
+            other_ok.status(),
+            StatusCode::TOO_MANY_REQUESTS,
+            "general write bucket must be independent of the rescan bucket"
+        );
     }
 
     #[test]

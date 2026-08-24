@@ -3,21 +3,22 @@
 mod analytics;
 mod analyze;
 mod api_key;
-mod auth;
 mod audit_command;
+mod auth;
 mod backup;
-mod batch_ops;
 mod batch_audit;
 mod batch_deploy;
 mod batch_export;
 mod batch_import;
 mod batch_migrate;
 mod batch_notify;
+mod batch_ops;
 mod batch_register;
 mod batch_update;
 mod batch_verify;
 mod cache;
 mod cached_http;
+mod category;
 mod cicd;
 mod codegen;
 mod commands;
@@ -26,14 +27,21 @@ mod completion;
 mod config;
 mod contract_audit;
 mod contract_dependency;
+mod contract_dependency_graph;
 mod contract_deploy;
 mod contract_deprecate;
 mod contract_highlight;
+mod contract_compatibility;
 mod contract_interaction;
+mod contract_interfaces;
+mod contract_provenance;
 mod contract_register;
 mod contract_risk;
+mod contract_search;
+mod contract_snapshot;
 mod contract_update;
 mod contract_verify;
+mod contract_verify_build;
 mod contracts;
 mod conversions;
 mod coverage;
@@ -57,6 +65,8 @@ mod package_signing;
 mod patch;
 mod plugins;
 mod profiler;
+mod publisher;
+mod registry;
 mod release_notes;
 mod shell;
 mod sla;
@@ -75,6 +85,7 @@ mod diagnostic;
 mod output_format;
 mod search;
 mod snapshot;
+mod search_pagination;
 
 use anyhow::Result;
 use clap::{ArgAction, Parser, Subcommand, ValueEnum};
@@ -1145,6 +1156,12 @@ pub enum Commands {
         action: EnvCommands,
     },
 
+    /// Publisher environment diagnostics
+    Publisher {
+        #[command(subcommand)]
+        action: PublisherCommands,
+    },
+
     /// External command (may be provided by an installed plugin)
     #[command(external_subcommand)]
     External(Vec<String>),
@@ -1190,6 +1207,17 @@ pub enum SnapshotCommands {
     Inspect {
         /// Path to the snapshot JSON file
         snapshot_file: String,
+    },
+}
+
+/// Sub-commands for the `publisher` group (#1124).
+#[derive(Debug, Subcommand)]
+pub enum PublisherCommands {
+    /// Diagnose local publisher setup (config, session, signing key, API reachability)
+    Doctor {
+        /// Output the diagnostic report as machine-readable JSON
+        #[arg(long)]
+        json: bool,
     },
 }
 
@@ -1850,9 +1878,155 @@ pub enum KeysCommands {
     },
 }
 
+/// Sub-commands for `contract category`.
+#[derive(Debug, Subcommand)]
+pub enum CategoryCommands {
+    /// List all categories with descriptions and contract counts
+    List {
+        /// Scope contract counts to a single network (mainnet | testnet | futurenet)
+        #[arg(long)]
+        network: Option<String>,
+
+        /// Output format for stdout: table, json, csv, yaml
+        #[arg(long, default_value = "table")]
+        format: String,
+
+        /// Also write the category list to a file: csv or json
+        #[arg(long)]
+        export: Option<String>,
+    },
+
+    /// Show detailed per-category statistics (counts, recent, trending)
+    Stats {
+        /// Scope statistics to a single network (mainnet | testnet | futurenet)
+        #[arg(long)]
+        network: Option<String>,
+
+        /// Output format for stdout: table, json, csv, yaml
+        #[arg(long, default_value = "table")]
+        format: String,
+
+        /// Also write the statistics to a file: csv or json
+        #[arg(long)]
+        export: Option<String>,
+    },
+}
+
 /// Sub-commands for the `contract` group (#522)
 #[derive(Debug, Subcommand)]
 pub enum ContractCommands {
+    /// Search the registry, one page at a time or across every page
+    ///
+    /// Pagination is handled for you: `--all` walks pages until the result set
+    /// runs out or a safety bound is reached, and never loops on a bad
+    /// continuation token. Cursor and offset parameters cannot be combined.
+    ///
+    /// Usage: soroban-registry contract search <QUERY> [--all] [--max-items <N>]
+    ///        [--pagination <cursor|offset>] [--cursor <TOKEN> | --offset <N>]
+    Search {
+        /// Search query
+        query: String,
+
+        /// Filter by network (comma-separated: mainnet,testnet,futurenet)
+        #[arg(long)]
+        networks: Option<String>,
+
+        /// Filter by category (comma-separated: DeFi,NFT)
+        #[arg(long)]
+        category: Option<String>,
+
+        /// Filter by tag (comma-separated: defi,amm)
+        #[arg(long)]
+        tags: Option<String>,
+
+        /// Only show verified contracts
+        #[arg(long)]
+        verified_only: bool,
+
+        /// Results per page (1-100)
+        #[arg(long, default_value = "20")]
+        limit: u32,
+
+        /// Start at this row offset. Offset pagination only — cannot be
+        /// combined with --cursor.
+        #[arg(long, conflicts_with = "cursor")]
+        offset: Option<u64>,
+
+        /// Resume from a continuation token returned by a previous run. Cursor
+        /// pagination only — the token is opaque and must not be edited.
+        #[arg(long)]
+        cursor: Option<String>,
+
+        /// Pagination mode: cursor (stable, no skips or duplicates) or offset
+        /// (relevance ordered). Defaults to cursor for --all, offset otherwise.
+        #[arg(long, value_name = "MODE")]
+        pagination: Option<String>,
+
+        /// Fetch every page, up to --max-items / --max-pages
+        #[arg(long)]
+        all: bool,
+
+        /// Maximum items to fetch with --all (default 1000)
+        #[arg(long)]
+        max_items: Option<u64>,
+
+        /// Maximum pages to fetch with --all (default 100)
+        #[arg(long)]
+        max_pages: Option<u64>,
+
+        /// Output as JSON, including pagination metadata
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// Export a signed, offline-verifiable snapshot of a contract (#1116)
+    ///
+    /// Captures metadata, verification status, dependency scan findings,
+    /// deprecation state and successor lineage as of now, signed by the
+    /// registry so it can be audited without a live API.
+    ///
+    /// Usage: soroban-registry contract snapshot <ID> --output <FILE>
+    Snapshot {
+        /// Contract UUID to snapshot
+        id: String,
+
+        /// File to write the signed snapshot to
+        #[arg(long, short = 'o')]
+        output: String,
+
+        /// Emit machine-readable JSON
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// Verify a previously exported contract snapshot (#1116)
+    ///
+    /// Runs entirely offline unless --fetch-key is passed. Exits non-zero when
+    /// verification fails, so it can gate a compliance pipeline.
+    ///
+    /// Usage: soroban-registry contract verify-snapshot <FILE> [--expect-key <FP>]
+    VerifySnapshot {
+        /// Path to the snapshot file
+        file: String,
+
+        /// Registry key fingerprint to pin against. Without it, a valid result
+        /// proves only that the bundle is self-consistent.
+        #[arg(long)]
+        expect_key: Option<String>,
+
+        /// Fail if the snapshot is older than this many days
+        #[arg(long)]
+        max_age_days: Option<i64>,
+
+        /// Fetch the expected fingerprint from the registry instead of pinning
+        /// it locally. Requires network access.
+        #[arg(long)]
+        fetch_key: bool,
+
+        /// Emit machine-readable JSON
+        #[arg(long)]
+        json: bool,
+    },
 
     /// Assess security and operational risks for a contract (#837)
     ///
@@ -1974,6 +2148,100 @@ pub enum ContractCommands {
         /// Skip cache and always fetch fresh data from registry
         #[arg(long)]
         no_cache: bool,
+    },
+
+    /// Derive and display a contract's deterministic interface fingerprint
+    /// (functions, types, events, errors) from a local compiled WASM
+    /// artifact.
+    ///
+    /// Usage: soroban-registry contract interfaces --wasm <path> [--json]
+    Interfaces {
+        /// Path to a local compiled WASM contract to inspect.
+        #[arg(long)]
+        wasm: String,
+
+        /// Output results as machine-readable JSON
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// Display build-provenance metadata recorded for a contract, read from
+    /// a local manifest file.
+    ///
+    /// Usage: soroban-registry contract provenance --manifest <path> [--json]
+    Provenance {
+        /// Path to a local provenance manifest (JSON) to display.
+        #[arg(long)]
+        manifest: String,
+
+        /// Output results as machine-readable JSON
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// Attempt to independently reproduce a contract's published WASM
+    /// artifact from source, and compare its hash against the expected
+    /// (registry-recorded) artifact hash.
+    ///
+    /// Usage: soroban-registry contract verify-build --manifest <path> --source-dir <dir> --expected-hash <hash> [--allow-toolchain-mismatch] [--json]
+    VerifyBuild {
+        /// Path to a local provenance manifest (JSON) describing the recorded build.
+        #[arg(long)]
+        manifest: String,
+
+        /// Directory containing the contract's source to rebuild.
+        #[arg(long)]
+        source_dir: String,
+
+        /// The registry-recorded WASM artifact hash to compare the rebuild against.
+        #[arg(long)]
+        expected_hash: String,
+
+        /// Proceed with the rebuild even if the locally installed rustc
+        /// version doesn't match the version recorded in provenance.
+        #[arg(long)]
+        allow_toolchain_mismatch: bool,
+
+        /// Output results as machine-readable JSON
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// Structurally compare two local compiled WASM artifacts and classify
+    /// ABI changes as compatible, potentially breaking, breaking, or
+    /// unknown.
+    ///
+    /// Usage: soroban-registry contract compatibility --from <wasm> --to <wasm> [--strict] [--json] [--fail-on <level>]
+    Compatibility {
+        /// Path to the earlier/baseline compiled WASM contract.
+        #[arg(long)]
+        from: String,
+
+        /// Path to the newer/candidate compiled WASM contract.
+        #[arg(long)]
+        to: String,
+
+        /// Network passphrase associated with the `--from` artifact.
+        #[arg(long)]
+        from_network_passphrase: Option<String>,
+
+        /// Network passphrase associated with the `--to` artifact.
+        #[arg(long)]
+        to_network_passphrase: Option<String>,
+
+        /// Exit non-zero when changes at or above the --fail-on threshold
+        /// are found (default threshold: potentially_breaking).
+        #[arg(long)]
+        strict: bool,
+
+        /// Minimum severity that triggers a non-zero exit under --strict:
+        /// breaking | potential | unknown
+        #[arg(long, default_value = "potential")]
+        fail_on: String,
+
+        /// Output results as machine-readable JSON
+        #[arg(long)]
+        json: bool,
     },
 
     /// Display detailed information about a contract
@@ -2108,6 +2376,81 @@ pub enum ContractCommands {
         summary: bool,
     },
 
+    /// List what a contract depends on (#1147)
+    ///
+    /// Usage: soroban-registry contract dependencies <ADDRESS> [--network <NET>]
+    ///        [--transitive] [--depth N] [--json]
+    ///
+    /// A bare contract address registered on more than one network is ambiguous;
+    /// pass --network to disambiguate.
+    Dependencies {
+        /// On-chain contract address or registry UUID
+        address: String,
+        /// Stellar network (mainnet | testnet | futurenet)
+        #[arg(long)]
+        network: Option<String>,
+        /// Walk the whole dependency closure, not just direct edges
+        #[arg(long)]
+        transitive: bool,
+        /// Maximum traversal depth (capped server-side)
+        #[arg(long)]
+        depth: Option<u32>,
+        /// Include on-chain call edges alongside declared ones
+        #[arg(long)]
+        include_telemetry: bool,
+        /// Print the registry response as JSON
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// List what depends on a contract (#1147)
+    ///
+    /// Usage: soroban-registry contract dependents <ADDRESS> [--network <NET>]
+    ///        [--transitive] [--depth N] [--json]
+    Dependents {
+        /// On-chain contract address or registry UUID
+        address: String,
+        /// Stellar network (mainnet | testnet | futurenet)
+        #[arg(long)]
+        network: Option<String>,
+        /// Walk the whole dependent closure, not just direct edges
+        #[arg(long)]
+        transitive: bool,
+        /// Maximum traversal depth (capped server-side)
+        #[arg(long)]
+        depth: Option<u32>,
+        /// Include on-chain call edges alongside declared ones
+        #[arg(long)]
+        include_telemetry: bool,
+        /// Print the registry response as JSON
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// Report direct and inherited risk across a contract's dependencies (#1147)
+    ///
+    /// Usage: soroban-registry contract dependency-risk <ADDRESS> [--network <NET>]
+    ///        [--depth N] [--fail-on low|medium|high|critical] [--json]
+    ///
+    /// Each finding carries the shortest dependency path that reaches it.
+    /// With --fail-on, exits 1 when the overall risk meets or exceeds the level.
+    DependencyRisk {
+        /// On-chain contract address or registry UUID
+        address: String,
+        /// Stellar network (mainnet | testnet | futurenet)
+        #[arg(long)]
+        network: Option<String>,
+        /// Maximum traversal depth (capped server-side)
+        #[arg(long)]
+        depth: Option<u32>,
+        /// Exit 1 when overall risk meets or exceeds this level
+        #[arg(long)]
+        fail_on: Option<String>,
+        /// Print the registry response as JSON
+        #[arg(long)]
+        json: bool,
+    },
+
     /// Update contract metadata after registration (#828)
     ///
     /// Usage: soroban-registry contract update <ADDRESS> [--name ...] [--dry-run]
@@ -2195,6 +2538,30 @@ pub enum ContractCommands {
         /// Directory for archive extraction (archive format only)
         #[arg(long, default_value = "./imported")]
         output_dir: String,
+    },
+
+    /// Rollback a deprecated contract to active state (#1091)
+    ///
+    /// Usage: soroban-registry contract rollback <ADDRESS> --reason <REASON> --private-key <KEY>
+    Rollback {
+        /// Contract address or registry UUID to rollback
+        address: String,
+
+        /// Human-readable reason for rollback
+        #[arg(long)]
+        reason: String,
+
+        /// Publisher's Ed25519 private key (base64-encoded)
+        #[arg(long)]
+        private_key: String,
+
+        /// Skip interactive confirmation
+        #[arg(long, short = 'y')]
+        yes: bool,
+
+        /// Output results as machine-readable JSON
+        #[arg(long)]
+        json: bool,
     },
 
     /// Detect drift between local lockfile and registry state (#1060)
@@ -2403,6 +2770,19 @@ pub enum EnvCommands {
     Switch {
         /// Environment name to activate
         environment: String,
+    },
+}
+
+/// Sub-commands for the `publisher` group
+#[derive(Debug, Subcommand)]
+pub enum PublisherCommands {
+    /// Diagnose the local publishing environment (config, session, signing key, connectivity)
+    ///
+    /// Usage: soroban-registry publisher doctor [--json]
+    Doctor {
+        /// Output results as machine-readable JSON
+        #[arg(long)]
+        json: bool,
     },
 }
 
@@ -2768,6 +3148,8 @@ async fn main() -> Result<()> {
         no_cache: cli.no_cache,
         verbose: cli.verbose,
     });
+    // The shared registry client picks up the same resolved timeout.
+    registry::init(cli.timeout);
 
     // ── Initialise logger ─────────────────────────────────────────────────────
     // -v counts; each level raises verbosity by one step.
@@ -2936,15 +3318,15 @@ pub async fn dispatch_command(
                 }
                 PluginConfigCommands::Set { name, json } => {
                     plugins::set_plugin_config_json(&name, &json)?;
-                    println!("{} Updated config for {}", "✓".green(), name.bold());
+                    println!("{} Updated config for {}", "[OK]".green(), name.bold());
                 }
                 PluginConfigCommands::Disable { name } => {
                     plugins::set_plugin_enabled(&name, false)?;
-                    println!("{} Disabled {}", "✓".green(), name.bold());
+                    println!("{} Disabled {}", "[OK]".green(), name.bold());
                 }
                 PluginConfigCommands::Enable { name } => {
                     plugins::set_plugin_enabled(&name, true)?;
-                    println!("{} Enabled {}", "✓".green(), name.bold());
+                    println!("{} Enabled {}", "[OK]".green(), name.bold());
                 }
             },
         },
@@ -4131,6 +4513,50 @@ pub async fn dispatch_command(
         },
         // ── Contract verify command (#522) ───────────────────────────────────
         Commands::Contract { action } => match action {
+            ContractCommands::Search {
+                query,
+                networks,
+                category,
+                tags,
+                verified_only,
+                limit,
+                offset,
+                cursor,
+                pagination,
+                all,
+                max_items,
+                max_pages,
+                json,
+            } => {
+                log::debug!(
+                    "Command: contract search | query={:?} all={} limit={} offset={:?} cursor={} pagination={:?}",
+                    query,
+                    all,
+                    limit,
+                    offset,
+                    cursor.is_some(),
+                    pagination
+                );
+                contract_search::run(
+                    &cli.api_url,
+                    search_pagination::SearchOptions {
+                        query,
+                        networks,
+                        category,
+                        tags,
+                        verified_only,
+                        limit,
+                        offset,
+                        cursor,
+                        pagination,
+                        all,
+                        max_items,
+                        max_pages,
+                        json,
+                    },
+                )
+                .await?;
+            }
             ContractCommands::Register { file, batch, json } => {
                 log::debug!(
                     "Command: contract register | file={:?} batch={} json={}",
@@ -4197,6 +4623,65 @@ pub async fn dispatch_command(
                         );
                     }
                 }
+            }
+            ContractCommands::Interfaces { wasm, json } => {
+                log::debug!("Command: contract interfaces | wasm={} json={}", wasm, json);
+                contract_interfaces::run_local(&wasm, json).await?;
+            }
+            ContractCommands::Provenance { manifest, json } => {
+                log::debug!("Command: contract provenance | manifest={} json={}", manifest, json);
+                contract_provenance::run_local(&manifest, json).await?;
+            }
+            ContractCommands::VerifyBuild {
+                manifest,
+                source_dir,
+                expected_hash,
+                allow_toolchain_mismatch,
+                json,
+            } => {
+                log::debug!(
+                    "Command: contract verify-build | manifest={} source_dir={} json={}",
+                    manifest,
+                    source_dir,
+                    json
+                );
+                contract_verify_build::run(
+                    &manifest,
+                    &source_dir,
+                    &expected_hash,
+                    allow_toolchain_mismatch,
+                    json,
+                )
+                .await?;
+            }
+            ContractCommands::Compatibility {
+                from,
+                to,
+                from_network_passphrase,
+                to_network_passphrase,
+                strict,
+                fail_on,
+                json,
+            } => {
+                log::debug!(
+                    "Command: contract compatibility | from={} to={} strict={} fail_on={} json={}",
+                    from,
+                    to,
+                    strict,
+                    fail_on,
+                    json
+                );
+                let fail_on = contract_compatibility::FailOn::parse(&fail_on)?;
+                contract_compatibility::run(
+                    &from,
+                    &to,
+                    from_network_passphrase,
+                    to_network_passphrase,
+                    strict,
+                    json,
+                    fail_on,
+                )
+                .await?;
             }
             ContractCommands::Details {
                 address,
@@ -4343,17 +4828,130 @@ pub async fn dispatch_command(
                 log::debug!("Command: contract interaction | address={}", address);
                 contract_interaction::run(&cli.api_url, &address, limit, json).await?;
             }
+            ContractCommands::Dependencies {
+                address,
+                network,
+                transitive,
+                depth,
+                include_telemetry,
+                json,
+            } => {
+                log::debug!(
+                    "Command: contract dependencies | address={} network={:?} transitive={}",
+                    address,
+                    network,
+                    transitive
+                );
+                let opts = contract_dependency_graph::GraphOptions {
+                    network,
+                    depth,
+                    transitive,
+                    include_telemetry,
+                    json,
+                };
+                contract_dependency_graph::dependencies(&cli.api_url, &address, &opts).await?;
+            }
+            ContractCommands::Dependents {
+                address,
+                network,
+                transitive,
+                depth,
+                include_telemetry,
+                json,
+            } => {
+                log::debug!(
+                    "Command: contract dependents | address={} network={:?} transitive={}",
+                    address,
+                    network,
+                    transitive
+                );
+                let opts = contract_dependency_graph::GraphOptions {
+                    network,
+                    depth,
+                    transitive,
+                    include_telemetry,
+                    json,
+                };
+                contract_dependency_graph::dependents(&cli.api_url, &address, &opts).await?;
+            }
+            ContractCommands::DependencyRisk {
+                address,
+                network,
+                depth,
+                fail_on,
+                json,
+            } => {
+                log::debug!(
+                    "Command: contract dependency-risk | address={} network={:?} fail_on={:?}",
+                    address,
+                    network,
+                    fail_on
+                );
+                let threshold = fail_on
+                    .as_deref()
+                    .map(contract_dependency_graph::Severity::parse)
+                    .transpose()?;
+                let opts = contract_dependency_graph::GraphOptions {
+                    network,
+                    depth,
+                    // Risk is only meaningful over the closure: a direct-only
+                    // report would omit exactly the inherited findings this
+                    // command exists to surface.
+                    transitive: true,
+                    include_telemetry: false,
+                    json,
+                };
+                let breached =
+                    contract_dependency_graph::risk(&cli.api_url, &address, &opts, threshold)
+                        .await?;
+                if breached {
+                    std::process::exit(1);
+                }
+            }
             ContractCommands::Dependency {
                 address,
                 depth,
                 format,
                 summary,
             } => {
-                log::debug!("Command: contract dependency | address={} depth={}", address, depth);
+                log::debug!(
+                    "Command: contract dependency | address={} depth={}",
+                    address,
+                    depth
+                );
                 let fmt = crate::output_format::validate_format(&format)
                     .unwrap_or(crate::output_format::OutputFormat::Table);
                 contract_dependency::run(&cli.api_url, &address, depth, fmt, summary).await?;
             }
+            ContractCommands::Category { action } => match action {
+                CategoryCommands::List {
+                    network,
+                    format,
+                    export,
+                } => {
+                    log::debug!(
+                        "Command: contract category list | network={:?} format={}",
+                        network,
+                        format
+                    );
+                    let fmt = crate::output_format::validate_format(&format)?;
+                    category::list(&cli.api_url, network.as_deref(), fmt, export.as_deref()).await?;
+                }
+                CategoryCommands::Stats {
+                    network,
+                    format,
+                    export,
+                } => {
+                    log::debug!(
+                        "Command: contract category stats | network={:?} format={}",
+                        network,
+                        format
+                    );
+                    let fmt = crate::output_format::validate_format(&format)?;
+                    category::stats(&cli.api_url, network.as_deref(), fmt, export.as_deref())
+                        .await?;
+                }
+            },
             ContractCommands::Update {
                 address,
                 name,
@@ -4442,6 +5040,30 @@ pub async fn dispatch_command(
                 let fmt = if json { "json" } else { &format };
                 contract_audit::run(&cli.api_url, &lockfile, fix, init, &contracts, fmt).await?;
             }
+            ContractCommands::Snapshot { id, output, json } => {
+                log::debug!("Command: contract snapshot | id={} output={}", id, output);
+                contract_snapshot::run_export(&cli.api_url, &id, &output, json).await?;
+            }
+
+            ContractCommands::VerifySnapshot {
+                file,
+                expect_key,
+                max_age_days,
+                fetch_key,
+                json,
+            } => {
+                log::debug!("Command: contract verify-snapshot | file={}", file);
+                contract_snapshot::run_verify(
+                    &cli.api_url,
+                    &file,
+                    expect_key.as_deref(),
+                    max_age_days,
+                    fetch_key,
+                    json,
+                )
+                .await?;
+            }
+
             ContractCommands::Deprecate {
                 address,
                 reason,
@@ -4466,6 +5088,28 @@ pub async fn dispatch_command(
                     &private_key,
                     migration_guide.as_deref(),
                     grace_period_days,
+                    yes,
+                    json,
+                )
+                .await?;
+            }
+            ContractCommands::Rollback {
+                address,
+                reason,
+                private_key,
+                yes,
+                json,
+            } => {
+                log::debug!(
+                    "Command: contract rollback | address={} reason={}",
+                    address,
+                    reason
+                );
+                contract_deprecate::rollback(
+                    &cli.api_url,
+                    &address,
+                    &reason,
+                    &private_key,
                     yes,
                     json,
                 )

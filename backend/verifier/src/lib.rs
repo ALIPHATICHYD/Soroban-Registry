@@ -120,10 +120,7 @@ pub enum PassphraseCheckOutcome {
     Pass,
     /// The provided passphrase conflicts with the passphrase that was recorded
     /// for this contract at publish / first-verification time.
-    Mismatch {
-        recorded: String,
-        provided: String,
-    },
+    Mismatch { recorded: String, provided: String },
 }
 
 /// Compare a `provided` passphrase against the `recorded` one stored in the
@@ -139,10 +136,7 @@ pub enum PassphraseCheckOutcome {
 ///    `Mismatch`.
 ///
 /// Comparisons are case-sensitive because Stellar passphrases are case-sensitive.
-pub fn check_passphrase(
-    recorded: Option<&str>,
-    provided: Option<&str>,
-) -> PassphraseCheckOutcome {
+pub fn check_passphrase(recorded: Option<&str>, provided: Option<&str>) -> PassphraseCheckOutcome {
     match (recorded, provided) {
         (Some(rec), Some(prov)) if rec != prov => PassphraseCheckOutcome::Mismatch {
             recorded: rec.to_owned(),
@@ -261,7 +255,13 @@ pub async fn verify_contract_with_passphrase(
     }
 
     // ── Bytecode check (delegates to existing logic) ──────────────────────────
-    verify_contract(source_code, deployed_wasm_hash, compiler_version, build_params).await
+    verify_contract(
+        source_code,
+        deployed_wasm_hash,
+        compiler_version,
+        build_params,
+    )
+    .await
 }
 
 /// Compile Rust source code to WASM.
@@ -572,7 +572,10 @@ mod tests {
         .await
         .expect("verify_contract_with_passphrase should not return Err");
 
-        assert!(result.verified, "matching passphrases + matching wasm should pass");
+        assert!(
+            result.verified,
+            "matching passphrases + matching wasm should pass"
+        );
         assert!(result.failure_kind.is_none());
     }
 
@@ -587,15 +590,20 @@ mod tests {
             &hash,
             None,
             None,
-            Some(PASSPHRASE_MAINNET),  // recorded: mainnet
-            Some(PASSPHRASE_TESTNET),  // provided: testnet  ← mismatch
+            Some(PASSPHRASE_MAINNET), // recorded: mainnet
+            Some(PASSPHRASE_TESTNET), // provided: testnet  ← mismatch
         )
         .await
         .expect("verify_contract_with_passphrase should not return Err");
 
-        assert!(!result.verified, "passphrase mismatch must reject verification");
+        assert!(
+            !result.verified,
+            "passphrase mismatch must reject verification"
+        );
         match &result.failure_kind {
-            Some(VerificationFailureKind::PassphraseMismatch { recorded, provided, .. }) => {
+            Some(VerificationFailureKind::PassphraseMismatch {
+                recorded, provided, ..
+            }) => {
                 assert_eq!(recorded, PASSPHRASE_MAINNET);
                 assert_eq!(provided, PASSPHRASE_TESTNET);
             }
@@ -616,8 +624,8 @@ mod tests {
             &hash,
             None,
             None,
-            None,                      // recorded: none (legacy record)
-            Some(PASSPHRASE_TESTNET),  // provided: testnet
+            None,                     // recorded: none (legacy record)
+            Some(PASSPHRASE_TESTNET), // provided: testnet
         )
         .await
         .expect("verify_contract_with_passphrase should not return Err");
@@ -671,7 +679,10 @@ mod tests {
 
         assert!(!result.verified);
         assert!(
-            matches!(result.failure_kind, Some(VerificationFailureKind::PassphraseMismatch { .. })),
+            matches!(
+                result.failure_kind,
+                Some(VerificationFailureKind::PassphraseMismatch { .. })
+            ),
             "PassphraseMismatch must take priority over SourceMismatch"
         );
     }

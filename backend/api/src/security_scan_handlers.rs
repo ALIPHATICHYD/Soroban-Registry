@@ -13,6 +13,7 @@ use uuid::Uuid;
 use crate::{
     error::{ApiError, ApiResult},
     ml_detector,
+    policy::{self, PolicyActor},
     state::AppState,
     vulnerability_database,
 };
@@ -36,20 +37,11 @@ pub struct ListScansQuery {
 /// POST /api/contracts/:id/scans
 pub async fn trigger_security_scan(
     State(state): State<AppState>,
+    actor: PolicyActor,
     Path(contract_id): Path<Uuid>,
     ValidatedJson(req): ValidatedJson<TriggerSecurityScanRequest>,
 ) -> ApiResult<Json<SecurityScan>> {
-    // Verify contract exists
-    let contract_exists: bool =
-        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM contracts WHERE id = $1)")
-            .bind(contract_id)
-            .fetch_one(&state.db)
-            .await
-            .map_err(|e| ApiError::internal(format!("Database error: {}", e)))?;
-
-    if !contract_exists {
-        return Err(ApiError::not_found("contract", "Contract not found"));
-    }
+    policy::require_contract_owner(&state, &actor, contract_id).await?;
 
     // Get contract version if specified, otherwise fall back to the latest version.
     let contract_version_id = if let Some(version) = &req.version {
@@ -357,8 +349,11 @@ pub struct ListIssuesQuery {
 pub async fn update_security_issue(
     State(state): State<AppState>,
     Path((contract_id, issue_id)): Path<(Uuid, Uuid)>,
+    actor: PolicyActor,
     ValidatedJson(req): ValidatedJson<UpdateSecurityIssueRequest>,
 ) -> ApiResult<Json<shared::SecurityIssue>> {
+    policy::require_contract_owner(&state, &actor, contract_id).await?;
+
     // Verify issue belongs to contract
     let existing: Option<shared::SecurityIssue> =
         sqlx::query_as("SELECT * FROM security_issues WHERE id = $1 AND contract_id = $2")
@@ -430,8 +425,11 @@ pub async fn list_security_scanners(
 /// POST /api/security/scanners
 pub async fn create_security_scanner(
     State(state): State<AppState>,
+    actor: PolicyActor,
     ValidatedJson(req): ValidatedJson<CreateSecurityScannerRequest>,
 ) -> ApiResult<Json<SecurityScanner>> {
+    actor.require_admin()?;
+
     // In production, api_key should be encrypted before storage
     let scanner = sqlx::query_as::<_, SecurityScanner>(
         r#"

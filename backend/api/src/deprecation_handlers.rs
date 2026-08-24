@@ -12,6 +12,8 @@ use std::collections::HashSet;
 use uuid::Uuid;
 
 use crate::error::{ApiError, ApiResult};
+use crate::ownership_transfer;
+use crate::policy::{self, PolicyActor};
 use crate::state::AppState;
 
 // ─── Public helper ────────────────────────────────────────────────────────────
@@ -245,14 +247,19 @@ pub async fn get_deprecation_info(
 )]
 pub async fn deprecate_contract(
     State(state): State<AppState>,
+    actor: PolicyActor,
     Path(id): Path<String>,
     ValidatedJson(req): ValidatedJson<DeprecateContractRequest>,
 ) -> ApiResult<Json<DeprecationInfo>> {
     let (contract_uuid, contract_id) = fetch_contract_identity(&state, &id).await?;
+    policy::require_contract_owner(&state, &actor, contract_uuid).await?;
+    verify_deprecation_signature(&actor, &contract_id, &req)?;
 
     let reason = req.deprecated_reason.clone().or_else(|| req.notes.clone());
 
-    if req.migration_guide_url.is_none() && req.replacement_contract_id.is_none() && reason.is_none()
+    if req.migration_guide_url.is_none()
+        && req.replacement_contract_id.is_none()
+        && reason.is_none()
     {
         return Err(ApiError::bad_request(
             "MissingMigrationPath",
@@ -348,13 +355,12 @@ pub async fn deprecate_contract(
     // ── Emit contract.deprecated webhook (best-effort) ────────────────────────
     // Fetch the publisher_id for this contract so we can route the webhook to
     // the correct set of subscriptions.
-    if let Ok(publisher_id) = sqlx::query_scalar::<_, uuid::Uuid>(
-        "SELECT publisher_id FROM contracts WHERE id = $1",
-    )
-    .bind(contract_uuid)
-    .fetch_optional(&state.db)
-    .await
-    .map(|opt| opt.unwrap_or(uuid::Uuid::nil()))
+    if let Ok(publisher_id) =
+        sqlx::query_scalar::<_, uuid::Uuid>("SELECT publisher_id FROM contracts WHERE id = $1")
+            .bind(contract_uuid)
+            .fetch_optional(&state.db)
+            .await
+            .map(|opt| opt.unwrap_or(uuid::Uuid::nil()))
     {
         if !publisher_id.is_nil() {
             crate::webhook_events::emit_webhook_event(
@@ -398,18 +404,19 @@ pub async fn deprecate_contract(
 )]
 pub async fn undeprecate_contract(
     State(state): State<AppState>,
+    actor: PolicyActor,
     Path(id): Path<String>,
     Query(req): Query<UndeprecateContractRequest>,
 ) -> ApiResult<Json<DeprecationInfo>> {
     let (contract_uuid, contract_id) = fetch_contract_identity(&state, &id).await?;
+    policy::require_contract_owner(&state, &actor, contract_uuid).await?;
 
-    let is_deprecated: bool = sqlx::query_scalar(
-        "SELECT COALESCE(is_deprecated, FALSE) FROM contracts WHERE id = $1",
-    )
-    .bind(contract_uuid)
-    .fetch_one(&state.db)
-    .await
-    .map_err(|err| db_internal_error("fetch is_deprecated", err))?;
+    let is_deprecated: bool =
+        sqlx::query_scalar("SELECT COALESCE(is_deprecated, FALSE) FROM contracts WHERE id = $1")
+            .bind(contract_uuid)
+            .fetch_one(&state.db)
+            .await
+            .map_err(|err| db_internal_error("fetch is_deprecated", err))?;
 
     if !is_deprecated {
         return get_deprecation_info(State(state), Path(contract_id)).await;
@@ -566,7 +573,10 @@ fn build_lineage_warnings(
 )]
 pub async fn purge_expired_deprecated_contracts(
     State(state): State<AppState>,
+    actor: PolicyActor,
 ) -> ApiResult<Json<serde_json::Value>> {
+    actor.require_admin()?;
+
     // Find contracts whose grace period has fully elapsed:
     //   deprecated_at + grace_period_days < NOW()
     let expired: Vec<(Uuid, String)> = sqlx::query_as(
@@ -608,6 +618,61 @@ pub async fn purge_expired_deprecated_contracts(
 }
 
 // ─── Internal helpers ─────────────────────────────────────────────────────────
+
+fn verify_deprecation_signature(
+    actor: &PolicyActor,
+    contract_id: &str,
+    req: &DeprecateContractRequest,
+) -> ApiResult<()> {
+    let (payload, signature, signing_address) =
+        match (&req.payload, &req.signature, &req.signing_address) {
+            (None, None, None) => return Ok(()),
+            (Some(payload), Some(signature), Some(signing_address)) => {
+                (payload, signature, signing_address)
+            }
+            _ => {
+                return Err(ApiError::bad_request(
+                    "IncompleteSignatureEnvelope",
+                    "payload, signature, and signing_address must be supplied together",
+                ))
+            }
+        };
+
+    actor.require_signature_identity(signing_address)?;
+    if payload.action != "deprecate" || payload.contract_id != contract_id {
+        return Err(ApiError::bad_request(
+            "SignaturePayloadMismatch",
+            "The signed payload does not describe this contract deprecation",
+        ));
+    }
+    if !(16..=128).contains(&payload.nonce.len())
+        || !payload
+            .nonce
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
+    {
+        return Err(ApiError::bad_request(
+            "InvalidSignatureNonce",
+            "The signature nonce must be 16-128 ASCII letters, digits, hyphens, or underscores",
+        ));
+    }
+
+    let signed_at = DateTime::parse_from_rfc3339(&payload.timestamp)
+        .map_err(|_| {
+            ApiError::bad_request(
+                "InvalidSignatureTimestamp",
+                "The signature timestamp must be RFC 3339",
+            )
+        })?
+        .timestamp();
+    ownership_transfer::check_signature_freshness(signed_at, Utc::now().timestamp())?;
+
+    let message = format!(
+        "{}:{}:{}:{}",
+        payload.action, payload.contract_id, payload.timestamp, payload.nonce
+    );
+    ownership_transfer::verify_transfer_signature(actor.stellar_address(), &message, signature)
+}
 
 async fn notify_dependents(
     state: &AppState,
@@ -753,12 +818,13 @@ async fn fetch_contract_uuid(state: &AppState, contract_id: &str) -> ApiResult<U
 }
 
 async fn resolve_contract_selector(state: &AppState, id: Uuid) -> ApiResult<String> {
-    let selector = sqlx::query_scalar::<_, String>("SELECT contract_id FROM contracts WHERE id = $1")
-        .bind(id)
-        .fetch_optional(&state.db)
-        .await
-        .map_err(|err| db_internal_error("resolve replacement selector", err))?
-        .unwrap_or_else(|| id.to_string());
+    let selector =
+        sqlx::query_scalar::<_, String>("SELECT contract_id FROM contracts WHERE id = $1")
+            .bind(id)
+            .fetch_optional(&state.db)
+            .await
+            .map_err(|err| db_internal_error("resolve replacement selector", err))?
+            .unwrap_or_else(|| id.to_string());
     Ok(selector)
 }
 

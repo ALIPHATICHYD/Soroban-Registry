@@ -216,7 +216,9 @@ pub struct NetworkHealthResponse {
 }
 
 /// Network where the contract is deployed
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, sqlx::Type, utoipa::ToSchema, PartialEq, Eq)]
+#[derive(
+    Debug, Clone, Copy, Serialize, Deserialize, sqlx::Type, utoipa::ToSchema, PartialEq, Eq,
+)]
 #[sqlx(type_name = "network_type", rename_all = "lowercase")]
 #[serde(rename_all = "lowercase")]
 pub enum Network {
@@ -246,7 +248,9 @@ fn parse_network_value<E: de::Error>(value: &str) -> Result<Network, E> {
     }
 }
 
-pub fn deserialize_optional_networks<'de, D>(deserializer: D) -> Result<Option<Vec<Network>>, D::Error>
+pub fn deserialize_optional_networks<'de, D>(
+    deserializer: D,
+) -> Result<Option<Vec<Network>>, D::Error>
 where
     D: serde::Deserializer<'de>,
 {
@@ -1148,16 +1152,33 @@ pub struct DeprecationInfo {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct DeprecationSignaturePayload {
+    pub contract_id: String,
+    pub action: String,
+    pub timestamp: String,
+    pub nonce: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct DeprecateContractRequest {
     pub retirement_at: DateTime<Utc>,
     pub replacement_contract_id: Option<String>,
     pub migration_guide_url: Option<String>,
     pub notes: Option<String>,
     /// Human-readable reason for the deprecation, shown in API deprecation warnings.
+    #[serde(default, alias = "reason")]
     pub deprecated_reason: Option<String>,
     /// Number of days after deprecation before the contract is hard-deleted.
     /// If `None`, the contract is soft-deleted but never automatically removed.
     pub grace_period_days: Option<i32>,
+    /// Optional signed action envelope used by clients that require additional wallet proof.
+    /// When any envelope field is supplied, all fields are required and verified.
+    #[serde(default)]
+    pub payload: Option<DeprecationSignaturePayload>,
+    #[serde(default)]
+    pub signature: Option<String>,
+    #[serde(default)]
+    pub signing_address: Option<String>,
 }
 
 /// Query parameters for clearing deprecation. Reactivating a deprecated contract
@@ -3632,7 +3653,7 @@ pub struct CollaborativeReviewDetails {
 // ADVANCED CONTRACT DEPENDENCIES (issue #417)
 // ═══════════════════════════════════════════════════════════════════════════
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct DependencyNode {
     pub contract_id: String,
     pub resolved_id: Option<Uuid>,
@@ -3644,7 +3665,7 @@ pub struct DependencyNode {
     pub visualization_hints: serde_json::Value,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct DependencyResponse {
     pub root: DependencyNode,
     pub total_dependencies: usize,
@@ -4386,8 +4407,22 @@ pub enum ScanStatus {
 }
 
 /// Security issue severity
+// Copy/Eq/Ord/Hash so severities can be compared, counted, and used as map keys
+// by the dependency risk combinator (Issue #1147) without cloning. The variant
+// order below IS the severity order; do not reorder it.
 #[derive(
-    Debug, Clone, Serialize, Deserialize, sqlx::Type, utoipa::ToSchema, PartialEq, PartialOrd,
+    Debug,
+    Clone,
+    Copy,
+    Serialize,
+    Deserialize,
+    sqlx::Type,
+    utoipa::ToSchema,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
 )]
 #[sqlx(type_name = "issue_severity_type", rename_all = "lowercase")]
 pub enum IssueSeverity {

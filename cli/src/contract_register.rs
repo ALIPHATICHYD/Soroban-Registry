@@ -2,6 +2,8 @@ use crate::io_utils::compute_sha256_streaming;
 use crate::net::RequestBuilderExt;
 use crate::wizard::{confirm, prompt, prompt_with_validation};
 use anyhow::{Context, Result};
+use base64::engine::general_purpose::STANDARD as BASE64;
+use base64::Engine as _;
 use colored::Colorize;
 use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
@@ -18,6 +20,14 @@ use stellar_xdr::curr::{
 
 const MAX_BATCH_SIZE: usize = 50;
 const REGISTER_TIMEOUT_SECS: u64 = 60;
+
+/// Largest WASM file the CLI will inline as `wasm_artifact_base64`.
+///
+/// Base64 inflates by 4/3, so 3 MiB encodes to ~4 MiB and stays under the API's
+/// default 5 MB body limit (`MAX_PAYLOAD_SIZE_MB`). A whole batch is resolved
+/// before anything is sent, so this also bounds peak CLI memory at
+/// `MAX_BATCH_SIZE` x this value.
+const MAX_INLINE_ARTIFACT_BYTES: u64 = 3 * 1024 * 1024;
 
 #[derive(Debug, Clone, Deserialize, Default)]
 #[serde(deny_unknown_fields)]
@@ -370,6 +380,7 @@ async fn resolve_drafts(
         contract_id = contract_id.trim().to_uppercase();
 
         let wasm_hash = resolve_wasm_hash(draft)?;
+        let wasm_artifact_base64 = resolve_wasm_artifact(draft)?;
         let name = take_required(&mut draft.name, "name")?;
         let publisher_address = draft
             .publisher_address
@@ -398,6 +409,13 @@ async fn resolve_drafts(
             request: PublishRequest {
                 contract_id,
                 wasm_hash,
+                // Usually None: this flow registers already-deployed contracts
+                // from metadata, and a draft carrying only a `wasm_hash` has no
+                // bytes to send. When a draft does supply `wasm_path` -- which
+                // `resolve_wasm_hash` above already reads -- the artifact is
+                // inlined so the registry can scan it and derive an interface
+                // fingerprint rather than recording the contract scan-pending.
+                wasm_artifact_base64,
                 name,
                 slug,
                 description,
@@ -433,6 +451,32 @@ fn resolve_wasm_hash(draft: &RegistrationDraft) -> Result<String> {
     }
 
     Ok(wasm_hash.trim().to_lowercase())
+}
+
+/// Inline the WASM artifact when the draft supplied a local file.
+///
+/// A draft carrying only a `wasm_hash` has no bytes to send, so the artifact is
+/// omitted and the registry records the contract as scan-pending — the same
+/// semantics as any other publish without an artifact.
+fn resolve_wasm_artifact(draft: &RegistrationDraft) -> Result<Option<String>> {
+    let Some(path) = draft.wasm_path.as_ref() else {
+        return Ok(None);
+    };
+
+    let metadata = fs::metadata(path)
+        .with_context(|| format!("Failed to read WASM file: {}", path.display()))?;
+    if metadata.len() > MAX_INLINE_ARTIFACT_BYTES {
+        anyhow::bail!(
+            "WASM artifact {} is {} bytes, above the {} byte inline limit. Register with `wasm_hash` instead, or raise MAX_PAYLOAD_SIZE_MB on the registry and retry.",
+            path.display(),
+            metadata.len(),
+            MAX_INLINE_ARTIFACT_BYTES
+        );
+    }
+
+    let bytes =
+        fs::read(path).with_context(|| format!("Failed to read WASM file: {}", path.display()))?;
+    Ok(Some(BASE64.encode(bytes)))
 }
 
 fn trim_optional(value: Option<String>) -> Option<String> {

@@ -6,10 +6,10 @@ use crate::{
     analytics_handlers, archival, auth, auth_handlers, batch_verify_handlers, breaking_changes,
     bulk_operations_handlers, canary_handlers, category_handlers, client_observability_handlers,
     clone_federation_handlers, collaborative_reviews, compatibility_testing_handlers,
-    contract_events, contract_stats_handlers, contributor_handlers, custom_metrics_handlers,
+    contract_stats_handlers, contributor_handlers, custom_metrics_handlers,
     db_pool, dependency_handlers, dependency_vulnerability_handlers,
     deprecated_contracts_handlers, deprecation_handlers,
-    elasticsearch_handlers, error_logging, feature_flags, formal_verification_handlers,
+    elasticsearch_handlers, error_logging, formal_verification_handlers,
     formal_verification_integration, gas_estimation_handlers, governance_handlers,
     graph_analysis_handlers, handlers, integrity, interoperability_handlers,
     marketplace::{
@@ -20,11 +20,12 @@ use crate::{
     partition_manager, patch_handlers, performance_handlers, plugin_marketplace_handlers,
     publisher_verification_handlers, query_analysis, query_monitor, recommendation_handlers,
     report_handlers, resource_handlers, search_postgres, security_scan_handlers,
+    snapshot_handlers,
     signature_verification, similarity_handlers, simulation_handlers,
     state::AppState,
     state_monitor::handlers as state_monitor_handlers,
     stats, subscription_handlers, v1_contract_handlers, v1_search_handlers, v1_similar_handlers,
-    v1_trending_handlers, verification_handlers, websocket, zk_proof_handlers,
+    v1_trending_handlers, verification_handlers, zk_proof_handlers,
 };
 
 use axum::{
@@ -503,14 +504,19 @@ pub fn contract_routes() -> Router<AppState> {
             "/api/contracts/:id/deprecation-info",
             get(deprecation_handlers::get_deprecation_info),
         )
+        // Signed offline contract snapshot (Issue #1116)
+        .route(
+            "/api/contracts/:id/snapshot",
+            get(snapshot_handlers::get_contract_snapshot),
+        )
+        .route(
+            "/api/registry/signing-key",
+            get(snapshot_handlers::get_registry_signing_key),
+        )
         .route(
             "/api/contracts/:id/deprecate",
             post(deprecation_handlers::deprecate_contract)
                 .delete(deprecation_handlers::undeprecate_contract),
-        )
-        .route(
-            "/api/admin/deprecation/purge-expired",
-            post(deprecation_handlers::purge_expired_deprecated_contracts),
         )
         // AI-Powered Contract Code Assistant
         .route(
@@ -617,7 +623,15 @@ pub fn contract_routes() -> Router<AppState> {
         )
         .route(
             "/api/contracts/:id/dependents",
-            get(handlers::get_contract_dependents),
+            get(dependency_handlers::get_contract_dependents),
+        )
+        .route(
+            "/api/contracts/:id/dependency-graph",
+            get(dependency_handlers::get_dependency_graph),
+        )
+        .route(
+            "/api/contracts/:id/dependency-risk",
+            get(dependency_handlers::get_dependency_risk),
         )
         .route(
             "/api/contracts/:id/impact",
@@ -850,6 +864,10 @@ pub fn publisher_routes() -> Router<AppState> {
     Router::new()
         .route("/api/publishers", post(handlers::create_publisher))
         .route("/api/publishers/:id", get(handlers::get_publisher))
+        .route(
+            "/api/publishers/:id/summary",
+            get(handlers::get_publisher_summary),
+        )
         .route(
             "/api/publishers/:id/contracts",
             get(handlers::get_publisher_contracts),
@@ -1129,6 +1147,10 @@ pub fn performance_routes() -> Router<AppState> {
 
 pub fn admin_routes() -> Router<AppState> {
     Router::new()
+        .route(
+            "/api/admin/deprecation/purge-expired",
+            post(deprecation_handlers::purge_expired_deprecated_contracts),
+        )
         .route("/api/admin/audit-logs", get(handlers::get_all_audit_logs))
         .route(
             "/api/admin/audit-logs/export",

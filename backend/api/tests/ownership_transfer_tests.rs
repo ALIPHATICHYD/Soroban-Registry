@@ -33,7 +33,7 @@
 // Fixture note: the random_strkey helper used elsewhere in this suite produces
 // format-valid addresses with no private key behind them, so it cannot sign anything. Here
 // each actor is a real ed25519 keypair whose Stellar address is derived from its public
-// key, registered as a publisher through the public publish endpoint, and issued a real JWT
+// key, registered through the publisher endpoint, and issued a real JWT
 // through the challenge/verify flow. Payloads are built with the same functions the server
 // uses, so test and server agree byte for byte by construction rather than by copy.
 // ═══════════════════════════════════════════════════════════════════════════
@@ -211,7 +211,14 @@ fn test_tampered_payload_fails_verification() {
     let (_, attacker) = new_keypair();
     let signed_at = now_unix();
 
-    let signed = initiate_payload(contract, &address, &recipient, 1_800_000_000, "n", signed_at);
+    let signed = initiate_payload(
+        contract,
+        &address,
+        &recipient,
+        1_800_000_000,
+        "n",
+        signed_at,
+    );
     let signature = sign_b64(&signing, &signed);
 
     // The same signature, but the recipient has been swapped for the attacker.
@@ -372,9 +379,36 @@ fn unique_wasm_module() -> Vec<u8> {
     wasm
 }
 
-/// Publish a contract owned by `address`. `publish_contract` upserts `publishers`, which is
-/// how an actor comes to exist at all; returns the contract JSON.
-async fn publish_contract(client: &reqwest::Client, base: &str, address: &str) -> Value {
+/// Register the publisher identity used by the auth challenge.
+async fn register_publisher(client: &reqwest::Client, base: &str, address: &str) {
+    let res = client
+        .post(format!("{}/api/publishers", base))
+        .json(&json!({
+            "id": Uuid::nil(),
+            "stellar_address": address,
+            "username": null,
+            "email": null,
+            "github_url": null,
+            "website": null,
+            "created_at": chrono::Utc::now(),
+        }))
+        .send()
+        .await
+        .expect("publisher registration failed");
+    assert!(
+        res.status().is_success(),
+        "publisher registration failed: {}",
+        res.text().await.unwrap_or_default()
+    );
+}
+
+/// Publish a contract as an authenticated, registered publisher.
+async fn publish_contract(
+    client: &reqwest::Client,
+    base: &str,
+    address: &str,
+    token: &str,
+) -> Value {
     use sha2::{Digest, Sha256};
 
     let wasm = unique_wasm_module();
@@ -382,6 +416,7 @@ async fn publish_contract(client: &reqwest::Client, base: &str, address: &str) -
 
     let res = client
         .post(format!("{}/api/contracts", base))
+        .bearer_auth(token)
         .json(&json!({
             "contract_id": random_contract_strkey(),
             "wasm_hash": wasm_hash,
@@ -459,10 +494,11 @@ async fn mint_token(
 /// A registered, authenticated actor plus the uuid of a contract it owns.
 async fn new_actor_with_contract(client: &reqwest::Client, base: &str) -> (Actor, Uuid) {
     let (signing, address) = new_keypair();
-    let contract = publish_contract(client, base, &address).await;
+    register_publisher(client, base, &address).await;
+    let token = mint_token(client, base, &signing, &address).await;
+    let contract = publish_contract(client, base, &address, &token).await;
     let contract_id = Uuid::parse_str(contract["id"].as_str().expect("contract id"))
         .expect("contract id was not a uuid");
-    let token = mint_token(client, base, &signing, &address).await;
     (
         Actor {
             signing,
@@ -835,7 +871,10 @@ async fn test_concurrent_accepts_complete_exactly_once() {
     }
 
     assert_eq!(accepted, 1, "exactly one acceptance may succeed");
-    assert_eq!(conflicted, 9, "the other nine must be rejected as conflicts");
+    assert_eq!(
+        conflicted, 9,
+        "the other nine must be rejected as conflicts"
+    );
 
     let row = get_transfer(&sc, transfer_id).await;
     assert_eq!(row["status"], "completed");
@@ -980,9 +1019,7 @@ async fn test_stored_signatures_verify_offline() {
                 payload.as_bytes(),
                 &ed25519_dalek::Signature::from_bytes(&signature_bytes),
             )
-            .unwrap_or_else(|e| {
-                panic!("stored {} did not verify offline: {}", signature_field, e)
-            });
+            .unwrap_or_else(|e| panic!("stored {} did not verify offline: {}", signature_field, e));
     }
 
     // And the two signatures come from genuinely different accounts (invariant I1).
@@ -1175,9 +1212,17 @@ async fn test_sender_can_cancel_pending_transfer() {
     );
     let (status, cancelled) = post_confirm(&sc, transfer_id, Some(&sc.owner.token), &body).await;
 
-    assert_eq!(status, StatusCode::OK, "sender cancel failed: {}", cancelled);
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "sender cancel failed: {}",
+        cancelled
+    );
     assert_eq!(cancelled["status"], "rejected");
-    assert_eq!(cancelled["decision_signer_address"], json!(sc.owner.address));
+    assert_eq!(
+        cancelled["decision_signer_address"],
+        json!(sc.owner.address)
+    );
 }
 
 #[tokio::test]
@@ -1356,6 +1401,7 @@ async fn test_expired_transfer_is_reported_as_expired_on_read() {
         "expired",
         "reading a past-due transfer must expire it"
     );
-    assert!(log_actions(&get_logs(&sc, transfer_id).await)
-        .contains(&"transfer_expired".to_string()));
+    assert!(
+        log_actions(&get_logs(&sc, transfer_id).await).contains(&"transfer_expired".to_string())
+    );
 }

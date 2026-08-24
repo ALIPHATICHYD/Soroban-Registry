@@ -402,6 +402,7 @@ export interface Contract {
   review_count?: number;
   deployment_count?: number;
   interaction_count?: number;
+  favorites_count?: number;
   relevance_score?: number;
   // Image fields for contract logo/icon
   logo_url?: string;
@@ -414,6 +415,8 @@ export interface Contract {
   logical_id?: string;
   /** Per-network configs: { mainnet: {...}, testnet: {...} } */
   network_configs?: Record<Network, NetworkConfig>;
+  artifact_scan_status?: "pending" | "passed" | "quarantined";
+  artifact_scan_findings?: string[];
 }
 
 /** GET /contracts/:id response when ?network= is used (Issue #43) */
@@ -816,6 +819,7 @@ export interface LegacyStatsResponse extends StatsResponse {
 }
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "";
+const AUTH_TOKEN_KEY = "soroban_registry_token";
 const USE_MOCKS = process.env.NEXT_PUBLIC_USE_MOCKS === "true";
 
 const CATEGORY_SYNONYMS: Record<string, string> = {
@@ -940,11 +944,24 @@ function semanticScore(contract: Contract, queryTokens: string[], intent: Search
 
 async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
   const url = `${API_URL}${path}`;
+  const headers = new Headers(options?.headers);
+  if (!headers.has("Content-Type")) {
+    headers.set("Content-Type", "application/json");
+  }
+  if (!headers.has("Authorization") && typeof window !== "undefined") {
+    try {
+      const token = window.localStorage.getItem(AUTH_TOKEN_KEY);
+      if (token) headers.set("Authorization", `Bearer ${token}`);
+    } catch {
+      // Storage may be unavailable in hardened/private browsing contexts.
+    }
+  }
+
   let response: Response;
   try {
     response = await fetch(url, {
-      headers: { "Content-Type": "application/json", ...(options?.headers || {}) },
       ...options,
+      headers,
     });
   } catch (err) {
     throw new NetworkError(`Network request failed: ${String(err)}`);

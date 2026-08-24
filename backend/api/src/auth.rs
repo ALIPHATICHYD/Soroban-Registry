@@ -3,7 +3,7 @@ use axum::extract::FromRequestParts;
 use axum::http::request::Parts;
 use axum::{
     extract::Request,
-    http::{header, HeaderMap, StatusCode},
+    http::{header, HeaderMap},
     middleware::Next,
     response::Response,
 };
@@ -19,54 +19,38 @@ use stellar_strkey::{ed25519::PublicKey as StellarPublicKey, Strkey};
 
 pub const MIN_JWT_SECRET_LEN: usize = 32;
 
-/// Authenticated user extracted from a valid Bearer JWT.
-/// The `sub` claim is expected to be the publisher's Stellar address,
-/// and `publisher_id` is derived by looking up the publisher in the DB.
-/// For simplicity (matching the existing subscription_handlers pattern),
-/// we store the sub as a string and expose a UUID parsed from it when possible,
-/// falling back to a nil UUID so callers can handle the error themselves.
+/// Authenticated publisher extracted from the canonical Bearer JWT path.
 #[derive(Debug, Clone)]
 pub struct AuthenticatedUser {
-    /// The `sub` claim from the JWT (Stellar address / publisher identifier)
+    /// The Stellar address proven during wallet authentication.
     pub stellar_address: String,
-    /// Publisher UUID — parsed from sub if it is a UUID, otherwise nil
+    /// Publisher UUID carried in the server-signed token.
     pub publisher_id: uuid::Uuid,
-    /// Database user id (publisher primary key)
+    /// Backward-compatible alias for the publisher primary key.
     pub id: uuid::Uuid,
-    /// Full claims for callers that need them
+    /// Full claims for callers that need them.
     pub claims: AuthClaims,
 }
 
 #[axum::async_trait]
-impl<S> axum::extract::FromRequestParts<S> for AuthenticatedUser
-where
-    S: Send + Sync,
-{
-    type Rejection = StatusCode;
+impl axum::extract::FromRequestParts<AppState> for AuthenticatedUser {
+    type Rejection = ApiError;
 
     async fn from_request_parts(
         parts: &mut axum::http::request::Parts,
-        _state: &S,
+        state: &AppState,
     ) -> Result<Self, Self::Rejection> {
-        let auth_header = parts
-            .headers
-            .get(header::AUTHORIZATION)
-            .and_then(|v| v.to_str().ok())
-            .and_then(|v| v.strip_prefix("Bearer "))
-            .ok_or(StatusCode::UNAUTHORIZED)?;
-
-        let auth_manager =
-            AuthManager::from_env().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-        let claims = auth_manager
-            .validate_jwt(auth_header)
-            .map_err(|_| StatusCode::UNAUTHORIZED)?;
-
-        let publisher_id = uuid::Uuid::parse_str(&claims.sub).unwrap_or(uuid::Uuid::nil());
+        let claims = AuthClaims::from_request_parts(parts, state).await?;
+        if claims.publisher_id.is_nil() {
+            return Err(ApiError::forbidden(
+                "The authenticated account is not a registered publisher",
+            ));
+        }
 
         Ok(AuthenticatedUser {
             stellar_address: claims.sub.clone(),
-            publisher_id,
-            id: publisher_id,
+            publisher_id: claims.publisher_id,
+            id: claims.publisher_id,
             claims,
         })
     }
@@ -379,6 +363,34 @@ impl AuthManager {
             .map(|data| data.claims)
             .map_err(|_| "invalid_token")
     }
+
+    /// Validate a JWT and, when it references a server-side session, ensure the
+    /// session is still active and describes the same authenticated identity.
+    ///
+    /// Sessionless JWTs remain valid for backward compatibility (including
+    /// externally-issued admin tokens). New wallet logins use session-backed
+    /// token pairs and therefore receive revocation checks here.
+    pub fn validate_access_token(&self, token: &str) -> Result<AuthClaims, &'static str> {
+        let claims = self.validate_jwt(token)?;
+        let Some(session_id) = claims.session_id else {
+            return Ok(claims);
+        };
+
+        let session = self.sessions.get(&session_id).ok_or("session_not_found")?;
+        if Utc::now().timestamp() > session.expires_at {
+            return Err("session_expired");
+        }
+        if session.subject != claims.sub
+            || session.publisher_id != claims.publisher_id
+            || session.role != claims.role
+            || session.scopes != claims.scopes
+            || session.mfa_verified != claims.mfa_verified
+        {
+            return Err("session_identity_mismatch");
+        }
+
+        Ok(claims)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -459,7 +471,7 @@ pub fn authenticate_headers(
         .read()
         .map_err(|_| ApiError::internal("Authentication state unavailable"))?;
     let claims = mgr
-        .validate_jwt(token)
+        .validate_access_token(token)
         .map_err(|_| ApiError::unauthorized("Invalid or expired token"))?;
 
     let role = claims.role.clone().unwrap_or_else(|| {
@@ -473,7 +485,7 @@ pub fn authenticate_headers(
     audit_auth_attempt(&claims.sub, true, "token accepted");
     Ok(AuthContext {
         subject: claims.sub,
-        publisher_id: Some(claims.publisher_id),
+        publisher_id: (!claims.publisher_id.is_nil()).then_some(claims.publisher_id),
         role,
         permissions: claims.scopes,
         method,
@@ -590,7 +602,7 @@ fn hash_refresh_token(token: &str) -> String {
 impl FromRequestParts<AppState> for AuthClaims {
     type Rejection = ApiError;
 
-    async fn from_request_parts(parts: &mut Parts, _state: &AppState) -> Result<Self, ApiError> {
+    async fn from_request_parts(parts: &mut Parts, state: &AppState) -> Result<Self, ApiError> {
         let auth_header = parts
             .headers
             .get(header::AUTHORIZATION)
@@ -604,11 +616,12 @@ impl FromRequestParts<AppState> for AuthClaims {
         }
 
         let token = &auth_header[7..];
-        let auth_manager = AuthManager::from_env()
-            .map_err(|_| ApiError::internal("Authentication configuration error"))?;
-
+        let auth_manager = state
+            .auth_mgr
+            .read()
+            .map_err(|_| ApiError::internal("Authentication state unavailable"))?;
         let claims = auth_manager
-            .validate_jwt(token)
+            .validate_access_token(token)
             .map_err(|_| ApiError::unauthorized("Invalid or expired token"))?;
 
         Ok(claims)
@@ -624,10 +637,6 @@ fn extract_bearer_token(req: &Request) -> Option<&str> {
         .filter(|token| !token.is_empty())
 }
 
-fn is_admin(claims: &AuthClaims) -> bool {
-    claims.admin || matches!(claims.role.as_deref(), Some("admin" | "ADMIN" | "Admin"))
-}
-
 pub async fn require_admin(req: Request, next: Next) -> Result<Response, ApiError> {
     let Some(token) = extract_bearer_token(&req) else {
         return Err(ApiError::unauthorized(
@@ -635,17 +644,16 @@ pub async fn require_admin(req: Request, next: Next) -> Result<Response, ApiErro
         ));
     };
 
+    // Router-level middleware is constructed before AppState is available to
+    // `from_fn`, so admin tokens use the same validated JWT configuration
+    // without attempting a server-side session lookup. Publisher-sensitive
+    // handlers use `PolicyActor` and the live AppState-backed session path.
     let auth = AuthManager::from_env()
         .map_err(|_| ApiError::internal("Authentication configuration error"))?;
     let claims = auth
         .validate_jwt(token)
         .map_err(|_| ApiError::unauthorized("Invalid or expired authentication token"))?;
-
-    if !is_admin(&claims) {
-        return Err(ApiError::forbidden(
-            "Administrative privileges are required for this endpoint",
-        ));
-    }
+    crate::policy::require_admin_claims(&claims)?;
 
     Ok(next.run(req).await)
 }
@@ -767,5 +775,75 @@ mod tests {
 
         let valid = "a".repeat(MIN_JWT_SECRET_LEN);
         assert!(AuthManager::validate_jwt_secret(&valid).is_ok());
+    }
+
+    #[test]
+    fn access_tokens_are_bound_to_their_live_session_identity() {
+        let mut auth = AuthManager::new("test-secret".to_string());
+        let session_id = uuid::Uuid::new_v4();
+        let publisher_id = uuid::Uuid::new_v4();
+        let address = "GSESSION";
+        auth.sessions.insert(
+            session_id,
+            SessionRecord {
+                subject: address.to_string(),
+                publisher_id,
+                role: None,
+                scopes: vec!["write".to_string()],
+                mfa_verified: false,
+                expires_at: Utc::now().timestamp() + 3_600,
+            },
+        );
+
+        let token = auth
+            .issue_access_token_for_session(
+                session_id,
+                address,
+                publisher_id,
+                vec!["write".to_string()],
+                None,
+                false,
+                3_600,
+            )
+            .expect("session token");
+        assert!(auth.validate_access_token(&token).is_ok());
+
+        auth.sessions.get_mut(&session_id).unwrap().expires_at = Utc::now().timestamp() - 1;
+        assert!(matches!(
+            auth.validate_access_token(&token),
+            Err("session_expired")
+        ));
+
+        auth.sessions.get_mut(&session_id).unwrap().expires_at = Utc::now().timestamp() + 3_600;
+        auth.sessions.get_mut(&session_id).unwrap().publisher_id = uuid::Uuid::new_v4();
+        assert!(matches!(
+            auth.validate_access_token(&token),
+            Err("session_identity_mismatch")
+        ));
+
+        auth.revoke_session(session_id);
+        assert!(matches!(
+            auth.validate_access_token(&token),
+            Err("session_not_found")
+        ));
+    }
+
+    #[test]
+    fn sessionless_tokens_remain_backward_compatible() {
+        let auth = AuthManager::new("test-secret".to_string());
+        let claims = AuthClaims {
+            sub: "GLEGACY".to_string(),
+            publisher_id: uuid::Uuid::nil(),
+            iat: Utc::now().timestamp(),
+            exp: Utc::now().timestamp() + 3_600,
+            scopes: vec![],
+            role: Some("admin".to_string()),
+            admin: true,
+            mfa_verified: false,
+            session_id: None,
+        };
+        let token = encode(&Header::default(), &claims, &auth.encoding_key).expect("legacy token");
+
+        assert!(auth.validate_access_token(&token).is_ok());
     }
 }

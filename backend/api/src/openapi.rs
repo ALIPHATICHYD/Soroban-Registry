@@ -2,6 +2,7 @@ use crate::analytics_handlers;
 use crate::breaking_changes;
 use crate::contract_stats_handlers;
 use crate::custom_metrics_handlers;
+use crate::dependency_handlers;
 use crate::deprecation_handlers;
 use crate::handlers;
 use crate::handlers::{ContractChangelogEntry, ContractChangelogResponse};
@@ -31,14 +32,17 @@ use utoipa::OpenApi;
         handlers::publish_contract,
         handlers::create_publisher,
         handlers::get_publisher,
+        handlers::get_publisher_summary,
         handlers::get_publisher_contracts,
         handlers::get_contract_abi,
         handlers::get_contract_openapi_yaml,
         handlers::get_contract_openapi_json,
         analytics_handlers::get_contract_analytics,
         analytics_handlers::get_analytics_summary,
-        handlers::get_contract_dependencies,
-        handlers::get_contract_dependents,
+        dependency_handlers::get_contract_dependencies,
+        dependency_handlers::get_contract_dependents,
+        dependency_handlers::get_dependency_graph,
+        dependency_handlers::get_dependency_risk,
         handlers::get_contract_graph,
         handlers::get_impact_analysis,
         contract_stats_handlers::get_contract_stats,
@@ -93,6 +97,11 @@ use utoipa::OpenApi;
             VerificationStatus,
             MaturityLevel,
             Publisher,
+            handlers::PublisherProfileSummaryResponse,
+            handlers::PublisherNetworkBreakdown,
+            handlers::PublisherCategoryBreakdown,
+            handlers::PublisherVerificationStatusBreakdown,
+            handlers::PublisherContractsResponse,
             ContractStats,
             GraphNode,
             GraphEdge,
