@@ -236,10 +236,10 @@ pub async fn get_reviews(
 
     // Build ORDER BY clause based on sort_by parameter
     let order_clause = match query.sort_by {
-        ReviewSortBy::MostHelpful => "ORDER BY r.helpful_count DESC, r.created_at DESC",
-        ReviewSortBy::MostRecent => "ORDER BY r.created_at DESC",
-        ReviewSortBy::HighestRated => "ORDER BY r.rating DESC, r.created_at DESC",
-        ReviewSortBy::LowestRated => "ORDER BY r.rating ASC, r.created_at DESC",
+        ReviewSortBy::MostHelpful => "ORDER BY r.helpful_count DESC, r.created_at DESC, r.id ASC",
+        ReviewSortBy::MostRecent => "ORDER BY r.created_at DESC, r.id ASC",
+        ReviewSortBy::HighestRated => "ORDER BY r.rating DESC, r.created_at DESC, r.id ASC",
+        ReviewSortBy::LowestRated => "ORDER BY r.rating ASC, r.created_at DESC, r.id ASC",
     };
 
     // Fetch only approved reviews (moderation workflow)
