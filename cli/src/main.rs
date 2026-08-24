@@ -1210,17 +1210,6 @@ pub enum SnapshotCommands {
     },
 }
 
-/// Sub-commands for the `publisher` group (#1124).
-#[derive(Debug, Subcommand)]
-pub enum PublisherCommands {
-    /// Diagnose local publisher setup (config, session, signing key, API reachability)
-    Doctor {
-        /// Output the diagnostic report as machine-readable JSON
-        #[arg(long)]
-        json: bool,
-    },
-}
-
 /// Sub-commands for the `network` group
 #[derive(Debug, Subcommand)]
 pub enum NetworkCommands {
@@ -2449,6 +2438,12 @@ pub enum ContractCommands {
         /// Print the registry response as JSON
         #[arg(long)]
         json: bool,
+    },
+
+    /// List and inspect contract categories
+    Category {
+        #[command(subcommand)]
+        action: CategoryCommands,
     },
 
     /// Update contract metadata after registration (#828)
