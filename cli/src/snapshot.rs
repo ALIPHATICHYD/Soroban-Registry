@@ -85,7 +85,7 @@ pub async fn export(api_url: &str, output: &str) -> Result<()> {
     let json = serde_json::to_string_pretty(&snapshot)?;
     fs::write(output, json)?;
 
-    println!("{} Snapshot exported to {}", "✓".green(), output);
+    println!("{} Snapshot exported to {}", "[OK]".green(), output);
     Ok(())
 }
 
@@ -123,7 +123,7 @@ pub async fn sign(snapshot_file: &str, key_path: &str) -> Result<()> {
     let json = serde_json::to_string_pretty(&snapshot)?;
     fs::write(snapshot_file, json)?;
 
-    println!("{} Snapshot signed successfully", "✓".green());
+    println!("{} Snapshot signed successfully", "[OK]".green());
     Ok(())
 }
 
@@ -157,10 +157,10 @@ pub async fn verify(snapshot_file: &str, trust_key_path: &str) -> Result<()> {
     let hash = canonical_hash(&snapshot.payload)?;
     
     if verifying_key.verify(&hash, &sig).is_ok() {
-        println!("{} Signature is VALID", "✓".green());
+        println!("{} Signature is VALID", "[OK]".green());
         Ok(())
     } else {
-        println!("{} Signature is INVALID", "✗".red());
+        println!("{} Signature is INVALID", "[ERR]".red());
         bail!("Signature verification failed");
     }
 }
