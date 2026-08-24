@@ -5611,13 +5611,40 @@ pub async fn dispatch_command(
     Ok(())
 }
 
+/// Runs `f` on a thread with a large stack and propagates its panics unchanged.
+///
+/// Clap's tree walkers -- `try_parse_from`, `Command::debug_assert`, and the
+/// `clap_complete` generators -- recurse over the entire command tree. This CLI has 60+
+/// top-level commands nested several levels deep, which in a debug build overflows the
+/// 2 MiB stack libtest allocates per test thread. Only tests need this: the shipped
+/// binary walks the same tree on the main thread, whose default stack is 8 MiB.
+///
+/// Panics are re-raised with `resume_unwind` so assertion failures keep their original
+/// message and location instead of surfacing as a generic join error.
+#[cfg(test)]
+pub(crate) fn with_large_stack<T, F>(f: F) -> T
+where
+    F: FnOnce() -> T + Send + 'static,
+    T: Send + 'static,
+{
+    const STACK_SIZE: usize = 16 * 1024 * 1024;
+
+    std::thread::Builder::new()
+        .stack_size(STACK_SIZE)
+        .spawn(f)
+        .expect("spawn large-stack test thread")
+        .join()
+        .unwrap_or_else(|payload| std::panic::resume_unwind(payload))
+}
+
 #[cfg(test)]
 mod verbose_flag_tests {
     use super::*;
     use clap::Parser;
 
     fn parse(args: &[&str]) -> Cli {
-        Cli::try_parse_from(args).expect("CLI should parse")
+        let args: Vec<String> = args.iter().map(|a| a.to_string()).collect();
+        with_large_stack(move || Cli::try_parse_from(args).expect("CLI should parse"))
     }
 
     #[test]
@@ -5658,8 +5685,10 @@ mod verbose_flag_tests {
 
     #[test]
     fn env_export_rejects_invalid_format() {
-        let err = Cli::try_parse_from(["soroban-registry", "env", "export", "--format", "invalid"])
-            .expect_err("CLI should reject invalid export format");
+        let err = with_large_stack(|| {
+            Cli::try_parse_from(["soroban-registry", "env", "export", "--format", "invalid"])
+                .expect_err("CLI should reject invalid export format")
+        });
 
         assert!(
             err.to_string().contains("possible values"),
