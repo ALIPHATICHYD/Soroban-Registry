@@ -80,7 +80,7 @@ pub async fn sign_package(
 
     let result: serde_json::Value = response.json().await?;
 
-    println!("{}", "\n✓ Package signed successfully!".green().bold());
+    println!("{}", "\n[OK] Package signed successfully!".green().bold());
     println!(
         "  {}: {}",
         "Signature ID".bold(),
@@ -93,7 +93,7 @@ pub async fn sign_package(
     );
     println!(
         "\n  {} Verify with: soroban-registry verify {} --contract-id {}\n",
-        "→".bright_black(),
+        "->".bright_black(),
         package_path,
         contract_id
     );
@@ -170,7 +170,7 @@ async fn verify_with_signature(
     let signing_address = result["signing_address"].as_str().unwrap_or("?");
 
     if valid {
-        println!("{}", "\n✓ Signature is VALID".green().bold());
+        println!("{}", "\n[OK] Signature is VALID".green().bold());
         println!(
             "  {}: {}",
             "Signing Address".bold(),
@@ -181,7 +181,7 @@ async fn verify_with_signature(
             println!("  {}: {}", "Signed At".bold(), signed_at);
         }
     } else {
-        println!("{}", "\n✗ Signature is INVALID".red().bold());
+        println!("{}", "\n[ERR] Signature is INVALID".red().bold());
         println!("  {}: {}", "Status".bold(), signature_status.red());
     }
 
@@ -224,7 +224,7 @@ async fn verify_from_registry(
     if signatures.is_empty() {
         println!(
             "{}",
-            "\n✗ No signatures found for this package".yellow().bold()
+            "\n[ERR] No signatures found for this package".yellow().bold()
         );
         return Ok(());
     }
@@ -240,13 +240,13 @@ async fn verify_from_registry(
             let signing_address = sig["signing_address"].as_str().unwrap_or("?");
 
             if status == "valid" {
-                println!("{}", "\n✓ Found VALID signature".green().bold());
+                println!("{}", "\n[OK] Found VALID signature".green().bold());
             } else if status == "revoked" {
-                println!("{}", "\n✗ Signature has been REVOKED".red().bold());
+                println!("{}", "\n[ERR] Signature has been REVOKED".red().bold());
             } else {
                 println!(
                     "{}",
-                    format!("\n⚠ Signature status: {}", status).yellow().bold()
+                    format!("\n[WARN] Signature status: {}", status).yellow().bold()
                 );
             }
 
@@ -276,7 +276,7 @@ async fn verify_from_registry(
     if !found_valid {
         println!(
             "{}",
-            "\n✗ No matching signature found for this package hash"
+            "\n[ERR] No matching signature found for this package hash"
                 .yellow()
                 .bold()
         );
@@ -314,7 +314,7 @@ pub async fn revoke_signature(
         bail!("Failed to revoke signature: {}", err);
     }
 
-    println!("{}", "✓ Signature revoked successfully!".green().bold());
+    println!("{}", "[OK] Signature revoked successfully!".green().bold());
     println!(
         "  {}: {}",
         "Signature ID".bold(),
@@ -373,7 +373,7 @@ pub async fn get_chain_of_custody(api_url: &str, contract_id: &str) -> Result<()
 
         println!(
             "  {} [{}] {} by {}",
-            "•".bright_black(),
+            "-".bright_black(),
             timestamp,
             action_colored.bold(),
             actor.bright_magenta()
@@ -441,7 +441,7 @@ pub async fn get_transparency_log(
 
         println!(
             "  {} [{}] {} by {}",
-            "•".bright_black(),
+            "-".bright_black(),
             timestamp,
             type_colored.bold(),
             actor.bright_magenta()
@@ -475,7 +475,7 @@ pub fn generate_keypair() -> Result<()> {
     let public_b64 = BASE64.encode(public_bytes);
     let stellar_address = derive_stellar_address(&public_bytes);
 
-    println!("{}", "\n✓ Keypair generated successfully!".green().bold());
+    println!("{}", "\n[OK] Keypair generated successfully!".green().bold());
     println!();
     println!("  {} (keep this secret!):", "Private Key".bold().red());
     println!("  {}", secret_b64.bright_red());
@@ -488,7 +488,7 @@ pub fn generate_keypair() -> Result<()> {
     println!();
     println!(
         "  {} Use the private key to sign packages:",
-        "→".bright_black()
+        "->".bright_black()
     );
     println!(
         "  soroban-registry sign package.tar.gz --private-key {} --contract-id <ID> --version <VERSION>\n",
@@ -601,14 +601,14 @@ pub fn verify_contract_local(
     let elapsed = start.elapsed();
 
     if ok {
-        println!("{}", "\n✓ Signature is VALID".green().bold());
+        println!("{}", "\n[OK] Signature is VALID".green().bold());
         println!(
             "  {}: {:.3} ms",
             "Verification time".bold(),
             elapsed.as_secs_f64() * 1000.0
         );
     } else {
-        println!("{}", "\n✗ Signature is INVALID".red().bold());
+        println!("{}", "\n[ERR] Signature is INVALID".red().bold());
         anyhow::bail!("Ed25519 verification failed for this contract binary");
     }
 
