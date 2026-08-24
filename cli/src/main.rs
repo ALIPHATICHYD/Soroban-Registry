@@ -642,10 +642,6 @@ pub enum Commands {
         #[arg(long, default_value = "true")]
         coverage: bool,
 
-        /// Verbose output
-        #[arg(long, short)]
-        verbose: bool,
-
         /// Require coverage data and fail if unavailable
         #[arg(long)]
         require_coverage: bool,
@@ -4096,7 +4092,6 @@ pub async fn dispatch_command(
             test_command,
             junit,
             coverage,
-            verbose,
             require_coverage,
             coverage_threshold,
             setup_hook,
@@ -4112,7 +4107,9 @@ pub async fn dispatch_command(
                 test_command: test_command.as_deref(),
                 junit_output: junit.as_deref(),
                 show_coverage: coverage,
-                verbose,
+                // Verbosity comes from the global -v/--verbose flag; a local `--verbose`
+                // here collided with it and made every `test` invocation panic.
+                verbose: cli.verbose > 0,
                 require_coverage,
                 coverage_threshold,
                 setup_hook: setup_hook.as_deref(),
