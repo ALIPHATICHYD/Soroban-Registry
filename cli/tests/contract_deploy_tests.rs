@@ -1,5 +1,7 @@
+use anyhow::Result;
 #[cfg(test)]
 mod tests {
+    use super::*;
 
     #[test]
     fn test_wasm_validation_magic_bytes() {
