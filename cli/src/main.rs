@@ -74,6 +74,7 @@ mod wizard;
 mod diagnostic;
 mod output_format;
 mod search;
+mod snapshot;
 
 use anyhow::Result;
 use clap::{ArgAction, Parser, Subcommand, ValueEnum};
@@ -1147,6 +1148,49 @@ pub enum Commands {
     /// External command (may be provided by an installed plugin)
     #[command(external_subcommand)]
     External(Vec<String>),
+
+    /// Manage signed offline registry snapshots (#1146)
+    Snapshot {
+        #[command(subcommand)]
+        action: SnapshotCommands,
+    },
+}
+
+/// Sub-commands for the `snapshot` group
+#[derive(Debug, Subcommand)]
+pub enum SnapshotCommands {
+    /// Export a signed offline registry snapshot
+    Export {
+        /// Output file path
+        #[arg(long, short = 'o')]
+        output: String,
+    },
+
+    /// Sign a registry snapshot
+    Sign {
+        /// Path to the snapshot JSON file
+        snapshot_file: String,
+
+        /// Path to the signing key (Ed25519 PEM or base64)
+        #[arg(long)]
+        key: String,
+    },
+
+    /// Verify a signed registry snapshot locally
+    Verify {
+        /// Path to the snapshot JSON file
+        snapshot_file: String,
+
+        /// Path to the trusted public key
+        #[arg(long)]
+        trust_key: String,
+    },
+
+    /// Inspect a registry snapshot metadata
+    Inspect {
+        /// Path to the snapshot JSON file
+        snapshot_file: String,
+    },
 }
 
 /// Sub-commands for the `network` group
@@ -4903,6 +4947,24 @@ pub async fn dispatch_command(
             PublisherCommands::Doctor { json } => {
                 log::debug!("Command: publisher doctor | json={}", json);
                 publisher::doctor(&cli.api_url, json).await?;
+            }
+        },
+        Commands::Snapshot { action } => match action {
+            SnapshotCommands::Export { output } => {
+                log::debug!("Command: snapshot export | output={}", output);
+                snapshot::export(&cli.api_url, &output).await?;
+            }
+            SnapshotCommands::Sign { snapshot_file, key } => {
+                log::debug!("Command: snapshot sign | file={} key={}", snapshot_file, key);
+                snapshot::sign(&snapshot_file, &key).await?;
+            }
+            SnapshotCommands::Verify { snapshot_file, trust_key } => {
+                log::debug!("Command: snapshot verify | file={} trust_key={}", snapshot_file, trust_key);
+                snapshot::verify(&snapshot_file, &trust_key).await?;
+            }
+            SnapshotCommands::Inspect { snapshot_file } => {
+                log::debug!("Command: snapshot inspect | file={}", snapshot_file);
+                snapshot::inspect(&snapshot_file).await?;
             }
         },
     }

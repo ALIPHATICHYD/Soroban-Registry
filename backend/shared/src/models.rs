@@ -5194,6 +5194,32 @@ pub struct OwnershipTransferLog {
     pub created_at: DateTime<Utc>,
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// SNAPSHOT TYPES
+// ═══════════════════════════════════════════════════════════════════════════
+
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct SnapshotPayload {
+    pub version: String,
+    pub registry_identity: String,
+    pub network: String,
+    pub timestamp: DateTime<Utc>,
+    pub contracts: Vec<Contract>,
+    pub versions: Vec<ContractVersion>,
+    pub artifact_hashes: Vec<String>,
+    pub interface_fingerprints: Vec<String>,
+    pub provenance_metadata: serde_json::Value,
+    pub deprecation_state: serde_json::Value,
+    pub vulnerability_state: serde_json::Value,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct SignedSnapshot {
+    pub payload: SnapshotPayload,
+    pub signature: Option<String>,
+    pub public_key: Option<String>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

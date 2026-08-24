@@ -518,7 +518,7 @@ fn compute_hash(data: &[u8]) -> String {
     format!("{:x}", hasher.finalize())
 }
 
-fn decode_private_key(key: &str) -> Result<SigningKey> {
+pub fn decode_private_key(key: &str) -> Result<SigningKey> {
     let bytes = BASE64
         .decode(key)
         .context("Invalid private key format (expected base64)")?;
