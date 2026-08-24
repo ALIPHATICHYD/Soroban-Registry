@@ -52,14 +52,21 @@ The source verifier applies these checks in order:
 
 1. Normalize and validate the recorded 64-character deployed hash.
 2. SHA-256 the fetched deployed bytes and require an exact match with that
-   recorded hash. Failure stops verification; canonical comparison is refused.
-3. Compile the submitted source and compare its raw SHA-256 with the deployed
-   raw SHA-256. An exact match succeeds as `exact`.
-4. If raw hashes differ, canonicalize both complete artifacts with the same V1
-   algorithm and compare their canonical hashes. Equality succeeds as
-   `canonical_metadata_only` and reports the algorithm and canonical hash.
-5. Invalid WASM, executable drift, Soroban metadata drift, or any other change
-   fails closed as a source mismatch.
+   recorded hash. Failure stops verification as `artifact_hash_mismatch`;
+   canonical comparison is refused.
+3. Validate the authoritative deployed artifact as canonicalizable WASM and
+   prepare its V1 hash. Invalid bytes stop verification as
+   `invalid_wasm_artifact` for the `deployed` artifact.
+4. Compile the submitted source and compare its raw SHA-256 with the deployed
+   raw SHA-256. An exact match succeeds as `exact`; no canonical equality
+   comparison is used for this path.
+5. Only if the raw hashes differ, canonicalize the compiled artifact with the
+   same V1 algorithm and compare it with the prepared deployed canonical hash.
+   Invalid compiled bytes fail as `invalid_wasm_artifact` for the `compiled`
+   artifact. Equality succeeds as `canonical_metadata_only` and reports the
+   algorithm and canonical hash.
+6. Valid WASM with executable drift, Soroban metadata drift, or any other
+   trust-boundary change fails closed as `source_mismatch`.
 
 The original raw hashes are retained in every successful result. A canonical
 hash is never compared with a raw on-chain hash.
