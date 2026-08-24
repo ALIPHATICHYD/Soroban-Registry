@@ -323,6 +323,7 @@ services:
 volumes:
   postgres_primary_data:
   postgres_replica_data:
+  redis_data:
   cargo_cache:
   prometheus_data:
   alertmanager_data:
