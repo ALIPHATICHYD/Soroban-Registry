@@ -166,6 +166,25 @@ fn normalize_network_filters(values: &[String]) -> Result<Vec<String>> {
     Ok(normalized)
 }
 
+/// Parse a comma-separated `--networks` value into the registry's network type.
+///
+/// Shared with `contract list` so every command validates network filters
+/// identically: unknown names fail here, locally, instead of being dropped
+/// server-side and silently returning unfiltered results.
+pub(crate) fn normalize_network_list(value: Option<&str>) -> Result<Vec<registry_client::Network>> {
+    let values: Vec<String> = value.into_iter().map(str::to_string).collect();
+    let normalized = normalize_network_filters(&values)?;
+    if normalized.is_empty() {
+        return Ok(Vec::new());
+    }
+    shared_networks(&normalized)
+}
+
+/// Split a comma-separated filter into trimmed, de-duplicated values.
+pub(crate) fn normalize_list_values(value: Option<&str>) -> Vec<String> {
+    normalize_filter_values(&value.into_iter().map(str::to_string).collect::<Vec<_>>())
+}
+
 #[allow(clippy::too_many_arguments)]
 pub async fn search(
     api_url: &str,

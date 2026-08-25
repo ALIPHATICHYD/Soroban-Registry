@@ -34,6 +34,7 @@ mod contract_deprecate;
 mod contract_highlight;
 mod contract_interaction;
 mod contract_interfaces;
+mod contract_list;
 mod contract_provenance;
 mod contract_register;
 mod contract_risk;
@@ -1905,6 +1906,41 @@ pub enum CategoryCommands {
 /// Sub-commands for the `contract` group (#522)
 #[derive(Debug, Subcommand)]
 pub enum ContractCommands {
+    /// List registered contracts, a page at a time
+    ///
+    /// Shows address, name, network, category and last update. JSON and CSV
+    /// carry no decoration, so they pipe cleanly into other tools.
+    ///
+    /// Examples:
+    ///   soroban-registry contract list
+    ///   soroban-registry contract list --limit 50 --offset 100
+    ///   soroban-registry contract list --networks testnet --category DeFi
+    ///   soroban-registry contract list --format json | jq '.contracts[].address'
+    ///   soroban-registry contract list --format csv > contracts.csv
+    #[command(verbatim_doc_comment)]
+    List {
+        /// Contracts per page (1-100)
+        #[arg(long, short, default_value_t = contract_list::DEFAULT_LIMIT)]
+        limit: usize,
+
+        /// Contracts to skip; use it with --limit to page through the registry
+        #[arg(long, short, default_value_t = 0)]
+        offset: usize,
+
+        /// Filter by network (comma-separated: mainnet,testnet,futurenet).
+        /// Named `networks` because the global `--network` owns that arg id.
+        #[arg(long)]
+        networks: Option<String>,
+
+        /// Filter by category (comma-separated: DeFi,NFT)
+        #[arg(long, short)]
+        category: Option<String>,
+
+        /// Output format: table, json or csv
+        #[arg(long, short, default_value = "table")]
+        format: String,
+    },
+
     /// Search the registry, one page at a time or across every page
     ///
     /// Pagination is handled for you: `--all` walks pages until the result set
@@ -4602,6 +4638,33 @@ pub async fn dispatch_command(
         },
         // ── Contract verify command (#522) ───────────────────────────────────
         Commands::Contract { action } => match action {
+            ContractCommands::List {
+                limit,
+                offset,
+                networks,
+                category,
+                format,
+            } => {
+                log::debug!(
+                    "Command: contract list | limit={} offset={} networks={:?} category={:?} format={}",
+                    limit,
+                    offset,
+                    networks,
+                    category,
+                    format
+                );
+                contract_list::run(
+                    &cli.api_url,
+                    contract_list::ListOptions {
+                        limit,
+                        offset,
+                        networks,
+                        category,
+                        format,
+                    },
+                )
+                .await?;
+            }
             ContractCommands::Search {
                 query,
                 networks,
