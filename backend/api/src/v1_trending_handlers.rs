@@ -202,12 +202,12 @@ async fn fetch_trending_contracts(
             t.category,
             t.{col}                   AS interactions,
             t.is_verified,
-            ROW_NUMBER() OVER (ORDER BY t.{col} DESC) AS rank
+            ROW_NUMBER() OVER (ORDER BY t.{col} DESC, t.contract_id ASC) AS rank
         FROM trending_contracts_mv t
         INNER JOIN contracts c ON c.contract_id = t.contract_id
         WHERE c.is_deprecated = FALSE
           AND COALESCE(c.status, '') <> 'dead'
-        ORDER BY interactions DESC
+        ORDER BY interactions DESC, t.contract_id ASC
         LIMIT 50
         "#,
         col = col,
@@ -274,7 +274,7 @@ async fn fetch_trending_categories(
           AND c.is_deprecated = FALSE
           AND COALESCE(c.status, '') <> 'dead'
         GROUP BY c.category
-        ORDER BY total_interactions DESC
+        ORDER BY total_interactions DESC, c.category ASC
         LIMIT 20
         "#,
         interval = interval,
@@ -334,7 +334,7 @@ async fn fetch_network_heatmap(
         WHERE c.is_deprecated = FALSE
           AND COALESCE(c.status, '') <> 'dead'
         GROUP BY c.network
-        ORDER BY total_interactions DESC
+        ORDER BY total_interactions DESC, c.network ASC
         "#,
         interval = interval,
     ))
