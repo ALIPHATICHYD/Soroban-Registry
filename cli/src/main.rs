@@ -26,12 +26,12 @@ mod compare;
 mod completion;
 mod config;
 mod contract_audit;
+mod contract_compatibility;
 mod contract_dependency;
 mod contract_dependency_graph;
 mod contract_deploy;
 mod contract_deprecate;
 mod contract_highlight;
-mod contract_compatibility;
 mod contract_interaction;
 mod contract_interfaces;
 mod contract_provenance;
@@ -84,8 +84,8 @@ mod wizard;
 mod diagnostic;
 mod output_format;
 mod search;
-mod snapshot;
 mod search_pagination;
+mod snapshot;
 
 use anyhow::Result;
 use clap::{ArgAction, Parser, Subcommand, ValueEnum};
@@ -642,10 +642,6 @@ pub enum Commands {
         #[arg(long, default_value = "true")]
         coverage: bool,
 
-        /// Verbose output
-        #[arg(long, short)]
-        verbose: bool,
-
         /// Require coverage data and fail if unavailable
         #[arg(long)]
         require_coverage: bool,
@@ -703,6 +699,7 @@ pub enum Commands {
         action: SlaCommands,
     },
 
+    /// Read and edit persisted user configuration values
     Config {
         #[command(subcommand)]
         action: ConfigSubcommands,
@@ -744,11 +741,15 @@ pub enum Commands {
         post: bool,
     },
 
+    /// Scan a contract's dependencies for known vulnerabilities
     ScanDeps {
+        /// Contract address or registry UUID to scan
         #[arg(long)]
         contract_id: String,
+        /// Comma-separated dependency list to scan
         #[arg(long, default_value = ",")]
         dependencies: String,
+        /// Exit non-zero when a high-severity finding is reported
         #[arg(long, default_value_t = false)]
         fail_on_high: bool,
     },
@@ -1207,17 +1208,6 @@ pub enum SnapshotCommands {
     Inspect {
         /// Path to the snapshot JSON file
         snapshot_file: String,
-    },
-}
-
-/// Sub-commands for the `publisher` group (#1124).
-#[derive(Debug, Subcommand)]
-pub enum PublisherCommands {
-    /// Diagnose local publisher setup (config, session, signing key, API reachability)
-    Doctor {
-        /// Output the diagnostic report as machine-readable JSON
-        #[arg(long)]
-        json: bool,
     },
 }
 
@@ -2451,6 +2441,12 @@ pub enum ContractCommands {
         json: bool,
     },
 
+    /// List and inspect contract categories
+    Category {
+        #[command(subcommand)]
+        action: CategoryCommands,
+    },
+
     /// Update contract metadata after registration (#828)
     ///
     /// Usage: soroban-registry contract update <ADDRESS> [--name ...] [--dry-run]
@@ -2634,6 +2630,98 @@ pub enum ContractCommands {
         /// Output results as machine-readable JSON
         #[arg(long)]
         json: bool,
+    },
+
+    /// Manage contract event notifications and alerts (#838)
+    Notification {
+        #[command(subcommand)]
+        action: NotificationCommands,
+    },
+}
+
+/// Sub-commands for `contract notification`
+#[derive(Debug, Subcommand)]
+pub enum NotificationCommands {
+    /// Subscribe to alerts for a contract address
+    Subscribe {
+        /// On-chain contract address
+        address: String,
+
+        /// Alert types (comma-separated): updates, audits, security, deployments
+        #[arg(long, default_value = "updates,security")]
+        alerts: String,
+
+        /// Notification channels (comma-separated): email, webhook, cli
+        #[arg(long, default_value = "cli")]
+        channels: String,
+
+        /// Notification frequency: instant, daily, weekly
+        #[arg(long, default_value = "instant")]
+        frequency: String,
+
+        /// Filter by networks (comma-separated, e.g. mainnet,testnet)
+        #[arg(long, default_value = "")]
+        networks: String,
+
+        /// Filter by categories (comma-separated, e.g. defi,token)
+        #[arg(long, default_value = "")]
+        categories: String,
+
+        /// Email address or webhook URL for the chosen channel
+        #[arg(long)]
+        target: Option<String>,
+    },
+
+    /// Unsubscribe from alerts for a contract address
+    Unsubscribe {
+        /// On-chain contract address
+        address: String,
+    },
+
+    /// List active notification rules
+    List {
+        /// Filter by contract address (omit to list all)
+        address: Option<String>,
+
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// Update an existing notification rule
+    Configure {
+        /// On-chain contract address
+        address: String,
+
+        /// New alert types (comma-separated)
+        #[arg(long)]
+        alerts: Option<String>,
+
+        /// New channels (comma-separated)
+        #[arg(long)]
+        channels: Option<String>,
+
+        /// New frequency: instant, daily, weekly
+        #[arg(long)]
+        frequency: Option<String>,
+
+        /// New network filter (comma-separated)
+        #[arg(long)]
+        networks: Option<String>,
+
+        /// New category filter (comma-separated)
+        #[arg(long)]
+        categories: Option<String>,
+
+        /// New email address or webhook URL
+        #[arg(long)]
+        target: Option<String>,
+    },
+
+    /// Send a test alert for a subscribed contract
+    Test {
+        /// On-chain contract address
+        address: String,
     },
 }
 
@@ -4009,7 +4097,6 @@ pub async fn dispatch_command(
             test_command,
             junit,
             coverage,
-            verbose,
             require_coverage,
             coverage_threshold,
             setup_hook,
@@ -4025,7 +4112,9 @@ pub async fn dispatch_command(
                 test_command: test_command.as_deref(),
                 junit_output: junit.as_deref(),
                 show_coverage: coverage,
-                verbose,
+                // Verbosity comes from the global -v/--verbose flag; a local `--verbose`
+                // here collided with it and made every `test` invocation panic.
+                verbose: cli.verbose > 0,
                 require_coverage,
                 coverage_threshold,
                 setup_hook: setup_hook.as_deref(),
@@ -4629,7 +4718,11 @@ pub async fn dispatch_command(
                 contract_interfaces::run_local(&wasm, json).await?;
             }
             ContractCommands::Provenance { manifest, json } => {
-                log::debug!("Command: contract provenance | manifest={} json={}", manifest, json);
+                log::debug!(
+                    "Command: contract provenance | manifest={} json={}",
+                    manifest,
+                    json
+                );
                 contract_provenance::run_local(&manifest, json).await?;
             }
             ContractCommands::VerifyBuild {
@@ -4935,7 +5028,8 @@ pub async fn dispatch_command(
                         format
                     );
                     let fmt = crate::output_format::validate_format(&format)?;
-                    category::list(&cli.api_url, network.as_deref(), fmt, export.as_deref()).await?;
+                    category::list(&cli.api_url, network.as_deref(), fmt, export.as_deref())
+                        .await?;
                 }
                 CategoryCommands::Stats {
                     network,
@@ -5114,6 +5208,74 @@ pub async fn dispatch_command(
                     json,
                 )
                 .await?;
+            }
+            ContractCommands::Notification { action } => {
+                /// Splits a comma-separated argument, dropping empty entries so
+                /// `--alerts ""` means "none" rather than one empty alert type.
+                fn split_list(value: &str) -> Vec<String> {
+                    value
+                        .split(',')
+                        .map(|item| item.trim().to_string())
+                        .filter(|item| !item.is_empty())
+                        .collect()
+                }
+
+                match action {
+                    NotificationCommands::Subscribe {
+                        address,
+                        alerts,
+                        channels,
+                        frequency,
+                        networks,
+                        categories,
+                        target,
+                    } => {
+                        log::debug!("Command: contract notification subscribe | address={address}");
+                        notification::subscribe(
+                            &address,
+                            split_list(&alerts),
+                            split_list(&channels),
+                            &frequency,
+                            split_list(&networks),
+                            split_list(&categories),
+                            target,
+                        )?;
+                    }
+                    NotificationCommands::Unsubscribe { address } => {
+                        log::debug!(
+                            "Command: contract notification unsubscribe | address={address}"
+                        );
+                        notification::unsubscribe(&address)?;
+                    }
+                    NotificationCommands::List { address, json } => {
+                        log::debug!("Command: contract notification list");
+                        notification::list(address.as_deref(), json)?;
+                    }
+                    NotificationCommands::Configure {
+                        address,
+                        alerts,
+                        channels,
+                        frequency,
+                        networks,
+                        categories,
+                        target,
+                    } => {
+                        log::debug!("Command: contract notification configure | address={address}");
+                        notification::configure(
+                            &address,
+                            alerts.as_deref().map(split_list),
+                            channels.as_deref().map(split_list),
+                            frequency,
+                            networks.as_deref().map(split_list),
+                            categories.as_deref().map(split_list),
+                            target,
+                        )?;
+                    }
+                    NotificationCommands::Test { address } => {
+                        log::debug!("Command: contract notification test | address={address}");
+                        notification::test_notification(&address)?;
+                    }
+                }
             }
         },
         Commands::ApiKey { action } => match action {
@@ -5599,11 +5761,22 @@ pub async fn dispatch_command(
                 snapshot::export(&cli.api_url, &output).await?;
             }
             SnapshotCommands::Sign { snapshot_file, key } => {
-                log::debug!("Command: snapshot sign | file={} key={}", snapshot_file, key);
+                log::debug!(
+                    "Command: snapshot sign | file={} key={}",
+                    snapshot_file,
+                    key
+                );
                 snapshot::sign(&snapshot_file, &key).await?;
             }
-            SnapshotCommands::Verify { snapshot_file, trust_key } => {
-                log::debug!("Command: snapshot verify | file={} trust_key={}", snapshot_file, trust_key);
+            SnapshotCommands::Verify {
+                snapshot_file,
+                trust_key,
+            } => {
+                log::debug!(
+                    "Command: snapshot verify | file={} trust_key={}",
+                    snapshot_file,
+                    trust_key
+                );
                 snapshot::verify(&snapshot_file, &trust_key).await?;
             }
             SnapshotCommands::Inspect { snapshot_file } => {
@@ -5616,13 +5789,40 @@ pub async fn dispatch_command(
     Ok(())
 }
 
+/// Runs `f` on a thread with a large stack and propagates its panics unchanged.
+///
+/// Clap's tree walkers -- `try_parse_from`, `Command::debug_assert`, and the
+/// `clap_complete` generators -- recurse over the entire command tree. This CLI has 60+
+/// top-level commands nested several levels deep, which in a debug build overflows the
+/// 2 MiB stack libtest allocates per test thread. Only tests need this: the shipped
+/// binary walks the same tree on the main thread, whose default stack is 8 MiB.
+///
+/// Panics are re-raised with `resume_unwind` so assertion failures keep their original
+/// message and location instead of surfacing as a generic join error.
+#[cfg(test)]
+pub(crate) fn with_large_stack<T, F>(f: F) -> T
+where
+    F: FnOnce() -> T + Send + 'static,
+    T: Send + 'static,
+{
+    const STACK_SIZE: usize = 16 * 1024 * 1024;
+
+    std::thread::Builder::new()
+        .stack_size(STACK_SIZE)
+        .spawn(f)
+        .expect("spawn large-stack test thread")
+        .join()
+        .unwrap_or_else(|payload| std::panic::resume_unwind(payload))
+}
+
 #[cfg(test)]
 mod verbose_flag_tests {
     use super::*;
     use clap::Parser;
 
     fn parse(args: &[&str]) -> Cli {
-        Cli::try_parse_from(args).expect("CLI should parse")
+        let args: Vec<String> = args.iter().map(|a| a.to_string()).collect();
+        with_large_stack(move || Cli::try_parse_from(args).expect("CLI should parse"))
     }
 
     #[test]
@@ -5663,8 +5863,10 @@ mod verbose_flag_tests {
 
     #[test]
     fn env_export_rejects_invalid_format() {
-        let err = Cli::try_parse_from(["soroban-registry", "env", "export", "--format", "invalid"])
-            .expect_err("CLI should reject invalid export format");
+        let err = with_large_stack(|| {
+            Cli::try_parse_from(["soroban-registry", "env", "export", "--format", "invalid"])
+                .expect_err("CLI should reject invalid export format")
+        });
 
         assert!(
             err.to_string().contains("possible values"),
@@ -5688,6 +5890,117 @@ mod verbose_flag_tests {
                 action: EnvCommands::Set { show_value, .. },
             } => assert!(show_value),
             _ => panic!("expected env set command"),
+        }
+    }
+}
+
+/// Guards against the regression this module was written for: a subcommand that exists as
+/// a module and a dispatch arm but was dropped from the command tree by a bad merge, and
+/// so silently disappears from `--help`. These tests introspect the clap tree rather than
+/// string-matching help output, so they fail on the definition rather than on its
+/// rendering.
+#[cfg(test)]
+mod command_tree_tests {
+    use super::*;
+    use clap::CommandFactory;
+
+    /// `external_subcommand` variants are deliberately hidden and carry no help text, so
+    /// they are exempt from the checks below, as is anything explicitly marked hidden.
+    fn is_exempt(cmd: &clap::Command) -> bool {
+        cmd.is_hide_set() || cmd.get_name().is_empty()
+    }
+
+    #[test]
+    fn command_tree_is_valid() {
+        // Clap's own validator: catches duplicate names, conflicting short flags, and
+        // defaults that do not parse, across the whole tree.
+        with_large_stack(|| Cli::command().debug_assert());
+    }
+
+    #[test]
+    fn every_subcommand_has_help_text() {
+        fn check(cmd: &clap::Command, path: &str, missing: &mut Vec<String>) {
+            for sub in cmd.get_subcommands() {
+                if is_exempt(sub) {
+                    continue;
+                }
+                let full = format!("{path} {}", sub.get_name());
+                // `help` is generated by clap and carries no `about` of its own.
+                if sub.get_name() != "help" && sub.get_about().is_none() {
+                    missing.push(full.clone());
+                }
+                check(sub, &full, missing);
+            }
+        }
+
+        let missing = with_large_stack(|| {
+            let cmd = Cli::command();
+            let mut missing = Vec::new();
+            check(&cmd, "soroban-registry", &mut missing);
+            missing
+        });
+
+        assert!(
+            missing.is_empty(),
+            "these subcommands render with no description in --help: {missing:#?}"
+        );
+    }
+
+    #[test]
+    fn every_top_level_command_appears_in_help() {
+        let (names, help) = with_large_stack(|| {
+            let mut cmd = Cli::command();
+            let names: Vec<String> = cmd
+                .get_subcommands()
+                .filter(|sub| !is_exempt(sub))
+                .map(|sub| sub.get_name().to_string())
+                .collect();
+            let help = cmd.render_long_help().to_string();
+            (names, help)
+        });
+
+        assert!(
+            !names.is_empty(),
+            "the command tree reported no top-level subcommands"
+        );
+
+        let missing: Vec<&String> = names
+            .iter()
+            .filter(|name| !help.contains(name.as_str()))
+            .collect();
+
+        assert!(
+            missing.is_empty(),
+            "these commands are defined but absent from --help: {missing:#?}"
+        );
+    }
+
+    /// The three variants this branch restored after merges dropped them. Named
+    /// explicitly so a future regression points straight at the cause.
+    #[test]
+    fn restored_commands_are_reachable() {
+        for args in [
+            ["contract", "category"].as_slice(),
+            ["contract", "notification"].as_slice(),
+            ["publisher", "doctor"].as_slice(),
+        ] {
+            let args = args.to_vec();
+            let rendered = args.join(" ");
+            let found = with_large_stack(move || {
+                let mut cmd = Cli::command();
+                for part in &args {
+                    match cmd.find_subcommand(part) {
+                        Some(sub) => cmd = sub.clone(),
+                        None => return false,
+                    }
+                }
+                true
+            });
+
+            assert!(
+                found,
+                "`soroban-registry {rendered}` is not in the command tree"
+            );
         }
     }
 }

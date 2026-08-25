@@ -1,5 +1,4 @@
 use std::env;
-use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
 use tempfile::tempdir;
@@ -28,14 +27,14 @@ fn get_binary_path() -> PathBuf {
 fn test_snapshot_lifecycle() {
     let dir = tempdir().unwrap();
     let snapshot_file = dir.path().join("registry.snapshot.json");
-    let key_file = dir.path().join("signing.key");
-    let pub_key_file = dir.path().join("trust.pub");
+    let _key_file = dir.path().join("signing.key");
+    let _pub_key_file = dir.path().join("trust.pub");
 
     // Generate keys (assuming we just need some valid Ed25519 string)
-    // Actually we need to call keygen. But wait, we can just use the tool if it exists, 
+    // Actually we need to call keygen. But wait, we can just use the tool if it exists,
     // or hardcode a keypair for testing.
     // To avoid dependency on keygen in the CLI if not available, we can mock or hardcode.
-    
+
     // Basic test to verify that the CLI command parses correctly
     // The registry URL is a dummy URL, so it will fail to connect, but the CLI parsing should pass.
     let output = Command::new(get_binary_path())
@@ -50,7 +49,10 @@ fn test_snapshot_lifecycle() {
 
     // Check that we hit a connection error rather than a CLI parse error
     let stderr = String::from_utf8_lossy(&output.stderr);
-    let stdout = String::from_utf8_lossy(&output.stdout);
+    let _stdout = String::from_utf8_lossy(&output.stdout);
     // As long as it is a connection error and not a clap parse error, we're good for this basic integration test.
-    assert!(!stderr.contains("error: unrecognized subcommand"), "CLI should recognize snapshot subcommand");
+    assert!(
+        !stderr.contains("error: unrecognized subcommand"),
+        "CLI should recognize snapshot subcommand"
+    );
 }

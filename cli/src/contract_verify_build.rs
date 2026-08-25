@@ -138,7 +138,10 @@ async fn run_build(source_dir: &Path) -> Result<Vec<u8>, VerifyBuildOutcome> {
     tokio::fs::read(&wasm_path)
         .await
         .map_err(|e| VerifyBuildOutcome::BuildFailed {
-            detail: format!("Failed to read built artifact at {}: {e}", wasm_path.display()),
+            detail: format!(
+                "Failed to read built artifact at {}: {e}",
+                wasm_path.display()
+            ),
         })
 }
 
@@ -157,11 +160,13 @@ pub async fn run(
         json
     );
 
-    let expected = normalize_hash(expected_hash)
-        .with_context(|| format!("--expected-hash '{expected_hash}' must be a 64-character hex SHA-256 hash"))?;
+    let expected = normalize_hash(expected_hash).with_context(|| {
+        format!("--expected-hash '{expected_hash}' must be a 64-character hex SHA-256 hash")
+    })?;
     let provenance = load_provenance(manifest_path)?;
 
-    let outcome = attempt_rebuild(&provenance, source_dir, &expected, allow_toolchain_mismatch).await;
+    let outcome =
+        attempt_rebuild(&provenance, source_dir, &expected, allow_toolchain_mismatch).await;
 
     if json {
         println!("{}", serde_json::to_string_pretty(&outcome)?);
@@ -226,7 +231,10 @@ fn print_human(outcome: &VerifyBuildOutcome) {
         VerifyBuildOutcome::MissingSource { detail } => {
             println!("{} {}", "[FAIL] Missing source:".red().bold(), detail);
         }
-        VerifyBuildOutcome::ToolchainMismatch { recorded, installed } => {
+        VerifyBuildOutcome::ToolchainMismatch {
+            recorded,
+            installed,
+        } => {
             println!("{}", "[FAIL] Toolchain mismatch".red().bold());
             println!("  Recorded:  {}", recorded);
             println!("  Installed: {}", installed);

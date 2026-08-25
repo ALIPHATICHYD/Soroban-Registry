@@ -4,7 +4,6 @@ use crate::net::RequestBuilderExt;
 use anyhow::Result;
 use colored::Colorize;
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ContractEvent {
@@ -296,7 +295,7 @@ fn format_event_stats_table(stats: &EventStats) -> String {
 
             for (topic, count) in topic_counts {
                 let percentage = if stats.total_events > 0 {
-                    (count as f64 / stats.total_events as f64 * 100.0)
+                    count as f64 / stats.total_events as f64 * 100.0
                 } else {
                     0.0
                 };
