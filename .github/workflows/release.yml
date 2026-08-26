@@ -1,0 +1,91 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+jobs:
+  release:
+    name: Build, Attest, and Release
+    runs-on: ubuntu-latest
+    # Require two approvals via GitHub Environment protection rules
+    environment:
+      name: release
+    permissions:
+      id-token: write # Required for provenance attestation
+      contents: write # Required for creating a release
+      attestations: write # Required for attest-build-provenance
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master
+        with:
+          toolchain: stable
+
+      # Note: No actions/cache used to ensure a caching-free environment for security.
+
+      - name: Build Registry CLI
+        run: cargo build --release --locked --manifest-path cli/Cargo.toml
+
+      - name: Build Backend
+        run: cargo build --release --locked --manifest-path backend/Cargo.toml
+
+      - name: Install cargo-cyclonedx
+        run: cargo install cargo-cyclonedx --locked
+
+      - name: Generate SBOM for CLI (CycloneDX)
+        run: cargo cyclonedx --manifest-path cli/Cargo.toml --format json --all --output cli-sbom.json
+
+      - name: Generate SBOM for Backend (CycloneDX)
+        run: cargo cyclonedx --manifest-path backend/Cargo.toml --format json --all --output backend-sbom.json
+
+      - name: Scan CLI SBOM for vulnerabilities
+        uses: aquasecurity/trivy-action@d2a0b60797ff03db6132bd4e2b293f9b37081297 # master
+        with:
+          scan-type: 'sbom'
+          sbom-files: 'cli-sbom.json'
+          format: 'table'
+          exit-code: '1'
+          ignore-unfixed: true
+          severity: 'CRITICAL,HIGH'
+
+      - name: Scan Backend SBOM for vulnerabilities
+        uses: aquasecurity/trivy-action@d2a0b60797ff03db6132bd4e2b293f9b37081297 # master
+        with:
+          scan-type: 'sbom'
+          sbom-files: 'backend-sbom.json'
+          format: 'table'
+          exit-code: '1'
+          ignore-unfixed: true
+          severity: 'CRITICAL,HIGH'
+
+      - name: Generate Build Provenance Attestation (CLI)
+        uses: actions/attest-build-provenance@9d57eef8c06cd9d6b433effeeb7a6a77b3ff94ad # main
+        with:
+          subject-path: 'cli/target/release/soroban-registry'
+
+      - name: Generate Build Provenance Attestation (Backend)
+        uses: actions/attest-build-provenance@9d57eef8c06cd9d6b433effeeb7a6a77b3ff94ad # main
+        with:
+          subject-path: 'backend/target/release/api'
+
+      - name: Prepare Release Artifacts
+        run: |
+          mkdir -p release-artifacts
+          cp cli/target/release/soroban-registry release-artifacts/
+          cp backend/target/release/api release-artifacts/soroban-registry-api
+          cp cli-sbom.json release-artifacts/
+          cp backend-sbom.json release-artifacts/
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@e5ee6bc58a36b838b92fc1217f2e4b414b5abcc8 # master
+        with:
+          files: |
+            release-artifacts/soroban-registry
+            release-artifacts/soroban-registry-api
+            release-artifacts/cli-sbom.json
+            release-artifacts/backend-sbom.json
+          generate_release_notes: true
