@@ -296,61 +296,65 @@ pub async fn deprecate_contract(
         None
     };
 
-    let mut tx = state
-        .db
-        .begin()
-        .await
-        .map_err(|err| db_internal_error("begin deprecate tx", err))?;
+    // The deprecation record and the denormalized contract columns must move as
+    // one unit (issue #1164): a deprecation can never be half-applied.
+    let retirement_at = req.retirement_at;
+    let webhook_replacement_contract_id = req.replacement_contract_id.clone();
+    let webhook_migration_guide_url = req.migration_guide_url.clone();
+    let webhook_reason = reason.clone();
 
-    // Upsert the deprecation record (retirement schedule, reason and grace period)
-    sqlx::query(
-        "INSERT INTO contract_deprecations \
-            (contract_id, retirement_at, replacement_contract_id, migration_guide_url, notes, \
-             deprecated_reason, grace_period_days) \
-         VALUES ($1, $2, $3, $4, $5, $6, $7) \
-         ON CONFLICT (contract_id) DO UPDATE SET \
-           retirement_at             = EXCLUDED.retirement_at, \
-           replacement_contract_id   = EXCLUDED.replacement_contract_id, \
-           migration_guide_url       = EXCLUDED.migration_guide_url, \
-           notes                     = EXCLUDED.notes, \
-           deprecated_reason         = EXCLUDED.deprecated_reason, \
-           grace_period_days         = EXCLUDED.grace_period_days, \
-           updated_at                = NOW()",
-    )
-    .bind(contract_uuid)
-    .bind(req.retirement_at)
-    .bind(replacement_uuid)
-    .bind(&req.migration_guide_url)
-    .bind(&req.notes)
-    .bind(&reason)
-    .bind(req.grace_period_days)
-    .execute(&mut *tx)
-    .await
-    .map_err(|err| db_internal_error("upsert deprecation schedule", err))?;
+    crate::db_transaction::with_transaction(&state.db, |tx| {
+        Box::pin(async move {
+            // Upsert the deprecation record (retirement schedule, reason and grace period)
+            sqlx::query(
+                "INSERT INTO contract_deprecations \
+                    (contract_id, retirement_at, replacement_contract_id, migration_guide_url, notes, \
+                     deprecated_reason, grace_period_days) \
+                 VALUES ($1, $2, $3, $4, $5, $6, $7) \
+                 ON CONFLICT (contract_id) DO UPDATE SET \
+                   retirement_at             = EXCLUDED.retirement_at, \
+                   replacement_contract_id   = EXCLUDED.replacement_contract_id, \
+                   migration_guide_url       = EXCLUDED.migration_guide_url, \
+                   notes                     = EXCLUDED.notes, \
+                   deprecated_reason         = EXCLUDED.deprecated_reason, \
+                   grace_period_days         = EXCLUDED.grace_period_days, \
+                   updated_at                = NOW()",
+            )
+            .bind(contract_uuid)
+            .bind(retirement_at)
+            .bind(replacement_uuid)
+            .bind(&req.migration_guide_url)
+            .bind(&req.notes)
+            .bind(&reason)
+            .bind(req.grace_period_days)
+            .execute(&mut **tx)
+            .await
+            .map_err(|err| db_internal_error("upsert deprecation schedule", err))?;
 
-    // Denormalize onto contracts so list/search/trending can filter and surface
-    // status without joining contract_deprecations (Issue #1090).
-    sqlx::query(
-        "UPDATE contracts SET \
-            deprecated_at = COALESCE(deprecated_at, NOW()), \
-            deprecation_reason = $2, \
-            replacement_contract_id = $3, \
-            is_deprecated = TRUE, \
-            updated_at = NOW() \
-         WHERE id = $1",
-    )
-    .bind(contract_uuid)
-    .bind(&reason)
-    .bind(replacement_uuid)
-    .execute(&mut *tx)
-    .await
-    .map_err(|err| db_internal_error("update contract deprecation columns", err))?;
+            // Denormalize onto contracts so list/search/trending can filter and surface
+            // status without joining contract_deprecations (Issue #1090).
+            sqlx::query(
+                "UPDATE contracts SET \
+                    deprecated_at = COALESCE(deprecated_at, NOW()), \
+                    deprecation_reason = $2, \
+                    replacement_contract_id = $3, \
+                    is_deprecated = TRUE, \
+                    updated_at = NOW() \
+                 WHERE id = $1",
+            )
+            .bind(contract_uuid)
+            .bind(&reason)
+            .bind(replacement_uuid)
+            .execute(&mut **tx)
+            .await
+            .map_err(|err| db_internal_error("update contract deprecation columns", err))?;
 
-    tx.commit()
-        .await
-        .map_err(|err| db_internal_error("commit deprecate tx", err))?;
+            Ok::<(), ApiError>(())
+        })
+    })
+    .await?;
 
-    notify_dependents(&state, contract_uuid, &contract_id, req.retirement_at).await?;
+    notify_dependents(&state, contract_uuid, &contract_id, retirement_at).await?;
 
     // ── Emit contract.deprecated webhook (best-effort) ────────────────────────
     // Fetch the publisher_id for this contract so we can route the webhook to
@@ -370,10 +374,10 @@ pub async fn deprecate_contract(
                 serde_json::json!({
                     "contract_id": contract_id,
                     "contract_uuid": contract_uuid,
-                    "deprecated_reason": reason,
-                    "replacement_contract_id": req.replacement_contract_id,
-                    "migration_guide_url": req.migration_guide_url,
-                    "retirement_at": req.retirement_at,
+                    "deprecated_reason": webhook_reason,
+                    "replacement_contract_id": webhook_replacement_contract_id,
+                    "migration_guide_url": webhook_migration_guide_url,
+                    "retirement_at": retirement_at,
                 }),
             )
             .await;
@@ -429,35 +433,35 @@ pub async fn undeprecate_contract(
         ));
     }
 
-    let mut tx = state
-        .db
-        .begin()
-        .await
-        .map_err(|err| db_internal_error("begin undeprecate tx", err))?;
+    // Clearing the contract columns and deleting the schedule row must move as
+    // one unit (issue #1164): a reactivated contract can never retain a stale
+    // deprecation record, or vice versa.
+    crate::db_transaction::with_transaction(&state.db, |tx| {
+        Box::pin(async move {
+            sqlx::query(
+                "UPDATE contracts SET \
+                    deprecated_at = NULL, \
+                    deprecation_reason = NULL, \
+                    replacement_contract_id = NULL, \
+                    is_deprecated = FALSE, \
+                    updated_at = NOW() \
+                 WHERE id = $1",
+            )
+            .bind(contract_uuid)
+            .execute(&mut **tx)
+            .await
+            .map_err(|err| db_internal_error("clear contract deprecation columns", err))?;
 
-    sqlx::query(
-        "UPDATE contracts SET \
-            deprecated_at = NULL, \
-            deprecation_reason = NULL, \
-            replacement_contract_id = NULL, \
-            is_deprecated = FALSE, \
-            updated_at = NOW() \
-         WHERE id = $1",
-    )
-    .bind(contract_uuid)
-    .execute(&mut *tx)
-    .await
-    .map_err(|err| db_internal_error("clear contract deprecation columns", err))?;
+            sqlx::query("DELETE FROM contract_deprecations WHERE contract_id = $1")
+                .bind(contract_uuid)
+                .execute(&mut **tx)
+                .await
+                .map_err(|err| db_internal_error("delete deprecation schedule", err))?;
 
-    sqlx::query("DELETE FROM contract_deprecations WHERE contract_id = $1")
-        .bind(contract_uuid)
-        .execute(&mut *tx)
-        .await
-        .map_err(|err| db_internal_error("delete deprecation schedule", err))?;
-
-    tx.commit()
-        .await
-        .map_err(|err| db_internal_error("commit undeprecate tx", err))?;
+            Ok::<(), ApiError>(())
+        })
+    })
+    .await?;
 
     reindex_contract_search(&state, contract_uuid).await;
 
