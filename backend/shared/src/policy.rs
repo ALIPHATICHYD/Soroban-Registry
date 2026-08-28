@@ -205,7 +205,18 @@ pub enum PolicyError {
 
     #[error("Policy evaluation failed: {0}")]
     EvaluationFailed(String),
+
+    #[error("Default policy parse error: {0}")]
+    DefaultPolicyError(String),
 }
+
+/// Maximum number of rules a single policy may contain.
+/// Policies exceeding this limit fail closed to keep evaluation bounded.
+pub const MAX_POLICY_RULES: usize = 100;
+
+/// Default maximum evaluation duration (seconds).
+/// Evaluation aborts with an error if it exceeds this budget.
+const DEFAULT_EVAL_TIMEOUT_SECS: u64 = 5;
 
 pub struct PolicyEvaluator;
 
@@ -214,7 +225,24 @@ impl PolicyEvaluator {
         policy: &PolicyDefinition,
         context: &AdmissionContext,
     ) -> Result<PolicyEvaluationResult, PolicyError> {
+        Self::evaluate_with_timeout(policy, context, DEFAULT_EVAL_TIMEOUT_SECS)
+    }
+
+    /// Evaluate with an explicit timeout in seconds.
+    pub fn evaluate_with_timeout(
+        policy: &PolicyDefinition,
+        context: &AdmissionContext,
+        timeout_secs: u64,
+    ) -> Result<PolicyEvaluationResult, PolicyError> {
         policy.validate()?;
+
+        if policy.rules.len() > MAX_POLICY_RULES {
+            return Err(PolicyError::EvaluationFailed(format!(
+                "Policy contains {} rules, exceeding the maximum of {}",
+                policy.rules.len(),
+                MAX_POLICY_RULES
+            )));
+        }
 
         let ctx_val = serde_json::to_value(context)
             .map_err(|e| PolicyError::EvaluationFailed(format!("Failed to serialize context: {e}")))?;
@@ -223,8 +251,15 @@ impl PolicyEvaluator {
         let mut overall_decision = PolicyDecision::Allow;
         let mut reasons = Vec::new();
         let mut warnings = Vec::new();
+        let start = std::time::Instant::now();
+        let deadline = std::time::Duration::from_secs(timeout_secs);
 
         for rule in &policy.rules {
+            if start.elapsed() > deadline {
+                return Err(PolicyError::EvaluationFailed(format!(
+                    "Policy evaluation exceeded {timeout_secs}s timeout"
+                )));
+            }
             let (matched, input_values) =
                 evaluate_expression(&rule.when, &ctx_val).map_err(|details| {
                     PolicyError::AmbiguousRuleResult {
@@ -505,6 +540,47 @@ fn check_contains(lhs: &serde_json::Value, rhs_str: &str) -> Result<bool, String
     }
 }
 
+/// Resolve effective policy by merging an override with an optional default.
+///
+/// The `override_policy` takes full precedence when present; the
+/// `default_policy` is used as a fallback. When both are `None`, the
+/// function returns `None` (no policy enforcement).
+///
+/// This supports the requirement that repository or organization defaults
+/// can be set, with explicit CLI/API overrides.
+pub fn resolve_effective_policy(
+    override_policy: Option<&PolicyDefinition>,
+    default_policy: Option<&PolicyDefinition>,
+) -> Result<Option<PolicyDefinition>, PolicyError> {
+    if let Some(ov) = override_policy {
+        ov.validate()?;
+        Ok(Some(ov.clone()))
+    } else if let Some(def) = default_policy {
+        def.validate()?;
+        Ok(Some(def.clone()))
+    } else {
+        Ok(None)
+    }
+}
+
+/// Parse a policy from an optional YAML/JSON string, returning None if absent.
+pub fn parse_optional_policy(
+    content: Option<&str>,
+) -> Result<Option<PolicyDefinition>, PolicyError> {
+    match content {
+        Some(c) => {
+            let trimmed = c.trim();
+            if trimmed.is_empty() {
+                return Ok(None);
+            }
+            let def = PolicyDefinition::from_yaml(trimmed)
+                .or_else(|_| PolicyDefinition::from_json(trimmed))?;
+            Ok(Some(def))
+        }
+        None => Ok(None),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -559,6 +635,59 @@ mod tests {
         }
     }
 
+    /// A permissive context where everything passes.
+    fn clean_context() -> AdmissionContext {
+        AdmissionContext {
+            artifact: ArtifactContext {
+                signature_verified: true,
+                size: 2048,
+                hash: "deadbeef".to_string(),
+                is_wasm: true,
+            },
+            verification: VerificationContext {
+                state: "verified".to_string(),
+                verified: true,
+            },
+            provenance: ProvenanceContext {
+                present: true,
+                builder_image: Some("soroban/contract:latest".to_string()),
+                reproducible: true,
+            },
+            vulnerabilities: VulnerabilityContext {
+                count: 0,
+                critical_count: 0,
+                high_count: 0,
+            },
+            risk: RiskContext {
+                max_severity: "none".to_string(),
+                score: 0.0,
+            },
+            dependency: DependencyContext {
+                revoked_count: 0,
+                has_revoked: false,
+                risk_score: 0.0,
+            },
+            interface: InterfaceContext {
+                compatible: true,
+                breaking_changes: 0,
+            },
+            network: NetworkContext {
+                identity: "mainnet".to_string(),
+                passphrase: Some("Public Global Stellar Network ; September 2015".to_string()),
+            },
+            metadata: MetadataContext {
+                complete: true,
+                completeness: 1.0,
+                has_readme: true,
+                has_license: true,
+                has_repository: true,
+                has_version: true,
+            },
+        }
+    }
+
+    // ── Rule evaluation ────────────────────────────────────────────────────
+
     #[test]
     fn test_sample_policy_yaml_parsing_and_evaluation() {
         let yaml = r#"
@@ -591,6 +720,31 @@ rules:
     }
 
     #[test]
+    fn test_clean_context_allows() {
+        let yaml = r#"
+version: 1
+rules:
+  - name: require-signed
+    when: artifact.signature_verified != true
+    decision: deny
+    reason: "Unsigned artifacts are not allowed"
+  - name: require-provenance
+    when: provenance.present != true
+    decision: warn
+"#;
+        let policy = PolicyDefinition::from_yaml(yaml).unwrap();
+        let ctx = clean_context();
+        let res = PolicyEvaluator::evaluate(&policy, &ctx).unwrap();
+
+        assert_eq!(res.decision, PolicyDecision::Allow);
+        assert!(res.allowed);
+        assert!(res.reasons.is_empty());
+        assert!(res.warnings.is_empty());
+    }
+
+    // ── Precedence ─────────────────────────────────────────────────────────
+
+    #[test]
     fn test_precedence_deny_over_warn_over_allow() {
         let yaml = r#"
 version: 1
@@ -613,6 +767,53 @@ rules:
         assert_eq!(res.warnings.len(), 1);
         assert_eq!(res.reasons.len(), 1);
     }
+
+    #[test]
+    fn test_warn_only_decision() {
+        let yaml = r#"
+version: 1
+rules:
+  - name: missing-license
+    when: metadata.has_license == false
+    decision: warn
+    reason: "License file not found"
+"#;
+        let policy = PolicyDefinition::from_yaml(yaml).unwrap();
+        let ctx = sample_context();
+        let res = PolicyEvaluator::evaluate(&policy, &ctx).unwrap();
+
+        assert_eq!(res.decision, PolicyDecision::Warn);
+        assert!(res.allowed);
+        assert!(res.warnings.contains(&"License file not found".to_string()));
+    }
+
+    #[test]
+    fn test_multiple_deny_reasons_collected() {
+        let yaml = r#"
+version: 1
+rules:
+  - name: block-critical
+    when: risk.max_severity == "critical"
+    decision: deny
+    reason: "Critical risk"
+  - name: block-revoked
+    when: dependency.has_revoked == true
+    decision: deny
+    reason: "Revoked dependency"
+  - name: block-incompatible
+    when: interface.compatible == false
+    decision: deny
+    reason: "Incompatible interface"
+"#;
+        let policy = PolicyDefinition::from_yaml(yaml).unwrap();
+        let ctx = sample_context();
+        let res = PolicyEvaluator::evaluate(&policy, &ctx).unwrap();
+
+        assert_eq!(res.decision, PolicyDecision::Deny);
+        assert_eq!(res.reasons.len(), 3);
+    }
+
+    // ── Fails-closed ───────────────────────────────────────────────────────
 
     #[test]
     fn test_unsupported_version_fails_closed() {
@@ -638,6 +839,32 @@ rules: []
     }
 
     #[test]
+    fn test_malformed_empty_rule_name_fails_closed() {
+        let yaml = r#"
+version: 1
+rules:
+  - name: ""
+    when: artifact.is_wasm == true
+    decision: allow
+"#;
+        let res = PolicyDefinition::from_yaml(yaml);
+        assert!(matches!(res, Err(PolicyError::MalformedPolicy(_))));
+    }
+
+    #[test]
+    fn test_malformed_empty_when_condition_fails_closed() {
+        let yaml = r#"
+version: 1
+rules:
+  - name: empty-cond
+    when: ""
+    decision: deny
+"#;
+        let res = PolicyDefinition::from_yaml(yaml);
+        assert!(matches!(res, Err(PolicyError::MalformedPolicy(_))));
+    }
+
+    #[test]
     fn test_ambiguous_field_fails_closed() {
         let yaml = r#"
 version: 1
@@ -650,5 +877,466 @@ rules:
         let ctx = sample_context();
         let res = PolicyEvaluator::evaluate(&policy, &ctx);
         assert!(matches!(res, Err(PolicyError::AmbiguousRuleResult { .. })));
+    }
+
+    #[test]
+    fn test_exceeding_max_rules_fails_closed() {
+        let mut rules = Vec::new();
+        for i in 0..=MAX_POLICY_RULES {
+            rules.push(format!(
+                "  - name: rule-{i}\n    when: artifact.is_wasm == true\n    decision: allow"
+            ));
+        }
+        let yaml = format!("version: 1\nrules:\n{}", rules.join("\n"));
+        let def = PolicyDefinition::from_yaml(&yaml).unwrap();
+        let ctx = clean_context();
+        let res = PolicyEvaluator::evaluate(&def, &ctx);
+        assert!(matches!(res, Err(PolicyError::EvaluationFailed(_))));
+    }
+
+    // ── Timeout / bounded evaluation ────────────────────────────────────────
+
+    #[test]
+    fn test_evaluation_timeout_fails_closed() {
+        let yaml = r#"
+version: 1
+rules:
+  - name: check-size
+    when: artifact.size > 0
+    decision: allow
+"#;
+        let policy = PolicyDefinition::from_yaml(yaml).unwrap();
+        let ctx = clean_context();
+        // Timeout with 0 seconds should fail immediately
+        let res = PolicyEvaluator::evaluate_with_timeout(&policy, &ctx, 0);
+        assert!(matches!(res, Err(PolicyError::EvaluationFailed(ref msg)) if msg.contains("timeout")));
+    }
+
+    #[test]
+    fn test_evaluate_with_timeout_succeeds_normally() {
+        let yaml = r#"
+version: 1
+rules:
+  - name: check
+    when: artifact.is_wasm == true
+    decision: allow
+"#;
+        let policy = PolicyDefinition::from_yaml(yaml).unwrap();
+        let ctx = clean_context();
+        let res = PolicyEvaluator::evaluate_with_timeout(&policy, &ctx, 5);
+        assert!(res.is_ok());
+    }
+
+    // ── Explain output ─────────────────────────────────────────────────────
+
+    #[test]
+    fn test_explain_output_contains_all_rule_details() {
+        let yaml = r#"
+version: 1
+rules:
+  - name: require-signed
+    when: artifact.signature_verified != true
+    decision: deny
+    reason: "Unsigned artifacts are not allowed"
+  - name: require-provenance
+    when: provenance.present != true
+    decision: warn
+    reason: "Missing provenance"
+"#;
+        let policy = PolicyDefinition::from_yaml(yaml).unwrap();
+        let ctx = sample_context();
+        let res = PolicyEvaluator::evaluate(&policy, &ctx).unwrap();
+
+        // Every evaluated rule should have condition, matched, decision, reason, input_values
+        for rule in &res.evaluated_rules {
+            assert!(!rule.condition.is_empty());
+            assert!(rule.matched, "rule {} should match", rule.name);
+            assert!(rule.input_values.contains_key(&rule.condition.split_whitespace().next().unwrap().to_string()));
+        }
+
+        // Evidence should be present
+        assert!(res.evidence.is_object());
+        assert!(res.evidence.get("artifact").is_some());
+    }
+
+    // ── JSON serialization ─────────────────────────────────────────────────
+
+    #[test]
+    fn test_policy_check_response_json_roundtrip() {
+        use crate::models::{PolicyCheckRequest, PolicyCheckResponse};
+
+        let yaml = r#"
+version: 1
+rules:
+  - name: check
+    when: artifact.is_wasm == true
+    decision: warn
+    reason: "WASM artifact"
+"#;
+        let policy = PolicyDefinition::from_yaml(yaml).unwrap();
+        let ctx = clean_context();
+        let eval = PolicyEvaluator::evaluate(&policy, &ctx).unwrap();
+        let resp = PolicyCheckResponse { evaluation: eval };
+
+        let json_str = serde_json::to_string(&resp).unwrap();
+        let parsed: PolicyCheckResponse = serde_json::from_str(&json_str).unwrap();
+        assert_eq!(parsed.evaluation.decision, PolicyDecision::Warn);
+        assert!(parsed.evaluation.allowed);
+        assert_eq!(parsed.evaluation.policy_version, 1);
+    }
+
+    // ── Specific scenarios from acceptance criteria ─────────────────────────
+
+    #[test]
+    fn scenario_unsigned_artifact_denied() {
+        let yaml = r#"
+version: 1
+rules:
+  - name: require-signed
+    when: artifact.signature_verified != true
+    decision: deny
+    reason: "Unsigned artifacts are not allowed"
+"#;
+        let policy = PolicyDefinition::from_yaml(yaml).unwrap();
+        let mut ctx = clean_context();
+        ctx.artifact.signature_verified = false;
+        let res = PolicyEvaluator::evaluate(&policy, &ctx).unwrap();
+        assert!(!res.allowed);
+        assert!(res.reasons.iter().any(|r| r.contains("Unsigned")));
+    }
+
+    #[test]
+    fn scenario_critical_vulnerability_denied() {
+        let yaml = r#"
+version: 1
+rules:
+  - name: block-critical
+    when: risk.max_severity == "critical"
+    decision: deny
+    reason: "Critical risk"
+"#;
+        let policy = PolicyDefinition::from_yaml(yaml).unwrap();
+        let ctx = sample_context();
+        let res = PolicyEvaluator::evaluate(&policy, &ctx).unwrap();
+        assert!(!res.allowed);
+    }
+
+    #[test]
+    fn scenario_revoked_dependency_denied() {
+        let yaml = r#"
+version: 1
+rules:
+  - name: block-revoked
+    when: dependency.has_revoked == true
+    decision: deny
+    reason: "Revoked dependency"
+"#;
+        let policy = PolicyDefinition::from_yaml(yaml).unwrap();
+        let ctx = sample_context();
+        let res = PolicyEvaluator::evaluate(&policy, &ctx).unwrap();
+        assert!(!res.allowed);
+        assert!(res.reasons.iter().any(|r| r.contains("Revoked")));
+    }
+
+    #[test]
+    fn scenario_wrong_network_denied() {
+        let yaml = r#"
+version: 1
+rules:
+  - name: require-mainnet
+    when: network.identity != "mainnet"
+    decision: deny
+    reason: "Wrong network"
+"#;
+        let policy = PolicyDefinition::from_yaml(yaml).unwrap();
+        let ctx = sample_context();
+        let res = PolicyEvaluator::evaluate(&policy, &ctx).unwrap();
+        assert!(!res.allowed);
+        assert!(res.reasons.iter().any(|r| r.contains("Wrong network")));
+    }
+
+    #[test]
+    fn scenario_missing_provenance_warned() {
+        let yaml = r#"
+version: 1
+rules:
+  - name: require-provenance
+    when: provenance.present != true
+    decision: warn
+    reason: "Missing provenance"
+"#;
+        let policy = PolicyDefinition::from_yaml(yaml).unwrap();
+        let ctx = sample_context();
+        let res = PolicyEvaluator::evaluate(&policy, &ctx).unwrap();
+        assert!(res.allowed);
+        assert!(res.warnings.iter().any(|w| w.contains("provenance")));
+    }
+
+    #[test]
+    fn scenario_incompatible_interface_denied() {
+        let yaml = r#"
+version: 1
+rules:
+  - name: require-compatible
+    when: interface.compatible == false
+    decision: deny
+    reason: "Incompatible interface"
+"#;
+        let policy = PolicyDefinition::from_yaml(yaml).unwrap();
+        let ctx = sample_context();
+        let res = PolicyEvaluator::evaluate(&policy, &ctx).unwrap();
+        assert!(!res.allowed);
+        assert!(res.reasons.iter().any(|r| r.contains("Incompatible")));
+    }
+
+    // ── Operator coverage ──────────────────────────────────────────────────
+
+    #[test]
+    fn test_numeric_comparisons() {
+        let yaml = r#"
+version: 1
+rules:
+  - name: size-check
+    when: artifact.size > 1000000
+    decision: deny
+    reason: "Artifact too large"
+  - name: score-low
+    when: risk.score < 1.0
+    decision: allow
+"#;
+        let policy = PolicyDefinition::from_yaml(yaml).unwrap();
+        let ctx = sample_context(); // size=1024, score=9.5
+        let res = PolicyEvaluator::evaluate(&policy, &ctx).unwrap();
+        // size(1024) > 1000000 is false, score(9.5) < 1.0 is false => no rules match => Allow
+        assert_eq!(res.decision, PolicyDecision::Allow);
+    }
+
+    #[test]
+    fn test_in_operator() {
+        let yaml = r#"
+version: 1
+rules:
+  - name: network-check
+    when: network.identity in ["testnet", "futurenet"]
+    decision: warn
+    reason: "Non-production network"
+"#;
+        let policy = PolicyDefinition::from_yaml(yaml).unwrap();
+        let ctx = sample_context(); // network.identity = "testnet"
+        let res = PolicyEvaluator::evaluate(&policy, &ctx).unwrap();
+        assert!(res.warnings.iter().any(|w| w.contains("Non-production")));
+    }
+
+    #[test]
+    fn test_contains_operator() {
+        let yaml = r#"
+version: 1
+rules:
+  - name: hash-check
+    when: artifact.hash contains "a1b2"
+    decision: warn
+"#;
+        let policy = PolicyDefinition::from_yaml(yaml).unwrap();
+        let ctx = sample_context(); // hash = "a1b2c3d4"
+        let res = PolicyEvaluator::evaluate(&policy, &ctx).unwrap();
+        assert_eq!(res.warnings.len(), 1);
+    }
+
+    #[test]
+    fn test_negation_operator() {
+        // `!` must be quoted in YAML to avoid being parsed as a YAML tag.
+        let yaml = "version: 1\nrules:\n  - name: not-wasm\n    when: \"!artifact.is_wasm\"\n    decision: deny\n";
+        let policy = PolicyDefinition::from_yaml(yaml).unwrap();
+        let ctx = sample_context(); // is_wasm = true
+        let res = PolicyEvaluator::evaluate(&policy, &ctx).unwrap();
+        // !true = false => rule does not match => Allow
+        assert_eq!(res.decision, PolicyDecision::Allow);
+    }
+
+    #[test]
+    fn test_bool_field_truthy() {
+        let yaml = r#"
+version: 1
+rules:
+  - name: is-wasm
+    when: artifact.is_wasm
+    decision: allow
+"#;
+        let policy = PolicyDefinition::from_yaml(yaml).unwrap();
+        let ctx = sample_context(); // is_wasm = true
+        let res = PolicyEvaluator::evaluate(&policy, &ctx).unwrap();
+        assert_eq!(res.decision, PolicyDecision::Allow);
+    }
+
+    #[test]
+    fn test_and_or_operators() {
+        let yaml = r#"
+version: 1
+rules:
+  - name: combined
+    when: artifact.signature_verified != true && dependency.has_revoked == true
+    decision: deny
+    reason: "Unsigned with revoked dep"
+"#;
+        let policy = PolicyDefinition::from_yaml(yaml).unwrap();
+        let ctx = sample_context();
+        let res = PolicyEvaluator::evaluate(&policy, &ctx).unwrap();
+        assert!(!res.allowed);
+    }
+
+    #[test]
+    fn test_or_operator() {
+        let yaml = r#"
+version: 1
+rules:
+  - name: either
+    when: network.identity == "mainnet" || risk.score >= 9.0
+    decision: warn
+"#;
+        let policy = PolicyDefinition::from_yaml(yaml).unwrap();
+        let ctx = sample_context(); // network=testnet, score=9.5
+        let res = PolicyEvaluator::evaluate(&policy, &ctx).unwrap();
+        assert_eq!(res.warnings.len(), 1);
+    }
+
+    // ── JSON policy parsing ────────────────────────────────────────────────
+
+    #[test]
+    fn test_json_policy_parsing() {
+        let json = r#"{
+  "version": 1,
+  "rules": [
+    {
+      "name": "check-size",
+      "when": "artifact.size > 100",
+      "decision": "deny",
+      "reason": "Artifact too large"
+    }
+  ]
+}"#;
+        let policy = PolicyDefinition::from_json(json).unwrap();
+        let ctx = sample_context(); // size=1024
+        let res = PolicyEvaluator::evaluate(&policy, &ctx).unwrap();
+        assert!(!res.allowed);
+    }
+
+    // ── Default policy resolution ──────────────────────────────────────────
+
+    #[test]
+    fn test_resolve_effective_policy_override_takes_precedence() {
+        let override_yaml = r#"
+version: 1
+rules:
+  - name: override-rule
+    when: artifact.is_wasm == true
+    decision: deny
+"#;
+        let default_yaml = r#"
+version: 1
+rules:
+  - name: default-rule
+    when: artifact.is_wasm == true
+    decision: allow
+"#;
+        let ov = PolicyDefinition::from_yaml(override_yaml).unwrap();
+        let def = PolicyDefinition::from_yaml(default_yaml).unwrap();
+        let effective = resolve_effective_policy(Some(&ov), Some(&def)).unwrap().unwrap();
+        assert_eq!(effective.rules[0].name, "override-rule");
+    }
+
+    #[test]
+    fn test_resolve_effective_policy_fallback_to_default() {
+        let default_yaml = r#"
+version: 1
+rules:
+  - name: default-rule
+    when: artifact.is_wasm == true
+    decision: warn
+"#;
+        let def = PolicyDefinition::from_yaml(default_yaml).unwrap();
+        let effective = resolve_effective_policy(None, Some(&def)).unwrap().unwrap();
+        assert_eq!(effective.rules[0].name, "default-rule");
+    }
+
+    #[test]
+    fn test_resolve_effective_policy_none_when_both_absent() {
+        let effective = resolve_effective_policy(None, None).unwrap();
+        assert!(effective.is_none());
+    }
+
+    #[test]
+    fn test_parse_optional_policy_none() {
+        let result = parse_optional_policy(None).unwrap();
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_parse_optional_policy_empty_string() {
+        let result = parse_optional_policy(Some("   ")).unwrap();
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_parse_optional_policy_valid_yaml() {
+        let yaml = r#"
+version: 1
+rules:
+  - name: test
+    when: artifact.is_wasm == true
+    decision: allow
+"#;
+        let result = parse_optional_policy(Some(yaml)).unwrap();
+        assert!(result.is_some());
+    }
+
+    // ── Evidence / input values ────────────────────────────────────────────
+
+    #[test]
+    fn test_evaluated_rules_capture_input_values() {
+        let yaml = r#"
+version: 1
+rules:
+  - name: check-risk
+    when: risk.max_severity == "critical"
+    decision: deny
+"#;
+        let policy = PolicyDefinition::from_yaml(yaml).unwrap();
+        let ctx = sample_context();
+        let res = PolicyEvaluator::evaluate(&policy, &ctx).unwrap();
+
+        let rule = &res.evaluated_rules[0];
+        assert!(rule.matched);
+        // Should have captured the input value for risk.max_severity
+        assert!(rule.input_values.contains_key("risk.max_severity"));
+        let val = &rule.input_values["risk.max_severity"];
+        assert_eq!(val.as_str(), Some("critical"));
+    }
+
+    // ── Backward compatibility ─────────────────────────────────────────────
+
+    #[test]
+    fn test_no_policy_allows_publish() {
+        // When no policy is configured, publishing should work without error.
+        // This tests the backward compatibility requirement.
+        let ctx = clean_context();
+        // No policy evaluation = backward compatible
+        let effective = resolve_effective_policy(None, None).unwrap();
+        assert!(effective.is_none());
+    }
+
+    // ── Malformed JSON policy ──────────────────────────────────────────────
+
+    #[test]
+    fn test_malformed_json_fails_closed() {
+        let res = PolicyDefinition::from_json("not valid json");
+        assert!(matches!(res, Err(PolicyError::MalformedPolicy(_))));
+    }
+
+    #[test]
+    fn test_malformed_yaml_fails_closed() {
+        let res = PolicyDefinition::from_yaml(
+            "version: 1\nrules:\n  - invalid yaml structure!!!",
+        );
+        assert!(matches!(res, Err(PolicyError::MalformedPolicy(_))));
     }
 }

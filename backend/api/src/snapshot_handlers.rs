@@ -172,6 +172,7 @@ pub async fn get_contract_snapshot(
     let dependency_scan = fetch_dependency_scan(&state, contract_uuid).await?;
     let deprecation = fetch_deprecation(&state, contract_uuid).await?;
     let lineage = fetch_lineage(&state, contract_uuid).await?;
+    let policy_evaluation = fetch_policy_evaluation(&state, contract_uuid).await?;
 
     let payload = SnapshotPayload {
         schema_version: SNAPSHOT_SCHEMA_VERSION.to_string(),
@@ -196,7 +197,7 @@ pub async fn get_contract_snapshot(
         },
         dependency_scan,
         deprecation,
-        policy_evaluation: None,
+        policy_evaluation,
         lineage,
     };
 
@@ -363,4 +364,34 @@ async fn fetch_lineage(state: &AppState, contract_uuid: Uuid) -> ApiResult<Vec<L
     }
 
     Ok(chain)
+}
+
+/// Fetch the most recent policy evaluation result from the audit log for this
+/// contract. Policy evaluations are stored as part of the `ContractPublished`
+/// action's `new_value` field.
+async fn fetch_policy_evaluation(
+    state: &AppState,
+    contract_uuid: Uuid,
+) -> ApiResult<Option<Value>> {
+    let row: Option<(Value,)> = sqlx::query_as(
+        r#"
+        SELECT new_value
+        FROM contract_audit_log
+        WHERE contract_id = $1
+          AND action_type = 'contract_published'
+        ORDER BY timestamp DESC
+        LIMIT 1
+        "#,
+    )
+    .bind(contract_uuid)
+    .fetch_optional(&state.db)
+    .await
+    .map_err(|e| db_internal_error("fetch policy evaluation for snapshot", e))?;
+
+    Ok(row.and_then(|(new_val,)| {
+        new_val
+            .get("policy_evaluation")
+            .filter(|v| !v.is_null())
+            .cloned()
+    }))
 }

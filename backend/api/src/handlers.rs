@@ -4758,7 +4758,7 @@ async fn publish_contract_inner(
         },
     };
 
-    let _policy_eval_result = if let Some(ref policy_str) = req.policy {
+    let policy_eval_result = if let Some(ref policy_str) = req.policy {
         let policy_def = shared::policy::PolicyDefinition::from_yaml(policy_str)
             .or_else(|_| shared::policy::PolicyDefinition::from_json(policy_str))
             .map_err(|err| {
@@ -4976,7 +4976,8 @@ async fn publish_contract_inner(
         "network": { "before": Value::Null, "after": contract.network.to_string() },
         "is_verified": { "before": Value::Null, "after": contract.is_verified },
         "category": { "before": Value::Null, "after": contract.category },
-        "tags": { "before": Value::Null, "after": contract.tags }
+        "tags": { "before": Value::Null, "after": contract.tags },
+        "policy_evaluation": policy_eval_result.as_ref().and_then(|ev| serde_json::to_value(ev).ok()).unwrap_or(Value::Null)
     });
 
     write_contract_audit_log(
