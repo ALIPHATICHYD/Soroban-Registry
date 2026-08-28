@@ -69,13 +69,19 @@ pub fn resolve(graph: &HashMap<String, Vec<String>>) -> Result<Vec<String>, Depe
         }
     }
 
-    // Build in-degree map.
-    let mut in_degree: HashMap<&str, usize> = graph.keys().map(|k| (k.as_str(), 0)).collect();
-    for deps in graph.values() {
-        for dep in deps {
-            *in_degree.entry(dep.as_str()).or_insert(0) += 1;
-        }
-    }
+    // Build in-degree map. Edges point dependency -> dependent, so a node's
+    // in-degree is the number of *distinct* dependencies it declares. Seeding it
+    // from the dependent count instead would be inconsistent with the decrement
+    // below, which walks dependents, and reports acyclic graphs as circular.
+    // Distinct matters: the decrement uses `any`, so a dependency listed twice
+    // would otherwise never drain to zero.
+    let mut in_degree: HashMap<&str, usize> = graph
+        .iter()
+        .map(|(k, deps)| {
+            let distinct: HashSet<&str> = deps.iter().map(|d| d.as_str()).collect();
+            (k.as_str(), distinct.len())
+        })
+        .collect();
 
     // Enqueue zero-in-degree nodes (sorted for deterministic output).
     let mut queue: VecDeque<&str> = {

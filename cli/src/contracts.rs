@@ -1,10 +1,7 @@
-use crate::net::RequestBuilderExt;
 use crate::output_format::{self, OutputFormat};
 use anyhow::{Context, Result};
 use colored::Colorize;
-use reqwest::StatusCode;
 use serde_json::json;
-use std::cmp::Ordering;
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ContractListItem {
@@ -247,9 +244,9 @@ fn print_table(contracts: &[ContractListItem]) {
     // Rows
     for contract in contracts {
         let verified = if contract.is_verified {
-            "✓".green().to_string()
+            "yes".green().to_string()
         } else {
-            "✗".red().to_string()
+            "no".red().to_string()
         };
 
         let health_color = match contract.health_score {
@@ -333,25 +330,23 @@ fn print_yaml(contracts: &[ContractListItem]) {
 pub async fn info(api_url: &str, id: &str, json_output: bool) -> Result<()> {
     let t0 = std::time::Instant::now();
 
-    let url = format!("{}/api/contracts/{}", api_url, id);
-    let query = vec![
-        ("include_stats", "true".to_string()),
-        ("include_versions", "true".to_string()),
-        ("include_abi", "true".to_string()),
-    ];
-
-    let (status, body) = crate::cached_http::cached_get(&url, &query)
+    // The document is kept untyped: `--json` passes the server's response
+    // through verbatim, so fields the registry adds later are not dropped.
+    let data: serde_json::Value = crate::registry::client(api_url)
+        .await?
+        .send_json(
+            registry_client::RequestSpec::get(format!("/api/contracts/{id}"))
+                .query_pair("include_stats", "true")
+                .query_pair("include_versions", "true")
+                .query_pair("include_abi", "true"),
+        )
         .await
-        .context("Failed to connect to the registry API")?;
-
-    if status == StatusCode::NOT_FOUND {
-        anyhow::bail!("Contract not found for address or slug: {}", id.bold());
-    } else if !status.is_success() {
-        anyhow::bail!("Failed to fetch contract info: HTTP {status}");
-    }
-
-    let data: serde_json::Value =
-        serde_json::from_str(&body).context("Invalid JSON response from server")?;
+        .map_err(|err| match err {
+            registry_client::Error::NotFound(_) => {
+                anyhow::anyhow!("Contract not found for address or slug: {}", id.bold())
+            }
+            other => anyhow::anyhow!("Failed to fetch contract info: {other}"),
+        })?;
 
     if json_output {
         println!("{}", serde_json::to_string_pretty(&data)?);
@@ -381,9 +376,9 @@ pub async fn info(api_url: &str, id: &str, json_output: bool) -> Result<()> {
     }
 
     let status_str = if is_verified {
-        "✓ Verified".green()
+        "Verified".green()
     } else {
-        "○ Unverified".yellow()
+        "Unverified".yellow()
     };
     println!("{:<15} {}", "Status:".bold(), status_str);
 
@@ -457,33 +452,21 @@ pub async fn run_details(
     network: &str,
     json_output: bool,
 ) -> Result<()> {
-    let url = format!("{}/api/contracts/{}?network={}", api_url, address, network);
-    log::debug!("Fetching contract details from: {}", url);
+    log::debug!("Fetching contract details for {address} on {network}");
 
-    let client = crate::net::client();
-    let response = client
-        .get(&url)
-        .send_with_retry()
+    let contract: serde_json::Value = crate::registry::client(api_url)
+        .await?
+        .send_json(
+            registry_client::RequestSpec::get(format!("/api/contracts/{address}"))
+                .query_pair("network", network),
+        )
         .await
-        .context("Failed to fetch contract details from API")?;
-
-    if !response.status().is_success() {
-        let status = response.status();
-        if status == StatusCode::NOT_FOUND {
-            anyhow::bail!("Contract not found for address: {}", address.bold());
-        }
-        let body = response.text().await.unwrap_or_default();
-        anyhow::bail!(
-            "Failed to fetch contract details: HTTP {} - {}",
-            status,
-            body
-        );
-    }
-
-    let contract: serde_json::Value = response
-        .json()
-        .await
-        .context("Failed to parse contract response")?;
+        .map_err(|err| match err {
+            registry_client::Error::NotFound(_) => {
+                anyhow::anyhow!("Contract not found for address: {}", address.bold())
+            }
+            other => anyhow::anyhow!("Failed to fetch contract details: {other}"),
+        })?;
 
     if json_output {
         println!("{}", serde_json::to_string_pretty(&contract)?);

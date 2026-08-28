@@ -138,7 +138,7 @@ impl ContractType {
     async fn audit_log(&self, ctx: &Context<'_>) -> Result<Vec<AuditLogType>> {
         let state = ctx.data::<AppState>()?;
         let logs: Vec<ContractAuditLog> = sqlx::query_as(
-            "SELECT * FROM contract_audit_log WHERE contract_id = $1 ORDER BY created_at DESC",
+            "SELECT * FROM contract_audit_log WHERE contract_id = $1 ORDER BY created_at DESC, id ASC",
         )
         .bind(self.id)
         .fetch_all(&state.db)
@@ -154,7 +154,7 @@ impl ContractType {
     ) -> Result<Vec<InteractionType>> {
         let state = ctx.data::<AppState>()?;
         let interactions: Vec<ContractInteraction> = sqlx::query_as(
-            "SELECT * FROM contract_interactions WHERE contract_id = $1 ORDER BY created_at DESC LIMIT $2",
+            "SELECT * FROM contract_interactions WHERE contract_id = $1 ORDER BY created_at DESC, id ASC LIMIT $2",
         )
         .bind(self.id)
         .bind(limit.unwrap_or(50))
@@ -353,7 +353,7 @@ impl PublisherType {
     async fn contracts(&self, ctx: &Context<'_>) -> Result<Vec<ContractType>> {
         let state = ctx.data::<AppState>()?;
         let contracts: Vec<Contract> = sqlx::query_as(
-            "SELECT * FROM contracts WHERE publisher_id = $1 ORDER BY created_at DESC",
+            "SELECT * FROM contracts WHERE publisher_id = $1 ORDER BY created_at DESC, id ASC",
         )
         .bind(self.id)
         .fetch_all(&state.db)
@@ -412,7 +412,7 @@ impl OrganizationType {
     async fn contracts(&self, ctx: &Context<'_>) -> Result<Vec<ContractType>> {
         let state = ctx.data::<AppState>()?;
         let contracts: Vec<Contract> = sqlx::query_as(
-            "SELECT * FROM contracts WHERE organization_id = $1 ORDER BY created_at DESC",
+            "SELECT * FROM contracts WHERE organization_id = $1 ORDER BY created_at DESC, id ASC",
         )
         .bind(self.id)
         .fetch_all(&state.db)

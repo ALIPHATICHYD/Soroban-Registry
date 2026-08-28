@@ -73,3 +73,6 @@ CLAUDE.md
 plan.md
 tasks/
 ASSUMPTIONS.md
+
+# Local pgBackRest overrides (real object-storage credentials)
+database/pgbackrest/pgbackrest.local.env

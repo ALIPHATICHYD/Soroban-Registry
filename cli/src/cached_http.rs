@@ -32,6 +32,12 @@ fn options() -> HttpCacheOptions {
     CACHE_OPTS.get().copied().unwrap_or_default()
 }
 
+/// The per-invocation cache settings, for callers that do their own fetching —
+/// e.g. the shared registry client's cache hook in [`crate::registry`].
+pub fn cache_options() -> HttpCacheOptions {
+    options()
+}
+
 /// Perform a GET request, returning cached body when available.
 pub async fn cached_get(url: &str, query: &[(&str, String)]) -> Result<(StatusCode, String)> {
     let opts = options();
@@ -42,7 +48,7 @@ pub async fn cached_get(url: &str, query: &[(&str, String)]) -> Result<(StatusCo
             if opts.verbose >= 1 {
                 eprintln!(
                     "{} cache hit (expires in {}s): {}",
-                    "◀".cyan(),
+                    "[CACHE]".cyan(),
                     entry.expires_in().unwrap_or(0),
                     truncate_key(&cache_key)
                 );
@@ -55,7 +61,7 @@ pub async fn cached_get(url: &str, query: &[(&str, String)]) -> Result<(StatusCo
     } else if opts.verbose >= 1 {
         eprintln!(
             "{} cache bypassed: {}",
-            "↷".yellow(),
+            "[CACHE]".yellow(),
             truncate_key(&cache_key)
         );
     }
@@ -76,7 +82,7 @@ pub async fn cached_get(url: &str, query: &[(&str, String)]) -> Result<(StatusCo
         if opts.verbose >= 1 {
             eprintln!(
                 "{} cached response: {}",
-                "▶".cyan(),
+                "[CACHE]".cyan(),
                 truncate_key(&cache_key)
             );
         }

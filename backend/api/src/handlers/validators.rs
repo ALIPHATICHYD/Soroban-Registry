@@ -135,7 +135,7 @@ pub async fn register_validator(
 /// List all validators
 pub async fn list_validators(State(state): State<AppState>) -> ApiResult<Json<Vec<Validator>>> {
     let validators: Vec<Validator> =
-        sqlx::query_as("SELECT * FROM validators ORDER BY reputation_score DESC")
+        sqlx::query_as("SELECT * FROM validators ORDER BY reputation_score DESC, id ASC")
             .fetch_all(&state.db)
             .await
             .map_err(|err| ApiError::internal(format!("Failed to fetch validators: {}", err)))?;
@@ -175,7 +175,7 @@ pub async fn get_available_tasks(
     State(state): State<AppState>,
 ) -> ApiResult<Json<Vec<VerificationTask>>> {
     let tasks: Vec<VerificationTask> = sqlx::query_as(
-        "SELECT * FROM verification_tasks WHERE status = 'pending' ORDER BY created_at ASC LIMIT 10"
+        "SELECT * FROM verification_tasks WHERE status = 'pending' ORDER BY created_at ASC, id ASC LIMIT 10"
     )
     .fetch_all(&state.db)
     .await
