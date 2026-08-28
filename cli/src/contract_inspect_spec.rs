@@ -181,6 +181,7 @@ pub async fn run_inspect_spec(wasm_file: &str, json_output: bool) -> Result<()> 
     let mut event_names = HashSet::new();
 
     for entry in &parsed_entries {
+        #[allow(unreachable_patterns)] // future-proof against new stellar-xdr variants
         match entry {
             ScSpecEntry::FunctionV0(f) => {
                 counts.functions += 1;
@@ -307,6 +308,16 @@ pub async fn run_inspect_spec(wasm_file: &str, json_output: bool) -> Result<()> 
                     });
                 }
                 events.push(ev_name);
+            }
+            // Catch-all for future or unknown ScSpecEntry variants.
+            // This ensures forward-compatibility: if the stellar-xdr crate
+            // adds new variants, they are reported as unsupported rather than
+            // causing a compile-time or silent-data-loss issue.
+            _ => {
+                diagnostics.push(DiagnosticOutput {
+                    severity: "warning".to_string(),
+                    message: "Unsupported or unknown contract-spec entry version detected".to_string(),
+                });
             }
         }
     }
