@@ -13,27 +13,19 @@
       "description": "Registry API URL"
     },
     "check-updates": {
-      "type": "enum",
+      "type": "boolean",
       "required": false,
       "repeatable": false,
       "secret": false,
       "deprecated": false,
-      "enum_values": [
-        "true",
-        "false"
-      ],
       "description": "Check for CLI updates before running the command"
     },
     "describe": {
-      "type": "enum",
+      "type": "boolean",
       "required": false,
       "repeatable": false,
       "secret": false,
       "deprecated": false,
-      "enum_values": [
-        "true",
-        "false"
-      ],
       "description": "Print machine-readable JSON command schema description (#1145)"
     },
     "network": {
@@ -45,15 +37,11 @@
       "description": "Stellar network to use (mainnet | testnet | futurenet)"
     },
     "no-cache": {
-      "type": "enum",
+      "type": "boolean",
       "required": false,
       "repeatable": false,
       "secret": false,
       "deprecated": false,
-      "enum_values": [
-        "true",
-        "false"
-      ],
       "description": "Skip local response cache and always fetch fresh data"
     },
     "profile": {
