@@ -33,6 +33,26 @@ fn describe_root_command() {
 }
 
 #[test]
+fn describe_root_boolean_args_not_enum() {
+    let output = Command::new(get_binary_path())
+        .arg("--describe")
+        .output()
+        .expect("run soroban-registry --describe");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let json: serde_json::Value = serde_json::from_str(&stdout).expect("valid JSON");
+
+    // Boolean flags should be typed as "boolean", not "enum" with ["true","false"]
+    let check_updates = &json["arguments"]["check-updates"];
+    assert_eq!(check_updates["type"], "boolean", "--check-updates should be boolean");
+    assert!(check_updates["enum_values"].is_null(), "boolean args must not have enum_values");
+
+    let describe_arg = &json["arguments"]["describe"];
+    assert_eq!(describe_arg["type"], "boolean", "--describe should be boolean");
+}
+
+#[test]
 fn describe_contract_verify_snapshot_nested_command() {
     let output = Command::new(get_binary_path())
         .arg("contract")
@@ -70,6 +90,39 @@ fn describe_secret_argument_protection() {
 
     assert_eq!(json["arguments"]["private-key"]["secret"], true);
     assert_eq!(json["arguments"]["private-key"]["default_value"], serde_json::Value::Null);
+}
+
+#[test]
+fn describe_repeatable_flag_marked() {
+    let output = Command::new(get_binary_path())
+        .arg("--describe")
+        .output()
+        .expect("run soroban-registry --describe");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let json: serde_json::Value = serde_json::from_str(&stdout).expect("valid JSON");
+
+    // --verbose is a Count action, so it should be repeatable
+    let verbose = &json["arguments"]["verbose"];
+    assert_eq!(verbose["type"], "number", "--verbose should be number type");
+    assert_eq!(verbose["repeatable"], true, "--verbose should be repeatable");
+}
+
+#[test]
+fn describe_exit_codes_present() {
+    let output = Command::new(get_binary_path())
+        .arg("--describe")
+        .output()
+        .expect("run soroban-registry --describe");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let json: serde_json::Value = serde_json::from_str(&stdout).expect("valid JSON");
+
+    assert!(json["exit_codes"].as_object().unwrap().contains_key("0"));
+    assert!(json["exit_codes"].as_object().unwrap().contains_key("1"));
+    assert!(json["exit_codes"].as_object().unwrap().contains_key("2"));
 }
 
 #[test]

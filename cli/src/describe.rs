@@ -126,25 +126,34 @@ fn build_schema(cmd: &Command, full_name: &str) -> CommandSchema {
         let is_secret = is_secret_argument(id, &arg_name);
         let is_path = is_path_argument(id, &arg_name, arg.get_value_names());
 
-        let possible_vals: Vec<String> = arg
-            .get_possible_values()
-            .into_iter()
-            .filter_map(|pv| {
-                if pv.is_hide_set() {
-                    None
-                } else {
-                    Some(pv.get_name().to_string())
-                }
-            })
-            .collect();
-
-        let arg_type = if !possible_vals.is_empty() {
-            "enum".to_string()
-        } else if matches!(
+        // Detect boolean flags FIRST: clap generates "true"/"false" as
+        // possible values for ArgAction::SetTrue/SetFalse, which would
+        // otherwise be misclassified as enum arguments.
+        let is_boolean = matches!(
             arg.get_action(),
             ArgAction::SetTrue | ArgAction::SetFalse
-        ) {
+        );
+
+        let possible_vals: Vec<String> = if is_boolean {
+            Vec::new() // skip clap's auto-generated true/false values
+        } else {
+            arg
+                .get_possible_values()
+                .into_iter()
+                .filter_map(|pv| {
+                    if pv.is_hide_set() {
+                        None
+                    } else {
+                        Some(pv.get_name().to_string())
+                    }
+                })
+                .collect()
+        };
+
+        let arg_type = if is_boolean {
             "boolean".to_string()
+        } else if !possible_vals.is_empty() {
+            "enum".to_string()
         } else if matches!(arg.get_action(), ArgAction::Count) || is_numeric_argument(id, &arg_name)
         {
             "number".to_string()
@@ -395,4 +404,103 @@ pub fn generate_or_check_artifacts(check: bool, dir: Option<&Path>) -> Result<()
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::CommandFactory;
+
+    #[test]
+    fn root_schema_has_version_and_subcommands() {
+        let cmd = crate::Cli::command();
+        let schema = build_schema(&cmd, cmd.get_name());
+        assert_eq!(schema.version, SCHEMA_VERSION);
+        assert_eq!(schema.command, "soroban-registry");
+        assert!(!schema.subcommands.is_empty());
+        assert!(schema.subcommands.contains(&"contract".to_string()));
+    }
+
+    #[test]
+    fn boolean_arguments_are_typed_boolean_not_enum() {
+        let cmd = crate::Cli::command();
+        let schema = build_schema(&cmd, cmd.get_name());
+        // --json and --describe are boolean flags (ArgAction::SetTrue)
+        if let Some(json_arg) = schema.arguments.get("json") {
+            assert_eq!(json_arg.arg_type, "boolean", "--json should be typed as boolean");
+        }
+        if let Some(desc) = schema.arguments.get("describe") {
+            assert_eq!(desc.arg_type, "boolean", "--describe should be typed as boolean");
+        }
+    }
+
+    #[test]
+    fn enum_arguments_detected_from_possible_values() {
+        let cmd = crate::Cli::command();
+        let contract_sub = cmd.find_subcommand("contract").expect("contract subcommand");
+        // The 'verify' subcommand should have a --format arg with enum values
+        if let Some(verify) = contract_sub.find_subcommand("verify") {
+            let schema = build_schema(verify, "soroban-registry contract verify");
+            // Check that at least one argument is typed as enum
+            let has_enum = schema.arguments.values().any(|a| a.arg_type == "enum");
+            assert!(has_enum, "expected at least one enum argument in contract verify");
+        }
+    }
+
+    #[test]
+    fn secret_arguments_flagged() {
+        let cmd = crate::Cli::command();
+        let contract_sub = cmd.find_subcommand("contract").expect("contract subcommand");
+        if let Some(deprecate) = contract_sub.find_subcommand("deprecate") {
+            let schema = build_schema(deprecate, "soroban-registry contract deprecate");
+            let pk = schema.arguments.get("private-key").expect("private-key arg");
+            assert!(pk.secret, "private-key should be flagged as secret");
+            assert!(pk.default_value.is_none(), "secret args must not expose default_value");
+        }
+    }
+
+    #[test]
+    fn nested_command_schema_resolves_path() {
+        let cmd = crate::Cli::command();
+        let schema = generate_schema_for_path(&cmd, &["contract", "inspect-spec"])
+            .expect("resolve nested path");
+        assert_eq!(schema.command, "soroban-registry contract inspect-spec");
+        assert!(schema.arguments.contains_key("wasm-file"));
+    }
+
+    #[test]
+    fn unknown_subcommand_returns_error() {
+        let cmd = crate::Cli::command();
+        let result = generate_schema_for_path(&cmd, &["nonexistent"]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn verbose_flag_is_count_type() {
+        let cmd = crate::Cli::command();
+        let schema = build_schema(&cmd, cmd.get_name());
+        let verbose = schema.arguments.get("verbose").expect("verbose arg");
+        assert_eq!(verbose.arg_type, "number", "--verbose should be typed as number (count)");
+        assert!(verbose.repeatable, "--verbose should be repeatable");
+    }
+
+    #[test]
+    fn output_formats_inferred_from_format_arg() {
+        let cmd = crate::Cli::command();
+        if let Some(list) = cmd.find_subcommand("list") {
+            let schema = build_schema(list, "soroban-registry list");
+            assert!(schema.output.formats.contains(&"json".to_string()));
+            assert!(schema.output.formats.contains(&"table".to_string()));
+            assert!(schema.output.formats.contains(&"csv".to_string()));
+        }
+    }
+
+    #[test]
+    fn exit_codes_present() {
+        let cmd = crate::Cli::command();
+        let schema = build_schema(&cmd, cmd.get_name());
+        assert!(schema.exit_codes.contains_key("0"));
+        assert!(schema.exit_codes.contains_key("1"));
+        assert!(schema.exit_codes.contains_key("2"));
+    }
 }
