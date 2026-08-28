@@ -41,6 +41,26 @@ impl WasmValidationResult {
     }
 }
 
+/// Extract the raw bytes of the `contractspecv0` custom section, if present.
+/// Concatenates the payloads of every section with that name, matching how
+/// Soroban's toolchain may split them, before use with
+/// [`crate::contract_spec::parse_contract_spec`].
+pub fn extract_contract_spec_bytes(wasm_bytes: &[u8]) -> Option<Vec<u8>> {
+    let parser = Parser::new(0);
+    let mut out: Option<Vec<u8>> = None;
+
+    for payload in parser.parse_all(wasm_bytes) {
+        if let Ok(wasmparser::Payload::CustomSection(c)) = payload {
+            if c.name() == CONTRACT_SPEC_SECTION {
+                out.get_or_insert_with(Vec::new)
+                    .extend_from_slice(c.data());
+            }
+        }
+    }
+
+    out
+}
+
 /// Parse and structurally validate a WASM byte slice.
 ///
 /// Returns a populated [`WasmValidationResult`] even on failure; inspect
@@ -114,7 +134,9 @@ pub fn validate_wasm(wasm_bytes: &[u8]) -> WasmValidationResult {
     }
 
     let has_contract_spec = custom_sections.iter().any(|s| s == CONTRACT_SPEC_SECTION);
-    let has_env_meta = custom_sections.iter().any(|s| s == CONTRACT_ENV_META_SECTION);
+    let has_env_meta = custom_sections
+        .iter()
+        .any(|s| s == CONTRACT_ENV_META_SECTION);
 
     // Valid = structurally parseable AND has at least one function.
     let valid = errors.is_empty();
@@ -164,12 +186,18 @@ mod tests {
     ];
 
     /// Append a custom section with `name` and empty payload to `wasm`.
-    fn with_custom_section(mut wasm: Vec<u8>, name: &str) -> Vec<u8> {
+    fn with_custom_section(wasm: Vec<u8>, name: &str) -> Vec<u8> {
+        with_custom_section_payload(wasm, name, &[])
+    }
+
+    /// Append a custom section with `name` and the given payload to `wasm`.
+    fn with_custom_section_payload(mut wasm: Vec<u8>, name: &str, payload: &[u8]) -> Vec<u8> {
         let mut body = Vec::new();
         body.push(name.len() as u8); // name length (LEB128, fits in one byte here)
         body.extend_from_slice(name.as_bytes());
+        body.extend_from_slice(payload);
         wasm.push(0x00); // custom section id
-        wasm.push(body.len() as u8); // section size
+        wasm.push(body.len() as u8); // section size (fits in one byte for test fixtures)
         wasm.extend_from_slice(&body);
         wasm
     }
@@ -178,7 +206,10 @@ mod tests {
     fn parses_minimal_wasm_without_parse_errors() {
         let result = validate_wasm(MINIMAL_WASM);
         assert!(
-            !result.errors.iter().any(|e| e.contains("WASM parsing error")),
+            !result
+                .errors
+                .iter()
+                .any(|e| e.contains("WASM parsing error")),
             "unexpected parse errors: {:?}",
             result.errors
         );
@@ -221,5 +252,19 @@ mod tests {
         let wasm = with_custom_section(MINIMAL_WASM.to_vec(), CONTRACT_ENV_META_SECTION);
         let result = validate_wasm(&wasm);
         assert!(result.has_env_meta);
+    }
+
+    #[test]
+    fn extracts_contract_spec_payload_bytes() {
+        let payload = [1u8, 2, 3, 4];
+        let wasm =
+            with_custom_section_payload(MINIMAL_WASM.to_vec(), CONTRACT_SPEC_SECTION, &payload);
+        let extracted = extract_contract_spec_bytes(&wasm).expect("section should be found");
+        assert_eq!(extracted, payload);
+    }
+
+    #[test]
+    fn extract_returns_none_when_section_absent() {
+        assert!(extract_contract_spec_bytes(MINIMAL_WASM).is_none());
     }
 }

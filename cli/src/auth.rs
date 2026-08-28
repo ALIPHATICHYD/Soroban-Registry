@@ -266,6 +266,48 @@ pub async fn access_token_for_requests(api_url: &str) -> Result<Option<String>> 
     Ok(Some(session.access_token))
 }
 
+/// Read-only view of the stored session, for diagnostics such as
+/// `soroban-registry publisher doctor`.
+///
+/// Deliberately does **not** refresh the access token the way
+/// [`access_token_for_requests`] does: a diagnostic must report the current
+/// state, not mutate it, and a refresh would hide exactly the expiry problem
+/// the operator is trying to see.
+#[derive(Debug, Clone)]
+pub struct SessionDiagnostics {
+    pub method: String,
+    pub identity: String,
+    pub token_present: bool,
+    pub expires_at: Option<DateTime<Utc>>,
+    pub expired: bool,
+    /// A Stellar secret seed is held for this session, so the CLI can sign
+    /// publish payloads and re-issue tokens without an interactive login.
+    pub signing_secret_present: bool,
+    pub legacy_storage: bool,
+}
+
+/// Load the active session for reporting. `Ok(None)` means no session is stored.
+pub async fn session_diagnostics() -> Result<Option<SessionDiagnostics>> {
+    let Some(session) = load_active_session().await? else {
+        return Ok(None);
+    };
+
+    let expired = session
+        .record
+        .access_token_expires_at
+        .is_some_and(|expires_at| Utc::now() >= expires_at);
+
+    Ok(Some(SessionDiagnostics {
+        method: session.record.method.to_string(),
+        identity: session.record.identity.clone(),
+        token_present: !session.access_token.trim().is_empty(),
+        expires_at: session.record.access_token_expires_at,
+        expired,
+        signing_secret_present: session.refresh_secret.is_some(),
+        legacy_storage: session.legacy,
+    }))
+}
+
 async fn refresh_stellar_session(api_url: &str, session: &mut LoadedSession) -> Result<()> {
     let refresh_secret = session.refresh_secret.clone().ok_or_else(|| {
         anyhow::anyhow!("Missing refresh secret. Run `soroban-registry auth login` again.")

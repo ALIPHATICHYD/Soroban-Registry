@@ -241,7 +241,11 @@ pub async fn list_categories(
             COUNT(c.id) FILTER (WHERE c.created_at > NOW() - INTERVAL '24 hour') AS new_24h,
             COUNT(c.id) FILTER (WHERE c.created_at > NOW() - INTERVAL '7 day') AS trending
         FROM contract_categories cc
-        LEFT JOIN contracts c ON c.category = cc.name AND c.network = $1
+        -- Cast the network_type enum column to text: the bind param arrives as
+        -- text, and `enum = text` has no operator (Postgres 42883). Casting the
+        -- column (rather than $1::network_type) also tolerates unknown network
+        -- strings by matching nothing instead of erroring.
+        LEFT JOIN contracts c ON c.category = cc.name AND c.network::text = $1
         GROUP BY cc.id
         ORDER BY cc.is_default DESC, cc.name ASC
         "#

@@ -154,12 +154,8 @@ pub async fn get_contract_metadata_v1(
 
     // Issue #1061: attach a deprecation warning so callers are notified without
     // requiring a separate request to /deprecation-info.
-    let deprecation_warning = crate::deprecation_handlers::build_deprecation_warning(
-        &state,
-        contract_uuid,
-        None,
-    )
-    .await;
+    let deprecation_warning =
+        crate::deprecation_handlers::build_deprecation_warning(&state, contract_uuid, None).await;
 
     let response = json!({
         "id": contract.id,
@@ -667,7 +663,7 @@ async fn fetch_related_contracts(
         WHERE c.id <> $1
           AND c.network = $3
           AND (c.category IS NOT DISTINCT FROM $2 OR COALESCE(tag_match.matches, 0) > 0)
-        ORDER BY relation_score DESC, c.updated_at DESC
+        ORDER BY relation_score DESC, c.updated_at DESC, c.contract_id ASC
         LIMIT 10
         "#,
     )

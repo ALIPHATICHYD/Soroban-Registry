@@ -3406,6 +3406,7 @@ dependencies = [
  "sha2",
  "shared",
  "shlex",
+ "soroban-registry-client",
  "stellar-strkey 0.0.16",
  "stellar-xdr",
  "sysinfo 0.28.4",
@@ -3415,6 +3416,21 @@ dependencies = [
  "toml",
  "uuid",
  "wiremock",
+]
+
+[[package]]
+name = "soroban-registry-client"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "futures-util",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "shared",
+ "thiserror 1.0.69",
+ "tokio",
+ "uuid",
 ]
 
 [[package]]
