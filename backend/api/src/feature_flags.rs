@@ -122,6 +122,9 @@ impl FeatureFlagManager {
                 let hash = self.hash_uuid(uid);
                 (hash % 100) < (flag.rollout_percentage as u64)
             } else {
+                // EXEMPTION: Blind-rerun attacks are not a fairness concern for anonymous feature flags.
+                // An attacker could refresh repeatedly to see a feature, but since they have no persistent
+                // identifier, we cannot track them deterministically anyway. This is acceptable for basic rollouts.
                 rand::random::<u8>() % 100 < flag.rollout_percentage
             };
 

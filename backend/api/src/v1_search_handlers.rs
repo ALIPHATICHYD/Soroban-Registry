@@ -568,7 +568,7 @@ async fn build_pg_facets(
           ) @@ contracts_build_tsquery($1)
           AND c.visibility = 'public'
         GROUP BY c.category
-        ORDER BY cnt DESC
+        ORDER BY cnt DESC, c.category ASC
         LIMIT 50
         "#,
     )
@@ -593,7 +593,7 @@ async fn build_pg_facets(
           ) @@ contracts_build_tsquery($1)
           AND c.visibility = 'public'
         GROUP BY c.network
-        ORDER BY cnt DESC
+        ORDER BY cnt DESC, c.network ASC
         "#,
     )
     .bind(query_str)
@@ -619,7 +619,7 @@ async fn build_pg_facets(
           ) @@ contracts_build_tsquery($1)
           AND c.visibility = 'public'
         GROUP BY t.name
-        ORDER BY cnt DESC
+        ORDER BY cnt DESC, t.name ASC
         LIMIT 30
         "#,
     )

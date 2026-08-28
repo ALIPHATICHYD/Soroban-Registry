@@ -6,9 +6,9 @@ use sqlx::FromRow;
 use std::fmt;
 use uuid::Uuid;
 
-// ═══════════════════════════════════════════════════════════════════════════
+// ===========================================================================
 // EXISTING REGISTRY TYPES
-// ═══════════════════════════════════════════════════════════════════════════
+// ===========================================================================
 
 /// Represents a tag that can be attached to a contract
 #[derive(
@@ -216,7 +216,9 @@ pub struct NetworkHealthResponse {
 }
 
 /// Network where the contract is deployed
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, sqlx::Type, utoipa::ToSchema, PartialEq, Eq)]
+#[derive(
+    Debug, Clone, Copy, Serialize, Deserialize, sqlx::Type, utoipa::ToSchema, PartialEq, Eq,
+)]
 #[sqlx(type_name = "network_type", rename_all = "lowercase")]
 #[serde(rename_all = "lowercase")]
 pub enum Network {
@@ -246,7 +248,9 @@ fn parse_network_value<E: de::Error>(value: &str) -> Result<Network, E> {
     }
 }
 
-pub fn deserialize_optional_networks<'de, D>(deserializer: D) -> Result<Option<Vec<Network>>, D::Error>
+pub fn deserialize_optional_networks<'de, D>(
+    deserializer: D,
+) -> Result<Option<Vec<Network>>, D::Error>
 where
     D: serde::Deserializer<'de>,
 {
@@ -535,9 +539,9 @@ pub struct MetadataHistoryResponse {
     pub versions: Vec<ContractMetadataVersion>,
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
+// ===========================================================================
 // MULTI-TENANCY TYPES (Issue #420)
-// ═══════════════════════════════════════════════════════════════════════════
+// ===========================================================================
 
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::Type, utoipa::ToSchema, PartialEq)]
 #[sqlx(type_name = "organization_role", rename_all = "lowercase")]
@@ -1023,9 +1027,9 @@ pub struct CreateContractVersionRequest {
     pub signature_algorithm: Option<String>,
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
+// ===========================================================================
 // VERSION TRACKING TYPES (Issue #486)
-// ═══════════════════════════════════════════════════════════════════════════
+// ===========================================================================
 
 /// A single field-level difference between two contract versions
 #[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
@@ -1629,9 +1633,9 @@ pub struct ContractExportStatusResponse {
     pub error: Option<String>,
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
+// ===========================================================================
 // BULK IMPORT TYPES
-// ═══════════════════════════════════════════════════════════════════════════
+// ===========================================================================
 
 /// Single contract record for bulk import
 #[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
@@ -1732,9 +1736,9 @@ pub struct ContractImportStatusResponse {
     pub results: Option<Vec<ContractImportItemResult>>,
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
+// ===========================================================================
 // BULK EXPORT GET REQUEST (Query params)
-// ═══════════════════════════════════════════════════════════════════════════
+// ===========================================================================
 
 /// Query parameters for GET /contracts/export
 #[derive(Debug, Clone, Default, Serialize, Deserialize, utoipa::IntoParams)]
@@ -1920,9 +1924,9 @@ impl<T> PaginatedResponse<T> {
     }
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
+// ===========================================================================
 // CONTRACT INTERACTION HISTORY (Issue #46)
-// ═══════════════════════════════════════════════════════════════════════════
+// ===========================================================================
 
 /// One contract invocation row (DB)
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow, utoipa::ToSchema)]
@@ -2883,9 +2887,9 @@ pub struct HealthCheckRequest {
     pub passed: bool,
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
+// ===========================================================================
 // POPULARITY / TRENDING
-// ═══════════════════════════════════════════════════════════════════════════
+// ===========================================================================
 
 /// Query parameters for the trending contracts endpoint
 #[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema, utoipa::IntoParams)]
@@ -2918,10 +2922,10 @@ pub struct TrendingContract {
 }
 
 // MULTI-SIGNATURE DEPLOYMENT TYPES  (issue #47)
-// ═══════════════════════════════════════════════════════════════════════════
-// ════════════════════════════════════════════════════════════════════════════
+// ===========================================================================
+// ============================================================================
 // Audit Log & Version History types
-// ════════════════════════════════════════════════════════════════════════════
+// ============================================================================
 
 /// The type of mutation that triggered an audit log entry.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, sqlx::Type, utoipa::ToSchema)]
@@ -3112,9 +3116,9 @@ impl<T: Serialize> CursorPaginatedResponse<T> {
     }
 }
 
-// ════════════════════════════════════════════════════════════════════════════
+// ============================================================================
 // Config Management types
-// ════════════════════════════════════════════════════════════════════════════
+// ============================================================================
 
 /// Represents a contract configuration version in the registry
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow, utoipa::ToSchema)]
@@ -3173,9 +3177,9 @@ impl From<ContractConfig> for ContractConfigResponse {
     }
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
+// ===========================================================================
 // DATA RESIDENCY CONTROLS  (issue #100)
-// ═══════════════════════════════════════════════════════════════════════════
+// ===========================================================================
 
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::Type, utoipa::ToSchema)]
 #[sqlx(type_name = "residency_decision", rename_all = "lowercase")]
@@ -3260,9 +3264,9 @@ pub struct ListResidencyLogsParams {
     pub page: Option<i64>,
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
+// ===========================================================================
 // CONTRACT EVENT TYPES (issue #44)
-// ═══════════════════════════════════════════════════════════════════════════
+// ===========================================================================
 
 /// A contract event emitted during execution
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
@@ -3322,9 +3326,9 @@ pub struct EventExport {
     pub total_count: i64,
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
+// ===========================================================================
 // CONTRACT PACKAGE SIGNING (Issue #67)
-// ═══════════════════════════════════════════════════════════════════════════
+// ===========================================================================
 
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::Type, PartialEq)]
 #[sqlx(type_name = "signature_status", rename_all = "lowercase")]
@@ -3540,9 +3544,9 @@ impl ContractHealth {
     }
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
+// ===========================================================================
 // CONTRACT RECOMMENDATIONS (Issue #492)
-// ═══════════════════════════════════════════════════════════════════════════
+// ===========================================================================
 
 #[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct RecommendationReason {
@@ -3579,9 +3583,9 @@ pub struct ContractRecommendationsResponse {
     pub recommendations: Vec<RecommendedContract>,
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
+// ===========================================================================
 // COLLABORATIVE REVIEWS (Issue #502)
-// ═══════════════════════════════════════════════════════════════════════════
+// ===========================================================================
 
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::Type, PartialEq, utoipa::ToSchema)]
 #[sqlx(type_name = "collaborative_review_status", rename_all = "snake_case")]
@@ -3654,11 +3658,11 @@ pub struct CollaborativeReviewDetails {
     pub comments: Vec<CollaborativeComment>,
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
+// ===========================================================================
 // ADVANCED CONTRACT DEPENDENCIES (issue #417)
-// ═══════════════════════════════════════════════════════════════════════════
+// ===========================================================================
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct DependencyNode {
     pub contract_id: String,
     pub resolved_id: Option<Uuid>,
@@ -3670,7 +3674,7 @@ pub struct DependencyNode {
     pub visualization_hints: serde_json::Value,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct DependencyResponse {
     pub root: DependencyNode,
     pub total_dependencies: usize,
@@ -3755,9 +3759,9 @@ pub struct DiffSummary {
     pub breaking_count: i32,
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
+// ===========================================================================
 // CONTRACT DEPLOYMENT SIMULATION (Issue #256)
-// ═══════════════════════════════════════════════════════════════════════════
+// ===========================================================================
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SimulateDeployRequest {
@@ -3831,9 +3835,9 @@ pub struct ContractFunctionInfo {
     pub is_view: bool,
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
+// ===========================================================================
 // GAS USAGE ESTIMATION TYPES (Issue #496)
-// ═══════════════════════════════════════════════════════════════════════════
+// ===========================================================================
 
 /// Confidence level of a gas estimate based on available historical data.
 #[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
@@ -3917,9 +3921,9 @@ pub struct BatchGasEstimateResponse {
 // Contract changelog (release history)
 // ────────────────────────────────────────────────────────────────────────────
 
-// ═══════════════════════════════════════════════════════════════════════════
+// ===========================================================================
 // ANALYTICS DASHBOARD (issue #430)
-// ═══════════════════════════════════════════════════════════════════════════
+// ===========================================================================
 
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow, utoipa::ToSchema)]
 pub struct CategoryCount {
@@ -3947,9 +3951,9 @@ pub struct DashboardAnalyticsResponse {
     pub recent_additions: Vec<Contract>,
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
+// ===========================================================================
 // CONTRACT REVIEW SYSTEM (Issue: Review System Implementation)
-// ═══════════════════════════════════════════════════════════════════════════
+// ===========================================================================
 
 /// Review status for moderation workflow
 /// New reviews start as "pending" and must be approved before becoming visible
@@ -4107,9 +4111,9 @@ pub struct ReviewVoteResponse {
     pub vote_recorded: bool,
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
+// ===========================================================================
 // #487: Contract Clone/Mirror Types
-// ═══════════════════════════════════════════════════════════════════════════
+// ===========================================================================
 
 /// Request to clone an existing contract
 #[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
@@ -4173,9 +4177,9 @@ pub struct ContractCloneHistory {
     pub network: Network,
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
+// ===========================================================================
 // #499: Federated Registry Protocol Types
-// ═══════════════════════════════════════════════════════════════════════════
+// ===========================================================================
 
 /// Federation protocol version
 #[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
@@ -4381,9 +4385,9 @@ pub struct FederationSyncHistoryResponse {
     pub total_count: i64,
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
+// ===========================================================================
 // SECURITY SCANNING TYPES (#498)
-// ═══════════════════════════════════════════════════════════════════════════
+// ===========================================================================
 
 /// Security scanner configuration
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow, utoipa::ToSchema)]
@@ -4412,8 +4416,22 @@ pub enum ScanStatus {
 }
 
 /// Security issue severity
+// Copy/Eq/Ord/Hash so severities can be compared, counted, and used as map keys
+// by the dependency risk combinator (Issue #1147) without cloning. The variant
+// order below IS the severity order; do not reorder it.
 #[derive(
-    Debug, Clone, Serialize, Deserialize, sqlx::Type, utoipa::ToSchema, PartialEq, PartialOrd,
+    Debug,
+    Clone,
+    Copy,
+    Serialize,
+    Deserialize,
+    sqlx::Type,
+    utoipa::ToSchema,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
 )]
 #[sqlx(type_name = "issue_severity_type", rename_all = "lowercase")]
 pub enum IssueSeverity {
@@ -4621,9 +4639,9 @@ pub struct PaginatedAuditsResponse {
     pub per_page: i64,
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
+// ===========================================================================
 // NOTIFICATION/SUBSCRIPTION TYPES (#493)
-// ═══════════════════════════════════════════════════════════════════════════
+// ===========================================================================
 
 /// Notification type
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::Type, utoipa::ToSchema, PartialEq)]
@@ -4840,9 +4858,9 @@ pub struct NotificationStatistics {
     pub total_failed: i32,
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
+// ===========================================================================
 // ZERO-KNOWLEDGE PROOF VALIDATION SYSTEM (Issue #624)
-// ═══════════════════════════════════════════════════════════════════════════
+// ===========================================================================
 
 /// Supported ZK proof systems
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::Type, utoipa::ToSchema, PartialEq)]
@@ -5054,9 +5072,9 @@ pub struct ZkCircuitSummary {
     pub created_at: DateTime<Utc>,
 }
 
-// ═══════════════════════════════════════════════════════════
+// ===========================================================
 // Issue #1058 / #1094 — Ownership Transfer types
-// ═══════════════════════════════════════════════════════════
+// ===========================================================
 
 /// Status of an ownership transfer request.
 ///
@@ -5220,21 +5238,30 @@ pub struct OwnershipTransferLog {
     pub created_at: DateTime<Utc>,
 }
 
-/// Request to evaluate a policy-as-code admission check (#1148).
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PolicyCheckRequest {
-    pub policy: Option<String>,
-    pub context: Option<crate::policy::AdmissionContext>,
-    pub contract_wasm_base64: Option<String>,
-    pub contract_id: Option<String>,
-    pub network: Option<String>,
-    pub explain: Option<bool>,
+// ===========================================================================
+// SNAPSHOT TYPES
+// ===========================================================================
+
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct SnapshotPayload {
+    pub version: String,
+    pub registry_identity: String,
+    pub network: String,
+    pub timestamp: DateTime<Utc>,
+    pub contracts: Vec<Contract>,
+    pub versions: Vec<ContractVersion>,
+    pub artifact_hashes: Vec<String>,
+    pub interface_fingerprints: Vec<String>,
+    pub provenance_metadata: serde_json::Value,
+    pub deprecation_state: serde_json::Value,
+    pub vulnerability_state: serde_json::Value,
 }
 
-/// Response for a policy-as-code admission check (#1148).
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PolicyCheckResponse {
-    pub evaluation: crate::policy::PolicyEvaluationResult,
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct SignedSnapshot {
+    pub payload: SnapshotPayload,
+    pub signature: Option<String>,
+    pub public_key: Option<String>,
 }
 
 #[cfg(test)]

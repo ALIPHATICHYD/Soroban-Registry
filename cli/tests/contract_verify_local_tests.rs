@@ -8,7 +8,10 @@ use std::path::PathBuf;
 use std::process::Command;
 
 fn binary_path() -> PathBuf {
-    for var in ["CARGO_BIN_EXE_soroban_registry", "CARGO_BIN_EXE_soroban-registry"] {
+    for var in [
+        "CARGO_BIN_EXE_soroban_registry",
+        "CARGO_BIN_EXE_soroban-registry",
+    ] {
         if let Ok(path) = env::var(var) {
             return PathBuf::from(path);
         }
@@ -74,8 +77,14 @@ fn help_lists_wasm_and_verbose_flags() {
         .expect("run help");
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("--wasm"), "help should mention --wasm:\n{stdout}");
-    assert!(stdout.contains("--verbose"), "help should mention --verbose");
+    assert!(
+        stdout.contains("--wasm"),
+        "help should mention --wasm:\n{stdout}"
+    );
+    assert!(
+        stdout.contains("--verbose"),
+        "help should mention --verbose"
+    );
 }
 
 #[test]
@@ -88,7 +97,10 @@ fn valid_soroban_contract_passes() {
         String::from_utf8_lossy(&output.stderr)
     );
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("\"passed\": true"), "expected passed=true:\n{stdout}");
+    assert!(
+        stdout.contains("\"passed\": true"),
+        "expected passed=true:\n{stdout}"
+    );
     assert!(stdout.contains("\"is_soroban_contract\": true"));
 }
 
@@ -98,7 +110,10 @@ fn valid_wasm_without_spec_is_not_a_soroban_contract() {
     // clear "not a Soroban contract" style error.
     let (_dir, path) = write_temp(&wasm_with_function());
     let output = run_verify_wasm(&path, &[]);
-    assert!(!output.status.success(), "non-Soroban wasm should exit non-zero");
+    assert!(
+        !output.status.success(),
+        "non-Soroban wasm should exit non-zero"
+    );
     let combined = format!(
         "{}{}",
         String::from_utf8_lossy(&output.stdout),
@@ -114,9 +129,15 @@ fn valid_wasm_without_spec_is_not_a_soroban_contract() {
 fn invalid_magic_bytes_fail() {
     let (_dir, path) = write_temp(&[0xff, 0xff, 0xff, 0xff, 0x00, 0x01]);
     let output = run_verify_wasm(&path, &["--json"]);
-    assert!(!output.status.success(), "invalid WASM should exit non-zero");
+    assert!(
+        !output.status.success(),
+        "invalid WASM should exit non-zero"
+    );
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("\"passed\": false"), "expected passed=false:\n{stdout}");
+    assert!(
+        stdout.contains("\"passed\": false"),
+        "expected passed=false:\n{stdout}"
+    );
 }
 
 #[test]
@@ -129,7 +150,10 @@ fn empty_file_fails() {
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
-    assert!(combined.to_lowercase().contains("empty"), "should mention empty file:\n{combined}");
+    assert!(
+        combined.to_lowercase().contains("empty"),
+        "should mention empty file:\n{combined}"
+    );
 }
 
 #[test]
@@ -144,7 +168,10 @@ fn missing_file_fails_clearly() {
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
-    assert!(combined.to_lowercase().contains("not found"), "should report file not found:\n{combined}");
+    assert!(
+        combined.to_lowercase().contains("not found"),
+        "should report file not found:\n{combined}"
+    );
 }
 
 #[test]
@@ -153,8 +180,14 @@ fn verbose_shows_diagnostics() {
     let output = run_verify_wasm(&path, &["--verbose"]);
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("Diagnostics"), "verbose should print diagnostics:\n{stdout}");
-    assert!(stdout.contains("Exported functions"), "verbose should list exports");
+    assert!(
+        stdout.contains("Diagnostics"),
+        "verbose should print diagnostics:\n{stdout}"
+    );
+    assert!(
+        stdout.contains("Exported functions"),
+        "verbose should list exports"
+    );
 }
 
 #[test]
@@ -163,7 +196,10 @@ fn requires_address_or_wasm() {
         .args(["contract", "verify"])
         .output()
         .expect("run");
-    assert!(!output.status.success(), "no address and no --wasm should error");
+    assert!(
+        !output.status.success(),
+        "no address and no --wasm should error"
+    );
 }
 
 #[test]
@@ -175,5 +211,8 @@ fn rejects_both_address_and_wasm() {
         .arg(&path)
         .output()
         .expect("run");
-    assert!(!output.status.success(), "address + --wasm should be rejected");
+    assert!(
+        !output.status.success(),
+        "address + --wasm should be rejected"
+    );
 }

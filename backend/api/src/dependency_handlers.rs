@@ -1,190 +1,341 @@
+//! Contract dependency endpoints.
+//!
+//! The read path was rebuilt on the bounded recursive traversal in
+//! [`crate::dependency_graph`] (Issue #1147). What it replaced had three
+//! defects that are worth naming, because each is easy to reintroduce:
+//!
+//! - It queried `contract_dependencies` under a *call* shape
+//!   (`caller_id` / `callee_contract_id` / `call_volume`) that no migration ever
+//!   created, so the endpoint could only ever fail.
+//! - Its `LEFT JOIN contracts c ON c.contract_id = cd.callee_contract_id` had no
+//!   network qualifier. Since `contracts` is `UNIQUE(contract_id, network)`, an
+//!   address deployed on two networks matched **two** rows: a duplicate edge plus
+//!   silent cross-network contamination.
+//! - It was `#[async_recursion]` and called `visited.remove()` on unwind, so a
+//!   diamond was re-expanded once per incoming path -- exponential on wide
+//!   graphs, and non-deterministic about which path it reported.
+
 use crate::validation::extractors::ValidatedJson;
 use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
     Json,
 };
+use shared::dependency_graph::{DiagnosticKind, EdgeState};
 use shared::{ContractDependency, DependencyDeclaration, DependencyNode, DependencyResponse};
-use sqlx::Row;
-use std::collections::HashSet;
+use std::collections::BTreeMap;
 use uuid::Uuid;
 
 use crate::{
-    dependency,
+    contract_ref, dependency,
+    dependency_graph::{self, Direction, TraversalRequest, TraversedEdgeRow},
     error::{ApiError, ApiResult},
     handlers::db_internal_error,
     state::AppState,
 };
 
+/// Query parameters shared by the dependency read endpoints.
+#[derive(Debug, Default, serde::Deserialize)]
+pub struct DependencyQuery {
+    /// Required to disambiguate a bare contract address, which is only unique
+    /// per `(contract_id, network)`.
+    pub network: Option<shared::Network>,
+    /// Walk the whole closure rather than only direct edges. Defaults to true so
+    /// the endpoint keeps its historical recursive behaviour.
+    pub transitive: Option<bool>,
+    pub depth: Option<u32>,
+    pub max_nodes: Option<usize>,
+    /// Replay the declared graph as it stood at this instant.
+    pub as_of: Option<chrono::DateTime<chrono::Utc>>,
+    /// Include on-chain call edges alongside declared ones.
+    pub include_telemetry: Option<bool>,
+    /// 1-based page for the flat node list on `/dependency-graph`.
+    pub page: Option<i64>,
+    /// Nodes per page. Capped by [`MAX_PER_PAGE`].
+    pub per_page: Option<i64>,
+}
+
+/// Upper bound on `per_page`.
+///
+/// Offset pagination is only defensible here because the traversal already
+/// hard-caps its result set (`max_nodes`, itself capped at 10000). This keeps a
+/// single page from simply re-requesting that whole cap.
+const MAX_PER_PAGE: i64 = 200;
+const DEFAULT_PER_PAGE: i64 = 50;
+
 /// GET /api/contracts/:id/dependencies
-/// Returns the full recursive dependency tree (backward-compatible handler).
+///
+/// `:id` accepts a registry UUID or a Stellar contract address. A bare address
+/// registered on more than one network is a 409 with the candidates, not a
+/// silent pick.
+#[utoipa::path(
+    get,
+    path = "/api/contracts/{id}/dependencies",
+    params(
+        ("id" = String, Path, description = "Contract UUID or Stellar contract address"),
+        ("network" = Option<String>, Query, description = "mainnet | testnet | futurenet. Required to disambiguate an address registered on more than one network"),
+        ("transitive" = Option<bool>, Query, description = "Walk the whole closure (default true) rather than direct edges only"),
+        ("depth" = Option<u32>, Query, description = "Maximum traversal depth, capped server-side"),
+        ("max_nodes" = Option<u32>, Query, description = "Maximum nodes returned, capped server-side"),
+        ("as_of" = Option<String>, Query, description = "RFC3339 instant; replays the declared graph as it stood then"),
+        ("include_telemetry" = Option<bool>, Query, description = "Include on-chain call edges alongside declared ones")
+    ),
+    responses(
+        (status = 200, description = "Dependency tree", body = DependencyResponse),
+        (status = 400, description = "The id is neither a UUID nor a contract address"),
+        (status = 404, description = "Contract not found"),
+        (status = 409, description = "Ambiguous contract address; retry with ?network="),
+        (status = 503, description = "Traversal exceeded its time budget")
+    ),
+    tag = "Graphs"
+)]
 pub async fn get_contract_dependencies(
     State(state): State<AppState>,
-    Path(id): Path<Uuid>,
+    Path(id): Path<String>,
+    Query(query): Query<DependencyQuery>,
 ) -> ApiResult<Json<DependencyResponse>> {
-    let response = get_contract_dependencies_internal(&state, id).await?;
+    let contract = contract_ref::resolve(&state, &id, query.network).await?;
+    let response = dependency_tree(&state, contract, &query, Direction::Dependencies).await?;
     Ok(Json(response))
 }
 
+/// GET /api/contracts/:id/dependents
+///
+/// The reverse edges: what would be affected if this contract changed.
+#[utoipa::path(
+    get,
+    path = "/api/contracts/{id}/dependents",
+    params(
+        ("id" = String, Path, description = "Contract UUID or Stellar contract address"),
+        ("network" = Option<String>, Query, description = "mainnet | testnet | futurenet. Required to disambiguate an address registered on more than one network"),
+        ("transitive" = Option<bool>, Query, description = "Walk the whole closure (default true) rather than direct edges only"),
+        ("depth" = Option<u32>, Query, description = "Maximum traversal depth, capped server-side"),
+        ("max_nodes" = Option<u32>, Query, description = "Maximum nodes returned, capped server-side"),
+        ("as_of" = Option<String>, Query, description = "RFC3339 instant; replays the declared graph as it stood then"),
+        ("include_telemetry" = Option<bool>, Query, description = "Include on-chain call edges alongside declared ones")
+    ),
+    responses(
+        (status = 200, description = "Dependent tree", body = DependencyResponse),
+        (status = 400, description = "The id is neither a UUID nor a contract address"),
+        (status = 404, description = "Contract not found"),
+        (status = 409, description = "Ambiguous contract address; retry with ?network="),
+        (status = 503, description = "Traversal exceeded its time budget")
+    ),
+    tag = "Graphs"
+)]
+pub async fn get_contract_dependents(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Query(query): Query<DependencyQuery>,
+) -> ApiResult<Json<DependencyResponse>> {
+    let contract = contract_ref::resolve(&state, &id, query.network).await?;
+    let response = dependency_tree(&state, contract, &query, Direction::Dependents).await?;
+    Ok(Json(response))
+}
+
+/// GraphQL entry point (`Contract.dependencies`).
+///
+/// Takes a UUID because GraphQL has already resolved the contract; the network
+/// is read from the row rather than guessed.
 pub(crate) async fn get_contract_dependencies_internal(
     state: &AppState,
     id: Uuid,
 ) -> ApiResult<DependencyResponse> {
-    // 1. Fetch the root contract
-    let root_contract = sqlx::query(
-        "SELECT id, contract_id, name, verification_status FROM contracts WHERE id = $1",
+    let network: shared::Network =
+        sqlx::query_scalar("SELECT network FROM contracts WHERE id = $1")
+            .bind(id)
+            .fetch_optional(&state.db)
+            .await
+            .map_err(|err| db_internal_error("get root contract for dependencies", err))?
+            .ok_or_else(|| ApiError::not_found("ContractNotFound", "Contract not found"))?;
+
+    dependency_tree(
+        state,
+        contract_ref::ResolvedContract { uuid: id, network },
+        &DependencyQuery::default(),
+        Direction::Dependencies,
     )
-    .bind(id)
+    .await
+}
+
+/// Run the traversal and fold its flat rows back into the nested
+/// [`DependencyResponse`] shape.
+///
+/// The response type is kept **field-stable**: `graphql/types.rs` resolves
+/// `Contract.dependencies` through it, so fields may be added with serde
+/// defaults but never renamed or removed.
+async fn dependency_tree(
+    state: &AppState,
+    contract: contract_ref::ResolvedContract,
+    query: &DependencyQuery,
+    direction: Direction,
+) -> ApiResult<DependencyResponse> {
+    let root = sqlx::query_as::<_, (String, String, String)>(
+        "SELECT contract_id, name, verification_status::text FROM contracts WHERE id = $1",
+    )
+    .bind(contract.uuid)
     .fetch_optional(&state.db)
     .await
     .map_err(|err| db_internal_error("get root contract for dependencies", err))?
     .ok_or_else(|| ApiError::not_found("ContractNotFound", "Contract not found"))?;
 
-    let root_internal_id: Uuid = root_contract.get("id");
-    let root_c_id: String = root_contract.get("contract_id");
-    let root_name: String = root_contract.get("name");
-    let verification_status: String = root_contract.get("verification_status");
-
-    // Default status for root (string form)
-    let root_status = verification_status;
-
-    // 2. Build the tree using DFS and a visited set to detect circular references
-    let mut visited = HashSet::new();
-    visited.insert(root_internal_id);
-
-    let mut context = DependencyContext {
-        db: state.db.clone(),
-        total_dependencies: 0,
-        max_depth: 0,
-        has_circular: false,
-        depth_limit: 20,
+    let request = TraversalRequest {
+        root: contract.uuid,
+        network: contract.network,
+        direction,
+        transitive: query.transitive.unwrap_or(true),
+        max_depth: query
+            .depth
+            .unwrap_or(shared::dependency_graph::DEFAULT_MAX_DEPTH),
+        max_nodes: query
+            .max_nodes
+            .unwrap_or(shared::dependency_graph::DEFAULT_MAX_NODES),
+        as_of: query.as_of,
+        // Tenancy is enforced inside the traversal; this endpoint has no
+        // authenticated actor, so it sees the public graph only.
+        caller_org: None,
+        include_telemetry: query.include_telemetry.unwrap_or(false),
     };
 
-    let children = build_dependency_tree(
-        &mut context,
-        root_internal_id,
-        &mut visited,
-        1, // Current depth
-    )
-    .await?;
+    let result = dependency_graph::traverse(&state.db, &request).await?;
 
-    let root_node = DependencyNode {
-        contract_id: root_c_id,
-        resolved_id: Some(root_internal_id),
-        name: Some(root_name),
-        call_volume: 0, // Root volume is undefined or total calls
-        status: root_status.to_string(),
-        is_circular: false,
-        dependencies: children,
-        visualization_hints: serde_json::json!({
-            "node_type": "root",
-            "depth": 0
-        }),
-    };
+    let has_circular = result
+        .diagnostics
+        .iter()
+        .any(|d| d.kind == DiagnosticKind::Cycle);
+    let max_depth = result
+        .rows
+        .iter()
+        .map(|r| r.depth as usize)
+        .max()
+        .unwrap_or(0);
+    let total_dependencies = result.rows.len();
+
+    let (root_contract_id, root_name, root_status) = root;
 
     Ok(DependencyResponse {
-        root: root_node,
-        total_dependencies: context.total_dependencies,
-        max_depth: context.max_depth,
-        has_circular: context.has_circular,
+        root: DependencyNode {
+            contract_id: root_contract_id,
+            resolved_id: Some(contract.uuid),
+            name: Some(root_name),
+            call_volume: 0,
+            status: root_status,
+            is_circular: false,
+            dependencies: nest(&result.rows, contract.uuid),
+            visualization_hints: serde_json::json!({
+                "node_type": "root",
+                "depth": 0,
+                "truncated": result.truncated,
+                "truncation_reason": result.truncation_reason,
+                "diagnostics": result.diagnostics,
+            }),
+        },
+        total_dependencies,
+        max_depth,
+        has_circular,
     })
 }
 
-struct DependencyContext {
-    db: sqlx::PgPool,
-    total_dependencies: usize,
-    max_depth: usize,
-    has_circular: bool,
-    depth_limit: usize,
+/// Rebuild the nested tree from the flat, path-carrying traversal rows.
+///
+/// Grouping is keyed on the **parent path**, not on the parent contract id.
+/// Keying on the id alone conflates every occurrence of a contract that is
+/// reachable by more than one route: in a diamond, the shared node's children
+/// would be attached once per incoming path and then rendered under every
+/// occurrence, multiplying the subtree.
+///
+/// Each row already carries its full root-to-here path, so this is a single
+/// grouping pass -- no further queries and no recursion over the database.
+fn nest(rows: &[TraversedEdgeRow], root: Uuid) -> Vec<DependencyNode> {
+    let mut by_parent: BTreeMap<Vec<Uuid>, Vec<&TraversedEdgeRow>> = BTreeMap::new();
+    for row in rows {
+        by_parent
+            .entry(parent_path(row).to_vec())
+            .or_default()
+            .push(row);
+    }
+    children_of(&by_parent, &[root], 1)
 }
 
-#[async_recursion::async_recursion]
-async fn build_dependency_tree(
-    ctx: &mut DependencyContext,
-    caller_internal_id: Uuid,
-    visited: &mut HashSet<Uuid>,
+/// The path of the node this row hangs under.
+///
+/// A row that contributed a node (resolved, non-cycle) has `path` ending at
+/// that node, so its parent is one element shorter. A row that contributed no
+/// node -- unresolved, or cycle-closing -- already ends at its source, which is
+/// its parent.
+fn parent_path(row: &TraversedEdgeRow) -> &[Uuid] {
+    if row.target_contract_id.is_some() && row.cycle_with.is_none() {
+        &row.path[..row.path.len().saturating_sub(1)]
+    } else {
+        &row.path
+    }
+}
+
+fn children_of(
+    by_parent: &BTreeMap<Vec<Uuid>, Vec<&TraversedEdgeRow>>,
+    parent: &[Uuid],
     depth: usize,
-) -> Result<Vec<DependencyNode>, ApiError> {
-    if depth > ctx.max_depth {
-        ctx.max_depth = depth;
-    }
+) -> Vec<DependencyNode> {
+    let Some(rows) = by_parent.get(parent) else {
+        return Vec::new();
+    };
 
-    // Safety limit to prevent extremely deep graphs from dragging down the server
-    if depth > ctx.depth_limit {
-        return Ok(vec![]);
-    }
-
-    // Fetch all outgoing dependencies from `caller_internal_id`
-    // We use a LEFT JOIN to see if the callee_contract_id exists in our registry
-    let rows = sqlx::query(
-        r#"
-        SELECT 
-            cd.callee_contract_id, 
-            cd.call_volume,
-            c.id as resolved_id,
-            c.name as resolved_name,
-            c.verification_status as verification_status
-        FROM contract_dependencies cd
-        LEFT JOIN contracts c ON c.contract_id = cd.callee_contract_id
-        WHERE cd.caller_id = $1
-        ORDER BY cd.call_volume DESC
-        "#,
-    )
-    .bind(caller_internal_id)
-    .fetch_all(&ctx.db)
-    .await
-    .map_err(|err| db_internal_error("fetch node children", err))?;
-
-    let mut children = Vec::new();
-
-    for row in rows {
-        ctx.total_dependencies += 1;
-
-        let callee_c_id: String = row.get("callee_contract_id");
-        let call_volume: i32 = row.get("call_volume");
-        let resolved_id: Option<Uuid> = row.get("resolved_id");
-        let resolved_name: Option<String> = row.get("resolved_name");
-        let verification_status: Option<String> = row.get("verification_status");
-
-        let status = if let Some(s) = verification_status.clone() {
-            s
-        } else if resolved_id.is_some() {
-            "unverified".to_string()
-        } else {
-            "unknown".to_string()
-        };
-
-        let mut is_circular = false;
-        let mut sub_dependencies = Vec::new();
-
-        if let Some(r_id) = resolved_id {
-            if visited.contains(&r_id) {
-                is_circular = true;
-                ctx.has_circular = true;
+    rows.iter()
+        .map(|row| {
+            let is_circular = row.cycle_with.is_some();
+            // A cycle-closing row must not be expanded again here, or the tree
+            // would be infinite even though the traversal itself terminated.
+            let dependencies = if is_circular || row.target_contract_id.is_none() {
+                Vec::new()
             } else {
-                // Traverse deeper
-                visited.insert(r_id);
-                sub_dependencies = build_dependency_tree(ctx, r_id, visited, depth + 1).await?;
-                visited.remove(&r_id);
+                children_of(by_parent, &row.path, depth + 1)
+            };
+
+            DependencyNode {
+                contract_id: display_ref(row),
+                resolved_id: row.target_contract_id.filter(|_| row.visible),
+                name: row.target_name.clone(),
+                // Call volume is not carried by the edge model; the aggregate
+                // table remains the source for it and is reported by the graph
+                // endpoints rather than guessed at here.
+                call_volume: 0,
+                status: node_status(row),
+                is_circular,
+                dependencies,
+                visualization_hints: serde_json::json!({
+                    "depth": depth,
+                    "node_type": if is_circular { "circular" } else { "standard" },
+                    "edge_source": row.edge_source,
+                    "edge_state": row.edge_state,
+                    "redacted": !row.visible,
+                }),
             }
-        }
+        })
+        .collect()
+}
 
-        children.push(DependencyNode {
-            contract_id: callee_c_id,
-            resolved_id,
-            name: resolved_name,
-            call_volume,
-            status: status.to_string(),
-            is_circular,
-            dependencies: sub_dependencies,
-            visualization_hints: serde_json::json!({
-                "depth": depth,
-                "node_type": if is_circular { "circular" } else { "standard" }
-            }),
-        });
+/// What to call a node in the response.
+///
+/// A redacted node is named by neither address nor name -- only the fact that it
+/// exists. Echoing `target_ref` would defeat the redaction, since the reference
+/// *is* the private contract's address.
+fn display_ref(row: &TraversedEdgeRow) -> String {
+    if row.visible {
+        row.target_address
+            .clone()
+            .unwrap_or_else(|| row.target_ref.clone())
+    } else {
+        "[redacted]".to_string()
     }
+}
 
-    Ok(children)
+fn node_status(row: &TraversedEdgeRow) -> String {
+    match dependency_graph::parse_edge_state(&row.edge_state) {
+        EdgeState::Resolved if !row.visible => "redacted".to_string(),
+        EdgeState::Resolved => "resolved".to_string(),
+        EdgeState::Unresolved => "unresolved".to_string(),
+        EdgeState::NetworkMismatch => "network_mismatch".to_string(),
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -197,12 +348,24 @@ pub struct DeclareDependenciesRequest {
     pub dependencies: Vec<DependencyDeclaration>,
 }
 
+/// A declaration that was stored but could not be bound to a registry contract
+/// (Issue #1147). Retained rather than dropped, because the operator declared
+/// something real; reported so it is not mistaken for a resolved dependency.
+#[derive(Debug, serde::Serialize)]
+pub struct UnresolvedDependency {
+    pub target_ref: String,
+    pub reason: String,
+}
+
 /// Response for POST /api/contracts/:id/dependencies
 #[derive(Debug, serde::Serialize)]
 pub struct DeclareDependenciesResponse {
     pub contract_id: Uuid,
     pub saved: Vec<ContractDependency>,
     pub has_circular: bool,
+    /// Empty when every declaration bound to a registered contract.
+    #[serde(default)]
+    pub unresolved: Vec<UnresolvedDependency>,
 }
 
 /// POST /api/contracts/:id/dependencies
@@ -217,19 +380,16 @@ pub async fn declare_contract_dependencies(
     Path(id): Path<Uuid>,
     ValidatedJson(body): ValidatedJson<DeclareDependenciesRequest>,
 ) -> ApiResult<(StatusCode, Json<DeclareDependenciesResponse>)> {
-    // Verify contract exists.
-    let exists: bool = sqlx::query_scalar("SELECT COUNT(*) > 0 FROM contracts WHERE id = $1")
-        .bind(id)
-        .fetch_one(&state.db)
-        .await
-        .map_err(|e| db_internal_error("check contract exists", e))?;
-
-    if !exists {
-        return Err(ApiError::not_found(
-            "ContractNotFound",
-            "Contract not found",
-        ));
-    }
+    // Fetch the network alongside the existence check: a dependency reference
+    // is only meaningful within one network (Issue #1147), so the declaring
+    // contract's own network is what its targets are resolved against.
+    let network: shared::Network =
+        sqlx::query_scalar("SELECT network FROM contracts WHERE id = $1")
+            .bind(id)
+            .fetch_optional(&state.db)
+            .await
+            .map_err(|e| db_internal_error("check contract exists", e))?
+            .ok_or_else(|| ApiError::not_found("ContractNotFound", "Contract not found"))?;
 
     // Pre-check for self-referential declarations.
     let self_dep = body.dependencies.iter().any(|d| d.name == id.to_string());
@@ -241,9 +401,35 @@ pub async fn declare_contract_dependencies(
     }
 
     // Save declarations (will detect cycles against existing graph in the DB).
-    dependency::save_dependencies(&state.db, id, &body.dependencies)
+    let resolutions = dependency::save_dependencies(&state.db, id, network, &body.dependencies)
         .await
         .map_err(|e| ApiError::internal(format!("Failed to save dependencies: {e}")))?;
+
+    // Surface references that were stored but could not be bound, rather than
+    // letting them appear as a silent NULL in `dependency_contract_id`.
+    let unresolved: Vec<UnresolvedDependency> = body
+        .dependencies
+        .iter()
+        .zip(&resolutions)
+        .filter_map(|(decl, resolution)| {
+            let reason = match resolution {
+                dependency::DependencyResolution::Resolved(_) => return None,
+                dependency::DependencyResolution::NetworkMismatch { found_on, .. } => {
+                    format!("registered on {found_on}, not {network}")
+                }
+                dependency::DependencyResolution::UnknownAddress => {
+                    "no contract with this address is registered".to_string()
+                }
+                dependency::DependencyResolution::NotAnAddress => {
+                    "not a Stellar contract address".to_string()
+                }
+            };
+            Some(UnresolvedDependency {
+                target_ref: decl.name.clone(),
+                reason,
+            })
+        })
+        .collect();
 
     // Fetch stored rows for response.
     let saved: Vec<ContractDependency> = sqlx::query_as(
@@ -280,339 +466,208 @@ pub async fn declare_contract_dependencies(
             contract_id: id,
             saved,
             has_circular,
+            unresolved,
         }),
     ))
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Issue #726 — New dependency tracking endpoints
+// Issue #1147 — Dependency graph summary and transitive risk
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Query params for GET /api/contracts/:id/direct-dependencies
-#[derive(Debug, serde::Deserialize)]
-pub struct DirectDepsQuery {
-    /// Filter by dependency type: import, call, data
-    pub dep_type: Option<String>,
-}
-
-/// A flat direct dependency entry
-#[derive(Debug, serde::Serialize)]
-pub struct DirectDep {
-    pub callee_contract_id: String,
-    pub resolved_id: Option<Uuid>,
-    pub name: Option<String>,
-    pub call_volume: i32,
-    pub dep_type: String,
-    pub is_verified: bool,
-    pub status: String,
-    pub is_resolvable: bool,
-}
-
-/// Response for GET /api/contracts/:id/direct-dependencies
-#[derive(Debug, serde::Serialize)]
-pub struct DirectDependenciesResponse {
-    pub contract_id: Uuid,
-    pub dependencies: Vec<DirectDep>,
-    pub total: usize,
-}
-
-/// GET /api/contracts/:id/direct-dependencies
+/// Response for GET /api/contracts/:id/dependency-graph
 ///
-/// Returns only the immediate (non-recursive) dependencies of a contract.
-/// Accepts optional `?dep_type=import|call|data` to filter by relationship type.
-pub async fn get_direct_contract_dependencies(
+/// A flat summary rather than the nested tree: this endpoint exists to answer
+/// "how big and how healthy is the closure", which a caller should be able to
+/// read without walking a recursive structure.
+#[derive(Debug, serde::Serialize, utoipa::ToSchema)]
+pub struct DependencyGraphSummary {
+    pub contract_id: Uuid,
+    pub network: String,
+    pub total_dependencies: usize,
+    /// Reachable contracts that resolved to a registry row.
+    pub resolved: usize,
+    /// References retained but not bound to any contract.
+    pub unresolved: usize,
+    /// Nodes hidden by tenancy: counted so the total stays honest, never named.
+    pub redacted: usize,
+    pub max_depth: usize,
+    pub has_circular: bool,
+    pub truncated: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub truncation_reason: Option<shared::dependency_graph::TruncationReason>,
+    /// Graph facts with no severity: cycles, unresolved edges, truncation.
+    pub diagnostics: Vec<shared::dependency_graph::Diagnostic>,
+    /// The reachable set as a flat, paginated list.
+    ///
+    /// Flat rather than nested because a tree cannot be coherently paginated:
+    /// page 2 of a tree is not a tree. `/dependencies` returns the nested shape
+    /// whole (bounded by `max_nodes`); this is the pageable view of the same
+    /// traversal.
+    pub nodes: shared::PaginatedResponse<DependencyGraphNode>,
+}
+
+/// One reachable contract, flattened out of the traversal.
+#[derive(Debug, serde::Serialize, utoipa::ToSchema)]
+pub struct DependencyGraphNode {
+    /// The target's address, or `[redacted]` when tenancy hides it.
+    pub contract_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub resolved_id: Option<Uuid>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    pub depth: i32,
+    pub edge_source: String,
+    pub edge_state: String,
+    /// Root-to-node path.
+    pub path: Vec<Uuid>,
+    pub redacted: bool,
+}
+
+/// GET /api/contracts/:id/dependency-graph
+#[utoipa::path(
+    get,
+    path = "/api/contracts/{id}/dependency-graph",
+    params(
+        ("id" = String, Path, description = "Contract UUID or Stellar contract address"),
+        ("network" = Option<String>, Query, description = "Required to disambiguate an address registered on more than one network"),
+        ("depth" = Option<u32>, Query, description = "Maximum traversal depth, capped server-side"),
+        ("max_nodes" = Option<u32>, Query, description = "Maximum nodes returned, capped server-side"),
+        ("as_of" = Option<String>, Query, description = "RFC3339 instant; replays the declared graph as it stood then"),
+        ("include_telemetry" = Option<bool>, Query, description = "Include on-chain call edges alongside declared ones"),
+        ("page" = Option<i64>, Query, description = "1-based page of the flat node list (default 1)"),
+        ("per_page" = Option<i64>, Query, description = "Nodes per page, default 50, capped at 200")
+    ),
+    responses(
+        (status = 200, description = "Dependency graph summary", body = DependencyGraphSummary),
+        (status = 404, description = "Contract not found"),
+        (status = 409, description = "Ambiguous contract address; retry with ?network=")
+    ),
+    tag = "Graphs"
+)]
+pub async fn get_dependency_graph(
     State(state): State<AppState>,
-    Path(id): Path<Uuid>,
-    Query(params): Query<DirectDepsQuery>,
-) -> ApiResult<Json<DirectDependenciesResponse>> {
-    let exists: bool = sqlx::query_scalar("SELECT COUNT(*) > 0 FROM contracts WHERE id = $1")
-        .bind(id)
-        .fetch_one(&state.db)
-        .await
-        .map_err(|e| db_internal_error("check contract exists", e))?;
+    Path(id): Path<String>,
+    Query(query): Query<DependencyQuery>,
+) -> ApiResult<Json<DependencyGraphSummary>> {
+    let contract = contract_ref::resolve(&state, &id, query.network).await?;
 
-    if !exists {
-        return Err(ApiError::not_found(
-            "ContractNotFound",
-            "Contract not found",
-        ));
-    }
+    let request = TraversalRequest {
+        root: contract.uuid,
+        network: contract.network,
+        direction: Direction::Dependencies,
+        transitive: query.transitive.unwrap_or(true),
+        max_depth: query
+            .depth
+            .unwrap_or(shared::dependency_graph::DEFAULT_MAX_DEPTH),
+        max_nodes: query
+            .max_nodes
+            .unwrap_or(shared::dependency_graph::DEFAULT_MAX_NODES),
+        as_of: query.as_of,
+        caller_org: None,
+        include_telemetry: query.include_telemetry.unwrap_or(false),
+    };
 
-    let rows = sqlx::query(
-        r#"
-        SELECT
-            cd.callee_contract_id,
-            cd.call_volume,
-            cd.is_verified,
-            COALESCE(cd.dep_type, 'call') AS dep_type,
-            c.id          AS resolved_id,
-            c.name        AS resolved_name,
-            c.verification_status
-        FROM contract_dependencies cd
-        LEFT JOIN contracts c ON c.contract_id = cd.callee_contract_id
-        WHERE cd.caller_id = $1
-          AND ($2::text IS NULL OR COALESCE(cd.dep_type, 'call') = $2)
-        ORDER BY cd.call_volume DESC
-        "#,
-    )
-    .bind(id)
-    .bind(params.dep_type.as_deref())
-    .fetch_all(&state.db)
-    .await
-    .map_err(|e| db_internal_error("fetch direct dependencies", e))?;
+    let result = dependency_graph::traverse(&state.db, &request).await?;
 
-    let dependencies: Vec<DirectDep> = rows
+    let resolved = result
+        .rows
         .iter()
-        .map(|row| {
-            let callee_contract_id: String = row.get("callee_contract_id");
-            let call_volume: i32 = row.get("call_volume");
-            let is_verified: bool = row.get("is_verified");
-            let dep_type: String = row.get("dep_type");
-            let resolved_id: Option<Uuid> = row.get("resolved_id");
-            let resolved_name: Option<String> = row.get("resolved_name");
-            let verification_status: Option<String> = row.get("verification_status");
-            let is_resolvable = resolved_id.is_some();
-            let status = verification_status.unwrap_or_else(|| {
-                if is_resolvable {
-                    "unverified".to_string()
-                } else {
-                    "unresolvable".to_string()
-                }
-            });
-            DirectDep {
-                callee_contract_id,
-                resolved_id,
-                name: resolved_name,
-                call_volume,
-                dep_type,
-                is_verified,
-                status,
-                is_resolvable,
-            }
+        .filter(|r| r.target_contract_id.is_some() && r.visible)
+        .count();
+    let redacted = result.rows.iter().filter(|r| !r.visible).count();
+    let unresolved = result
+        .rows
+        .iter()
+        .filter(|r| r.target_contract_id.is_none())
+        .count();
+
+    // Offset pagination over the flat node list. The rows arrive in the
+    // traversal's total order, so a page boundary is stable for a given graph
+    // rather than depending on row arrival.
+    let per_page = query
+        .per_page
+        .unwrap_or(DEFAULT_PER_PAGE)
+        .clamp(1, MAX_PER_PAGE);
+    let page = query.page.unwrap_or(1).max(1);
+    let total = result.rows.len() as i64;
+    let offset = ((page - 1) * per_page).min(total) as usize;
+    let end = (offset + per_page as usize).min(result.rows.len());
+
+    let items: Vec<DependencyGraphNode> = result.rows[offset..end]
+        .iter()
+        .map(|row| DependencyGraphNode {
+            contract_id: display_ref(row),
+            resolved_id: row.target_contract_id.filter(|_| row.visible),
+            name: row.target_name.clone(),
+            depth: row.depth,
+            edge_source: row.edge_source.clone(),
+            edge_state: row.edge_state.clone(),
+            path: row.path.clone(),
+            redacted: !row.visible,
         })
         .collect();
 
-    let total = dependencies.len();
-    Ok(Json(DirectDependenciesResponse {
-        contract_id: id,
-        dependencies,
-        total,
-    }))
-}
-
-/// GET /api/contracts/:id/dependency-tree
-///
-/// Returns the full recursive dependency tree limited to MAX_TREE_DEPTH levels.
-/// Circular dependencies are detected and flagged rather than traversed.
-const MAX_TREE_DEPTH: usize = 5;
-
-pub async fn get_contract_dependency_tree(
-    State(state): State<AppState>,
-    Path(id): Path<Uuid>,
-) -> ApiResult<Json<DependencyResponse>> {
-    let root_contract = sqlx::query(
-        "SELECT id, contract_id, name, verification_status FROM contracts WHERE id = $1",
-    )
-    .bind(id)
-    .fetch_optional(&state.db)
-    .await
-    .map_err(|err| db_internal_error("get root contract for dependency tree", err))?
-    .ok_or_else(|| ApiError::not_found("ContractNotFound", "Contract not found"))?;
-
-    let root_internal_id: Uuid = root_contract.get("id");
-    let root_c_id: String = root_contract.get("contract_id");
-    let root_name: String = root_contract.get("name");
-    let verification_status: String = root_contract.get("verification_status");
-
-    let mut visited = HashSet::new();
-    visited.insert(root_internal_id);
-
-    let mut context = DependencyContext {
-        db: state.db.clone(),
-        total_dependencies: 0,
-        max_depth: 0,
-        has_circular: false,
-        depth_limit: MAX_TREE_DEPTH,
-    };
-
-    let children = build_dependency_tree(&mut context, root_internal_id, &mut visited, 1).await?;
-
-    let root_node = DependencyNode {
-        contract_id: root_c_id,
-        resolved_id: Some(root_internal_id),
-        name: Some(root_name),
-        call_volume: 0,
-        status: verification_status,
-        is_circular: false,
-        dependencies: children,
-        visualization_hints: serde_json::json!({ "node_type": "root", "depth": 0 }),
-    };
-
-    Ok(Json(DependencyResponse {
-        root: root_node,
-        total_dependencies: context.total_dependencies,
-        max_depth: context.max_depth,
-        has_circular: context.has_circular,
-    }))
-}
-
-/// A single resolved transitive dependency
-#[derive(Debug, serde::Serialize)]
-pub struct TransitiveDep {
-    pub id: Uuid,
-    pub name: String,
-    pub contract_id: String,
-    pub depth: usize,
-}
-
-/// Response for POST /api/contracts/:id/resolve-dependencies
-#[derive(Debug, serde::Serialize)]
-pub struct ResolveDependenciesResponse {
-    pub contract_id: Uuid,
-    pub resolved: Vec<TransitiveDep>,
-    pub unresolvable: Vec<String>,
-    pub has_circular: bool,
-    pub circular_contracts: Vec<String>,
-    pub total_resolved: usize,
-    pub total_unresolvable: usize,
-}
-
-/// POST /api/contracts/:id/resolve-dependencies
-///
-/// Traverses the full transitive dependency graph via BFS.
-/// Returns all reachable contracts, contracts that cannot be resolved to a
-/// registry entry, and contracts that form circular references.
-/// Completes in O(nodes + edges) — well within the 500 ms acceptance criterion
-/// for typical registry graphs.
-pub async fn post_resolve_dependencies(
-    State(state): State<AppState>,
-    Path(id): Path<Uuid>,
-) -> ApiResult<Json<ResolveDependenciesResponse>> {
-    let root = sqlx::query("SELECT id FROM contracts WHERE id = $1")
-        .bind(id)
-        .fetch_optional(&state.db)
-        .await
-        .map_err(|e| db_internal_error("get root contract for resolution", e))?
-        .ok_or_else(|| ApiError::not_found("ContractNotFound", "Contract not found"))?;
-
-    let root_id: Uuid = root.get("id");
-
-    struct QueueItem {
-        id: Uuid,
-        depth: usize,
-    }
-
-    let mut queue = std::collections::VecDeque::new();
-    queue.push_back(QueueItem {
-        id: root_id,
-        depth: 0,
-    });
-
-    let mut visited: HashSet<Uuid> = HashSet::new();
-    visited.insert(root_id);
-
-    let mut resolved: Vec<TransitiveDep> = Vec::new();
-    let mut unresolvable: Vec<String> = Vec::new();
-    let mut circular_contracts: Vec<String> = Vec::new();
-
-    while let Some(item) = queue.pop_front() {
-        let rows = sqlx::query(
-            r#"
-            SELECT
-                cd.callee_contract_id,
-                c.id            AS resolved_id,
-                c.name          AS resolved_name,
-                c.contract_id   AS c_contract_id
-            FROM contract_dependencies cd
-            LEFT JOIN contracts c ON c.contract_id = cd.callee_contract_id
-            WHERE cd.caller_id = $1
-            "#,
-        )
-        .bind(item.id)
-        .fetch_all(&state.db)
-        .await
-        .map_err(|e| db_internal_error("fetch deps for resolution", e))?;
-
-        for row in &rows {
-            let callee_str: String = row.get("callee_contract_id");
-            let resolved_id: Option<Uuid> = row.get("resolved_id");
-            let resolved_name: Option<String> = row.get("resolved_name");
-            let c_contract_id: Option<String> = row.get("c_contract_id");
-
-            match resolved_id {
-                None => {
-                    if !unresolvable.contains(&callee_str) {
-                        unresolvable.push(callee_str);
-                    }
-                }
-                Some(dep_id) if dep_id == root_id || visited.contains(&dep_id) => {
-                    // Already visited or points back to root — circular
-                    let label = resolved_name.or(c_contract_id).unwrap_or(callee_str);
-                    if !circular_contracts.contains(&label) {
-                        circular_contracts.push(label);
-                    }
-                }
-                Some(dep_id) => {
-                    visited.insert(dep_id);
-                    resolved.push(TransitiveDep {
-                        id: dep_id,
-                        name: resolved_name.unwrap_or_default(),
-                        contract_id: c_contract_id.unwrap_or_default(),
-                        depth: item.depth + 1,
-                    });
-                    queue.push_back(QueueItem {
-                        id: dep_id,
-                        depth: item.depth + 1,
-                    });
-                }
-            }
-        }
-    }
-
-    let total_resolved = resolved.len();
-    let total_unresolvable = unresolvable.len();
-    let has_circular = !circular_contracts.is_empty();
-
-    Ok(Json(ResolveDependenciesResponse {
-        contract_id: id,
+    Ok(Json(DependencyGraphSummary {
+        contract_id: contract.uuid,
+        network: contract.network.to_string(),
+        nodes: shared::PaginatedResponse::new(items, total, page, per_page),
+        total_dependencies: result.rows.len(),
         resolved,
-        unresolvable,
-        has_circular,
-        circular_contracts,
-        total_resolved,
-        total_unresolvable,
+        unresolved,
+        redacted,
+        max_depth: result
+            .rows
+            .iter()
+            .map(|r| r.depth as usize)
+            .max()
+            .unwrap_or(0),
+        has_circular: result
+            .diagnostics
+            .iter()
+            .any(|d| d.kind == DiagnosticKind::Cycle),
+        truncated: result.truncated,
+        truncation_reason: result.truncation_reason,
+        diagnostics: result.diagnostics,
     }))
 }
 
-#[cfg(test)]
-mod tests {
-    use std::collections::HashSet;
-    use uuid::Uuid;
+/// GET /api/contracts/:id/dependency-risk
+///
+/// Direct and inherited findings, each with the shortest path that reaches it,
+/// plus severity-free diagnostics.
+#[utoipa::path(
+    get,
+    path = "/api/contracts/{id}/dependency-risk",
+    params(
+        ("id" = String, Path, description = "Contract UUID or Stellar contract address"),
+        ("network" = Option<String>, Query, description = "Required to disambiguate an address registered on more than one network"),
+        ("depth" = Option<u32>, Query, description = "Maximum traversal depth, capped server-side")
+    ),
+    responses(
+        (status = 200, description = "Transitive risk report", body = Object),
+        (status = 404, description = "Contract not found"),
+        (status = 409, description = "Ambiguous contract address; retry with ?network=")
+    ),
+    tag = "Graphs"
+)]
+pub async fn get_dependency_risk(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Query(query): Query<DependencyQuery>,
+) -> ApiResult<Json<crate::dependency_risk::DependencyRiskReport>> {
+    let contract = contract_ref::resolve(&state, &id, query.network).await?;
 
-    #[tokio::test]
-    async fn test_circular_dependency_logic() {
-        // We can test the visited set logic without db if we want,
-        // but since build_dependency_tree requires a db transaction,
-        // a pure unit test of the circular logic is best done by asserting the behavior of visited sets.
-        let mut visited = HashSet::new();
-        let id1 = Uuid::new_v4();
-        let id2 = Uuid::new_v4();
+    let report = crate::dependency_risk::assess(
+        &state,
+        contract.uuid,
+        contract.network,
+        query
+            .depth
+            .unwrap_or(shared::dependency_graph::DEFAULT_MAX_DEPTH),
+        None,
+    )
+    .await?;
 
-        visited.insert(id1);
-
-        let mut is_circular = false;
-
-        // Simulate finding id2
-        if visited.contains(&id2) {
-            is_circular = true;
-        } else {
-            visited.insert(id2);
-            // Simulate finding id1 again
-            if visited.contains(&id1) {
-                is_circular = true;
-            }
-        }
-
-        assert!(is_circular, "Circular reference should be detected");
-    }
+    Ok(Json(report))
 }

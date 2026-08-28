@@ -206,6 +206,10 @@ fn test_search_sort_by_options() {
         assert!(!output.status.success());
         let stderr = String::from_utf8_lossy(&output.stderr);
         assert!(stderr.contains("Failed to search contracts"));
-        assert!(!stderr.contains("unexpected argument"), "Failed for sort option: {}", sort_option);
+        assert!(
+            !stderr.contains("unexpected argument"),
+            "Failed for sort option: {}",
+            sort_option
+        );
     }
 }

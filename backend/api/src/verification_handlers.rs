@@ -176,14 +176,12 @@ pub async fn submit_contract_verification(
     //     didn't supply one.
     //  3. Persist the passphrase into the verifications record.
     let (recorded_passphrase, contract_network): (Option<String>, Option<Network>) =
-        sqlx::query_as(
-            "SELECT network_passphrase, network FROM contracts WHERE id = $1",
-        )
-        .bind(contract_uuid)
-        .fetch_optional(&state.db)
-        .await
-        .map_err(|e| db_err("fetch contract passphrase for validation", e))?
-        .unwrap_or((None, None));
+        sqlx::query_as("SELECT network_passphrase, network FROM contracts WHERE id = $1")
+            .bind(contract_uuid)
+            .fetch_optional(&state.db)
+            .await
+            .map_err(|e| db_err("fetch contract passphrase for validation", e))?
+            .unwrap_or((None, None));
 
     // For well-known networks, if the caller didn't provide a passphrase we
     // can fill it in from the known constant.  This guarantees new records are
