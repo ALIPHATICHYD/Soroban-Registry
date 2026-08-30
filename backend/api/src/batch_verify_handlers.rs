@@ -274,7 +274,7 @@ async fn run_single_item(
     .map(|v| v.to_string());
 
     let on_chain = match onchain_verifier
-        .verify_contract(&state.cache, &contract, abi_json.as_deref())
+        .verify_contract_with_artifact(&state.cache, &contract, abi_json.as_deref())
         .await
     {
         Ok(r) => r,
@@ -292,14 +292,28 @@ async fn run_single_item(
 
     let source_ok = match (&item.source_code, &item.compiler_version) {
         (Some(src), Some(ver)) if !src.trim().is_empty() => {
-            match verifier::verify_contract(
-                src,
-                &contract.wasm_hash,
-                Some(ver),
-                item.build_params.as_ref(),
-            )
-            .await
-            {
+            let verification = match on_chain.deployed_wasm.as_deref() {
+                Some(deployed_wasm) => {
+                    verifier::verify_contract_artifact(
+                        src,
+                        deployed_wasm,
+                        &contract.wasm_hash,
+                        Some(ver),
+                        item.build_params.as_ref(),
+                    )
+                    .await
+                }
+                None => {
+                    verifier::verify_contract(
+                        src,
+                        &contract.wasm_hash,
+                        Some(ver),
+                        item.build_params.as_ref(),
+                    )
+                    .await
+                }
+            };
+            match verification {
                 Ok(r) => r.verified,
                 Err(_) => false,
             }
@@ -420,7 +434,7 @@ async fn verify_batch_item(
     .map(|value| value.to_string());
 
     let on_chain = match onchain_verifier
-        .verify_contract(&state.cache, &contract, abi_json.as_deref())
+        .verify_contract_with_artifact(&state.cache, &contract, abi_json.as_deref())
         .await
     {
         Ok(result) => result,
@@ -434,15 +448,29 @@ async fn verify_batch_item(
     };
 
     let source_verification = match (&item.source_code, &item.compiler_version) {
-        (Some(source_code), Some(compiler_version)) if !source_code.trim().is_empty() => Some(
-            verifier::verify_contract(
-                source_code,
-                &contract.wasm_hash,
-                Some(compiler_version),
-                item.build_params.as_ref(),
-            )
-            .await,
-        ),
+        (Some(source_code), Some(compiler_version)) if !source_code.trim().is_empty() => {
+            Some(match on_chain.deployed_wasm.as_deref() {
+                Some(deployed_wasm) => {
+                    verifier::verify_contract_artifact(
+                        source_code,
+                        deployed_wasm,
+                        &contract.wasm_hash,
+                        Some(compiler_version),
+                        item.build_params.as_ref(),
+                    )
+                    .await
+                }
+                None => {
+                    verifier::verify_contract(
+                        source_code,
+                        &contract.wasm_hash,
+                        Some(compiler_version),
+                        item.build_params.as_ref(),
+                    )
+                    .await
+                }
+            })
+        }
         _ => None,
     };
 
@@ -468,7 +496,8 @@ async fn verify_batch_item(
                 "compiled_wasm_hash": v.compiled_wasm_hash,
                 "deployed_wasm_hash": v.deployed_wasm_hash,
                 "message": v.message,
-                "failure_kind": v.failure_kind
+                "failure_kind": v.failure_kind,
+                "match_kind": v.match_kind
             }),
             Err(err) => json!({
                 "verified": false,

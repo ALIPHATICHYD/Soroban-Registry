@@ -381,6 +381,18 @@ mod wasm_tests {
     }
 
     #[test]
+    fn toolchain_metadata_drift_does_not_change_interface_id() {
+        let base = wasm_with_spec_section(&function_entry_xdr("transfer"));
+        let first = append_custom_section(base.clone(), "producers", b"build-one");
+        let second = append_custom_section(base, "producers", b"build-two");
+
+        assert_eq!(
+            fingerprint_wasm(&first).unwrap().interface_id,
+            fingerprint_wasm(&second).unwrap().interface_id
+        );
+    }
+
+    #[test]
     fn empty_spec_section_is_not_an_interface() {
         let wasm = wasm_with_spec_section(&[]);
         assert!(matches!(
@@ -433,6 +445,16 @@ mod wasm_tests {
         out.extend_from_slice(&leb128(body.len() as u64));
         out.extend_from_slice(&body);
         out
+    }
+
+    fn append_custom_section(mut wasm: Vec<u8>, name: &str, payload: &[u8]) -> Vec<u8> {
+        let mut body = leb128(name.len() as u64);
+        body.extend_from_slice(name.as_bytes());
+        body.extend_from_slice(payload);
+        wasm.push(0);
+        wasm.extend_from_slice(&leb128(body.len() as u64));
+        wasm.extend_from_slice(&body);
+        wasm
     }
 
     fn leb128(mut value: u64) -> Vec<u8> {

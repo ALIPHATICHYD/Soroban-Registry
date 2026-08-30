@@ -5961,18 +5961,43 @@ pub async fn verify_contract(
     .await
     .map_err(|err| db_internal_error("insert verification record", err))?;
 
-    let verification_result = verifier::verify_contract(
-        &req.source_code,
-        &contract.wasm_hash,
-        Some(&req.compiler_version),
-        Some(&req.build_params),
-    )
-    .await;
     let onchain_verifier = OnChainVerifier::new();
     let abi_json = resolve_abi(&state, &contract.contract_id, false).await.ok();
     let onchain_result = onchain_verifier
-        .verify_contract(&state.cache, &contract, abi_json.as_deref())
+        .verify_contract_with_artifact(&state.cache, &contract, abi_json.as_deref())
         .await;
+    let verification_result = match &onchain_result {
+        Ok(onchain) => match onchain.deployed_wasm.as_deref() {
+            Some(deployed_wasm) => {
+                verifier::verify_contract_artifact(
+                    &req.source_code,
+                    deployed_wasm,
+                    &contract.wasm_hash,
+                    Some(&req.compiler_version),
+                    Some(&req.build_params),
+                )
+                .await
+            }
+            None => {
+                verifier::verify_contract(
+                    &req.source_code,
+                    &contract.wasm_hash,
+                    Some(&req.compiler_version),
+                    Some(&req.build_params),
+                )
+                .await
+            }
+        },
+        Err(_) => {
+            verifier::verify_contract(
+                &req.source_code,
+                &contract.wasm_hash,
+                Some(&req.compiler_version),
+                Some(&req.build_params),
+            )
+            .await
+        }
+    };
 
     let ip_address = extract_ip_address(&headers);
     let before_status = previous_status.unwrap_or_else(|| "pending".to_string());
@@ -6009,7 +6034,8 @@ pub async fn verify_contract(
                 "compiler_version": { "before": Value::Null, "after": req.compiler_version },
                 "verified_at": { "before": Value::Null, "after": chrono::Utc::now() },
                 "compiled_wasm_hash": { "before": Value::Null, "after": result.compiled_wasm_hash },
-                "deployed_wasm_hash": { "before": Value::Null, "after": result.deployed_wasm_hash }
+                "deployed_wasm_hash": { "before": Value::Null, "after": result.deployed_wasm_hash },
+                "match_kind": { "before": Value::Null, "after": result.match_kind }
             });
 
             write_contract_audit_log(
@@ -6091,6 +6117,7 @@ pub async fn verify_contract(
                 "contract_id": contract.id,
                 "compiled_wasm_hash": result.compiled_wasm_hash,
                 "deployed_wasm_hash": result.deployed_wasm_hash,
+                "match_kind": result.match_kind,
                 "on_chain": onchain
             })))
         }
@@ -6132,7 +6159,8 @@ pub async fn verify_contract(
                 "compiler_version": { "before": Value::Null, "after": req.compiler_version },
                 "error_message": { "before": Value::Null, "after": failure_message },
                 "compiled_wasm_hash": { "before": Value::Null, "after": result.compiled_wasm_hash },
-                "deployed_wasm_hash": { "before": Value::Null, "after": result.deployed_wasm_hash }
+                "deployed_wasm_hash": { "before": Value::Null, "after": result.deployed_wasm_hash },
+                "match_kind": { "before": Value::Null, "after": result.match_kind }
             });
             write_contract_audit_log(
                 &state.db,

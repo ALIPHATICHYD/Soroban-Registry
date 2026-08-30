@@ -7,7 +7,10 @@ use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
-use shared::RegistryError;
+use shared::{
+    wasm::{canonical_wasm_hash_v1, CANONICAL_WASM_HASH_V1},
+    RegistryError,
+};
 use std::process::Stdio;
 use std::time::Duration;
 use tempfile::TempDir;
@@ -65,6 +68,17 @@ pub enum VerificationFailureKind {
     NetworkMismatch { network: String },
     /// No on-chain wasm artifact was found to verify against.
     MissingArtifact,
+    /// The supplied artifact bytes do not hash to the authoritative raw hash
+    /// recorded for the deployed contract. Canonical comparison must not run
+    /// when this trust-boundary check fails.
+    ArtifactHashMismatch {
+        expected_hash: String,
+        actual_hash: String,
+        hint: String,
+    },
+    /// Either the deployed or compiled bytes are not a structurally valid
+    /// core WASM module, so neither exact nor canonical verification is safe.
+    InvalidWasmArtifact { artifact: String, detail: String },
     /// The passphrase supplied (or recorded at publish time) does not match
     /// the passphrase used during this verification attempt.
     ///
@@ -89,6 +103,12 @@ impl std::fmt::Display for VerificationFailureKind {
                 write!(f, "network_mismatch: contract not found on {network}")
             }
             Self::MissingArtifact => write!(f, "missing_artifact: no on-chain artifact found"),
+            Self::ArtifactHashMismatch { hint, .. } => {
+                write!(f, "artifact_hash_mismatch: {hint}")
+            }
+            Self::InvalidWasmArtifact { artifact, detail } => {
+                write!(f, "invalid_wasm_artifact: {artifact}: {detail}")
+            }
             Self::PassphraseMismatch {
                 recorded, provided, ..
             } => {
@@ -102,6 +122,17 @@ impl std::fmt::Display for VerificationFailureKind {
     }
 }
 
+/// Describes how a compiled artifact matched the deployed artifact.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum VerificationMatchKind {
+    /// Raw SHA-256 hashes are identical.
+    Exact,
+    /// Raw hashes differ, but the artifacts match after applying the named,
+    /// versioned metadata-only canonicalization scheme.
+    CanonicalMetadataOnly { algorithm: String, hash: String },
+}
+
 #[derive(Debug, Clone)]
 pub struct VerificationResult {
     pub verified: bool,
@@ -110,6 +141,9 @@ pub struct VerificationResult {
     pub message: Option<String>,
     /// Structured failure reason; `None` when `verified` is `true`.
     pub failure_kind: Option<VerificationFailureKind>,
+    /// `None` for failures; otherwise records whether the raw artifacts or
+    /// their versioned metadata-only representations matched.
+    pub match_kind: Option<VerificationMatchKind>,
 }
 
 /// Outcome of a passphrase compatibility check.
@@ -178,6 +212,7 @@ pub async fn verify_contract(
             deployed_wasm_hash: deployed_normalized,
             message: None,
             failure_kind: None,
+            match_kind: Some(VerificationMatchKind::Exact),
         });
     }
 
@@ -198,6 +233,146 @@ pub async fn verify_contract(
         }),
         compiled_wasm_hash: compiled_hash,
         deployed_wasm_hash: deployed_normalized,
+        match_kind: None,
+    })
+}
+
+/// Verify source against the actual deployed artifact bytes.
+///
+/// Unlike [`verify_contract`], this entry point can safely distinguish
+/// non-semantic toolchain metadata drift from executable drift. It first
+/// proves that `deployed_wasm` hashes to the authoritative raw deployed hash;
+/// only then may it use the versioned metadata-only comparison as a fallback.
+#[instrument(
+    skip(source_code, deployed_wasm, build_params),
+    fields(component = "verifier", deployed_wasm_hash = %deployed_wasm_hash)
+)]
+pub async fn verify_contract_artifact(
+    source_code: &str,
+    deployed_wasm: &[u8],
+    deployed_wasm_hash: &str,
+    compiler_version: Option<&str>,
+    build_params: Option<&Value>,
+) -> Result<VerificationResult, RegistryError> {
+    if source_code.trim().is_empty() {
+        return Err(RegistryError::invalid_input(
+            "source_code cannot be empty".to_string(),
+        ));
+    }
+
+    let deployed_normalized = normalize_hash(deployed_wasm_hash).ok_or_else(|| {
+        RegistryError::invalid_input("deployed_wasm_hash must be a 64-char hex hash".to_string())
+    })?;
+    let actual_deployed_hash = hash_wasm(deployed_wasm);
+
+    if actual_deployed_hash != deployed_normalized {
+        let hint = "The fetched artifact bytes do not match the authoritative deployed SHA-256; \
+                    refusing canonical comparison."
+            .to_string();
+        return Ok(VerificationResult {
+            verified: false,
+            compiled_wasm_hash: String::new(),
+            deployed_wasm_hash: deployed_normalized.clone(),
+            message: Some(format!(
+                "Deployed artifact hash mismatch: expected {}, got {}. {hint}",
+                deployed_normalized, actual_deployed_hash
+            )),
+            failure_kind: Some(VerificationFailureKind::ArtifactHashMismatch {
+                expected_hash: deployed_normalized,
+                actual_hash: actual_deployed_hash,
+                hint,
+            }),
+            match_kind: None,
+        });
+    }
+
+    let deployed_canonical = match canonical_wasm_hash_v1(deployed_wasm) {
+        Ok(hash) => hash,
+        Err(err) => {
+            let detail = err.to_string();
+            return Ok(VerificationResult {
+                verified: false,
+                compiled_wasm_hash: String::new(),
+                deployed_wasm_hash: actual_deployed_hash,
+                message: Some(format!(
+                    "The authoritative deployed artifact is not valid canonicalizable WASM: \
+                     {detail}"
+                )),
+                failure_kind: Some(VerificationFailureKind::InvalidWasmArtifact {
+                    artifact: "deployed".to_string(),
+                    detail,
+                }),
+                match_kind: None,
+            });
+        }
+    };
+
+    let compiled_wasm = compile_contract(source_code, compiler_version, build_params).await?;
+    let compiled_hash = hash_wasm(&compiled_wasm);
+    if compiled_hash == actual_deployed_hash {
+        return Ok(VerificationResult {
+            verified: true,
+            compiled_wasm_hash: compiled_hash,
+            deployed_wasm_hash: actual_deployed_hash,
+            message: None,
+            failure_kind: None,
+            match_kind: Some(VerificationMatchKind::Exact),
+        });
+    }
+
+    let compiled_canonical = match canonical_wasm_hash_v1(&compiled_wasm) {
+        Ok(hash) => hash,
+        Err(err) => {
+            let detail = err.to_string();
+            return Ok(VerificationResult {
+                verified: false,
+                compiled_wasm_hash: compiled_hash,
+                deployed_wasm_hash: actual_deployed_hash,
+                message: Some(format!(
+                    "The compiled artifact is not valid canonicalizable WASM: {detail}"
+                )),
+                failure_kind: Some(VerificationFailureKind::InvalidWasmArtifact {
+                    artifact: "compiled".to_string(),
+                    detail,
+                }),
+                match_kind: None,
+            });
+        }
+    };
+    if compiled_canonical == deployed_canonical {
+        return Ok(VerificationResult {
+            verified: true,
+            compiled_wasm_hash: compiled_hash,
+            deployed_wasm_hash: actual_deployed_hash,
+            message: Some(format!(
+                "Raw hashes differ only in allowlisted toolchain metadata; matched with {}.",
+                CANONICAL_WASM_HASH_V1
+            )),
+            failure_kind: None,
+            match_kind: Some(VerificationMatchKind::CanonicalMetadataOnly {
+                algorithm: CANONICAL_WASM_HASH_V1.to_string(),
+                hash: compiled_canonical,
+            }),
+        });
+    }
+
+    let hint = "Check that the compiler version, build flags, source code, and all trust-boundary \
+         sections match the deployed artifact."
+        .to_string();
+    Ok(VerificationResult {
+        verified: false,
+        message: Some(format!(
+            "Bytecode mismatch: compiled hash {} does not match deployed hash {}. {hint}",
+            compiled_hash, actual_deployed_hash
+        )),
+        failure_kind: Some(VerificationFailureKind::SourceMismatch {
+            compiled_hash: compiled_hash.clone(),
+            deployed_hash: actual_deployed_hash.clone(),
+            hint,
+        }),
+        compiled_wasm_hash: compiled_hash,
+        deployed_wasm_hash: actual_deployed_hash,
+        match_kind: None,
     })
 }
 
@@ -249,6 +424,7 @@ pub async fn verify_contract_with_passphrase(
                     provided: provided.clone(),
                     hint,
                 }),
+                match_kind: None,
             });
         }
         PassphraseCheckOutcome::Pass => {}
@@ -414,6 +590,24 @@ fn truncate_for_error(value: &str) -> String {
 mod tests {
     use super::*;
 
+    const MINIMAL_WASM: &[u8] = &[
+        0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, // header
+        0x01, 0x04, 0x01, 0x60, 0x00, 0x00, // type: () -> ()
+        0x03, 0x02, 0x01, 0x00, // function
+        0x07, 0x05, 0x01, 0x01, b'f', 0x00, 0x00, // export
+        0x0a, 0x04, 0x01, 0x02, 0x00, 0x0b, // code
+    ];
+
+    fn with_custom_section(mut wasm: Vec<u8>, name: &str, payload: &[u8]) -> Vec<u8> {
+        assert!(name.len() < 128 && name.len() + payload.len() + 1 < 128);
+        wasm.push(0);
+        wasm.push((name.len() + payload.len() + 1) as u8);
+        wasm.push(name.len() as u8);
+        wasm.extend_from_slice(name.as_bytes());
+        wasm.extend_from_slice(payload);
+        wasm
+    }
+
     #[tokio::test]
     async fn test_verify_contract_invalid_hash() {
         let result = verify_contract("fn main() {}", "invalid_hash", None, None).await;
@@ -452,6 +646,145 @@ mod tests {
             .as_deref()
             .unwrap_or_default()
             .contains("Bytecode mismatch"));
+    }
+
+    #[tokio::test]
+    async fn artifact_verification_accepts_allowlisted_metadata_only_drift() {
+        let compiled = with_custom_section(MINIMAL_WASM.to_vec(), "producers", b"rustc-build-one");
+        let deployed = with_custom_section(MINIMAL_WASM.to_vec(), "producers", b"rustc-build-two");
+        let source = format!("wasm_base64:{}", BASE64.encode(&compiled));
+        let deployed_hash = hash_wasm(&deployed);
+
+        let result = verify_contract_artifact(&source, &deployed, &deployed_hash, None, None)
+            .await
+            .expect("metadata-only comparison should complete");
+
+        assert!(result.verified);
+        assert_ne!(result.compiled_wasm_hash, result.deployed_wasm_hash);
+        assert!(matches!(
+            result.match_kind,
+            Some(VerificationMatchKind::CanonicalMetadataOnly { ref algorithm, .. })
+                if algorithm == CANONICAL_WASM_HASH_V1
+        ));
+        assert!(result.failure_kind.is_none());
+    }
+
+    #[tokio::test]
+    async fn artifact_verification_rejects_executable_drift() {
+        let compiled = MINIMAL_WASM.to_vec();
+        let mut deployed = MINIMAL_WASM.to_vec();
+        let code_section = deployed
+            .iter()
+            .position(|byte| *byte == 0x0a)
+            .expect("fixture has code section");
+        deployed[code_section + 1] = 0x05;
+        deployed[code_section + 3] = 0x03;
+        deployed.insert(code_section + 5, 0x01); // nop
+        let source = format!("wasm_base64:{}", BASE64.encode(&compiled));
+        let deployed_hash = hash_wasm(&deployed);
+
+        let result = verify_contract_artifact(&source, &deployed, &deployed_hash, None, None)
+            .await
+            .expect("executable comparison should complete");
+
+        assert!(!result.verified);
+        assert!(matches!(
+            result.failure_kind,
+            Some(VerificationFailureKind::SourceMismatch { .. })
+        ));
+        assert!(result.match_kind.is_none());
+    }
+
+    #[tokio::test]
+    async fn artifact_verification_rejects_soroban_spec_drift() {
+        let compiled = with_custom_section(
+            MINIMAL_WASM.to_vec(),
+            shared::wasm::CONTRACT_SPEC_SECTION,
+            b"spec-one",
+        );
+        let deployed = with_custom_section(
+            MINIMAL_WASM.to_vec(),
+            shared::wasm::CONTRACT_SPEC_SECTION,
+            b"spec-two",
+        );
+        let source = format!("wasm_base64:{}", BASE64.encode(&compiled));
+        let deployed_hash = hash_wasm(&deployed);
+
+        let result = verify_contract_artifact(&source, &deployed, &deployed_hash, None, None)
+            .await
+            .expect("spec comparison should complete");
+
+        assert!(!result.verified);
+        assert!(matches!(
+            result.failure_kind,
+            Some(VerificationFailureKind::SourceMismatch { .. })
+        ));
+    }
+
+    #[tokio::test]
+    async fn artifact_verification_checks_raw_deployed_hash_before_compiling() {
+        let deployed = with_custom_section(MINIMAL_WASM.to_vec(), "producers", b"deployed");
+        let wrong_authoritative_hash = hash_wasm(MINIMAL_WASM);
+
+        let result = verify_contract_artifact(
+            "wasm_base64:not-valid-base64",
+            &deployed,
+            &wrong_authoritative_hash,
+            None,
+            None,
+        )
+        .await
+        .expect("trust-boundary mismatch should be a structured result");
+
+        assert!(!result.verified);
+        assert!(matches!(
+            result.failure_kind,
+            Some(VerificationFailureKind::ArtifactHashMismatch { .. })
+        ));
+        assert!(result.compiled_wasm_hash.is_empty());
+    }
+
+    #[tokio::test]
+    async fn artifact_verification_fails_closed_for_invalid_wasm() {
+        let compiled = b"invalid-compiled-wasm";
+        let deployed = b"invalid-deployed-wasm";
+        let source = format!("wasm_base64:{}", BASE64.encode(compiled));
+        let deployed_hash = hash_wasm(deployed);
+
+        let result = verify_contract_artifact(&source, deployed, &deployed_hash, None, None)
+            .await
+            .expect("invalid artifacts should produce a mismatch, not panic");
+
+        assert!(!result.verified);
+        assert!(matches!(
+            result.failure_kind,
+            Some(VerificationFailureKind::InvalidWasmArtifact { ref artifact, .. })
+                if artifact == "deployed"
+        ));
+        assert!(result
+            .message
+            .as_deref()
+            .unwrap_or_default()
+            .contains("not valid canonicalizable WASM"));
+    }
+
+    #[tokio::test]
+    async fn artifact_verification_rejects_invalid_compiled_wasm() {
+        let compiled = b"invalid-compiled-wasm";
+        let deployed = MINIMAL_WASM;
+        let source = format!("wasm_base64:{}", BASE64.encode(compiled));
+        let deployed_hash = hash_wasm(deployed);
+
+        let result = verify_contract_artifact(&source, deployed, &deployed_hash, None, None)
+            .await
+            .expect("invalid compiled artifact should not panic");
+
+        assert!(!result.verified);
+        assert!(matches!(
+            result.failure_kind,
+            Some(VerificationFailureKind::InvalidWasmArtifact { ref artifact, .. })
+                if artifact == "compiled"
+        ));
     }
 
     #[tokio::test]
