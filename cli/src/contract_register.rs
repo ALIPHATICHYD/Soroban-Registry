@@ -429,6 +429,7 @@ async fn resolve_drafts(
             },
             registry_id: None,
             registry_url: None,
+            wasm_artifact_base64: None,
         });
     }
 

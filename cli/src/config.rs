@@ -285,6 +285,19 @@ fn resolve_runtime_config_with_sources(
     })
 }
 
+// cli/src/config.rs
+
+pub struct AuthSection {
+    pub session_token: String,
+    pub signing_key_path: Option<String>,
+}
+
+pub fn load_auth_section() -> Option<AuthSection> {
+    // This bridges to the existing logic in auth.rs
+    // For now, return None or implement a basic fetch
+    None 
+}
+
 fn read_env_overrides() -> Result<EnvOverrides> {
     let profile = read_env_string(ENV_PROFILE);
     let network = read_env_string(ENV_NETWORK);

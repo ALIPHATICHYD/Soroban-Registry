@@ -64,3 +64,6 @@ keyring = { version = "3.6.3", features = ["windows-native"] }
 [dev-dependencies]
 criterion = "0.5"
 wiremock = "0.6"
+
+name = "soroban_registry_cli"
+path = "src/lib.rs"
