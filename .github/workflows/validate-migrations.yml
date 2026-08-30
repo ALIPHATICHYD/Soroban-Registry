@@ -20,6 +20,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Validate migration files
         run: bash .github/scripts/validate-migrations.sh
@@ -33,5 +35,5 @@ jobs:
               issue_number: context.issue.number,
               owner: context.repo.owner,
               repo: context.repo.repo,
-              body: '❌ **Migration Validation Failed**\n\nPlease check the [workflow logs](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) for details.\n\nCommon issues:\n- Duplicate migration prefixes\n- Invalid filename format\n- Missing zero-padding in prefix\n\nSee [docs/MIGRATIONS.md](../blob/main/docs/MIGRATIONS.md) for naming conventions.'
+              body: '❌ **Migration Validation Failed**\n\nPlease check the [workflow logs](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) for details.\n\nCommon issues:\n- Duplicate migration prefixes\n- Invalid filename format\n- Missing zero-padding in prefix\n\nSee [CONTRIBUTING.md](../blob/main/CONTRIBUTING.md#database-migrations) for migration policy and file conventions.'
             })

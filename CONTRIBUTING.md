@@ -123,6 +123,13 @@ cd backend
 sqlx migrate run --source ../database/migrations
 ```
 
+### Database Migrations
+
+- Migration SQL files under `database/migrations/` are immutable once merged.
+- Do not edit or remove an already-merged migration file.
+- If you need to change schema or data, add a new migration file instead.
+- This keeps `sqlx` checksums stable and prevents startup failures on already-migrated databases.
+
 ## Making Changes
 
 ### Before You Start

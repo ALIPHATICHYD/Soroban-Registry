@@ -5,6 +5,7 @@
 // and rollback state management.
 
 use sha2::{Digest, Sha256};
+use std::path::Path;
 
 /// Compute SHA-256 hex checksum (mirrors the handler logic).
 fn compute_checksum(content: &str) -> String {
@@ -119,6 +120,41 @@ fn test_checksum_whitespace_sensitive() {
         c1, c2,
         "Whitespace differences should produce different checksums"
     );
+}
+
+#[test]
+fn test_migration_checksum_stability_for_sample_migrations() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let migrations_dir = manifest_dir.join("../../database/migrations");
+    let sample_files = [
+        "001_initial.sql",
+        "002_add_abi.sql",
+        "005_create_migrations_table.sql",
+    ];
+
+    let checksums: Vec<String> = sample_files
+        .iter()
+        .map(|file_name| {
+            let path = migrations_dir.join(file_name);
+            let sql = std::fs::read_to_string(&path)
+                .unwrap_or_else(|_| panic!("Failed to read migration file {}", path.display()));
+            compute_checksum(&sql)
+        })
+        .collect();
+
+    let repeat_checksums: Vec<String> = sample_files
+        .iter()
+        .map(|file_name| {
+            let path = migrations_dir.join(file_name);
+            let sql = std::fs::read_to_string(&path)
+                .unwrap_or_else(|_| panic!("Failed to read migration file {}", path.display()));
+            compute_checksum(&sql)
+        })
+        .collect();
+
+    assert_eq!(checksums, repeat_checksums);
+    assert_eq!(checksums.len(), sample_files.len());
+    assert!(checksums.iter().all(|c| c.len() == 64));
 }
 
 // ─── Version Gap Detection ───────────────────────────────────────────────────
