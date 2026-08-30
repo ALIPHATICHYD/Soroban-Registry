@@ -1,6 +1,6 @@
 services:
   postgres-primary:
-    image: bitnami/postgresql-repmgr:16
+    image: soldevelo/postgresql-repmgr:16
     container_name: soroban-registry-db-primary
     environment:
       POSTGRESQL_POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
@@ -31,7 +31,7 @@ services:
       retries: 10
 
   postgres-replica:
-    image: bitnami/postgresql-repmgr:16
+    image: soldevelo/postgresql-repmgr:16
     container_name: soroban-registry-db-replica
     environment:
       POSTGRESQL_POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
@@ -65,7 +65,7 @@ services:
       retries: 10
 
   pgpool:
-    image: bitnami/pgpool:4
+    image: soldevelo/pgpool:4
     container_name: soroban-registry-pgpool
     environment:
       PGPOOL_BACKEND_NODES: 0:postgres-primary:5432,1:postgres-replica:5432
