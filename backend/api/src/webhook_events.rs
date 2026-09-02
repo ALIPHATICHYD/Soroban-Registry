@@ -145,7 +145,10 @@ fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
     if a.len() != b.len() {
         return false;
     }
-    a.iter().zip(b.iter()).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
+    a.iter()
+        .zip(b.iter())
+        .fold(0u8, |acc, (x, y)| acc | (x ^ y))
+        == 0
 }
 
 async fn enqueue_delivery(
@@ -192,7 +195,10 @@ mod tests {
     #[test]
     fn signature_format_starts_with_sha256_prefix() {
         let sig = sign_payload("hello", "key");
-        assert!(sig.starts_with("sha256="), "signature should start with 'sha256='");
+        assert!(
+            sig.starts_with("sha256="),
+            "signature should start with 'sha256='"
+        );
     }
 
     #[test]
@@ -229,7 +235,10 @@ mod tests {
         let secret = "same-secret";
         let sig_a = sign_payload("payload-a", secret);
         let sig_b = sign_payload("payload-b", secret);
-        assert_ne!(sig_a, sig_b, "different payloads must produce different signatures");
+        assert_ne!(
+            sig_a, sig_b,
+            "different payloads must produce different signatures"
+        );
     }
 
     // ── Event type constants ──────────────────────────────────────────────────

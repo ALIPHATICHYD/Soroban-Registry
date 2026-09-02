@@ -74,11 +74,15 @@ fn test_track_deployment_invalid_network() {
     );
 }
 
+// The two timeout tests below assume that with no local registry running the poll finds
+// nothing and times out. That premise is wrong: `track-deployment` falls back to public
+// Horizon and Soroban RPC, whose endpoints are hardcoded in `track_deployment.rs`, so on
+// any machine with internet access the contract resolves as confirmed and the command
+// exits 0. Making them deterministic means letting the network endpoints be overridden,
+// which is a production change rather than a test fix -- see the PR for issue #1156.
+#[ignore = "polls public Horizon/RPC; needs overridable endpoints to test the timeout path"]
 #[test]
 fn test_track_deployment_timeout_exits_code_2() {
-    // Use a non-existent contract on testnet with a very short timeout.
-    // The registry API is not running in CI, so the poll will find nothing
-    // and the timeout should trigger exit code 2.
     let output = Command::new(get_binary_path())
         .args([
             "track-deployment",
@@ -101,6 +105,7 @@ fn test_track_deployment_timeout_exits_code_2() {
     );
 }
 
+#[ignore = "polls public Horizon/RPC; needs overridable endpoints to test the timeout path"]
 #[test]
 fn test_track_deployment_timeout_json_output() {
     let output = Command::new(get_binary_path())

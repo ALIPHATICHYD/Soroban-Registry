@@ -1,0 +1,166 @@
+name: CLI CI
+
+# Gates the soroban-registry CLI on every pull request: formatting, a locked build, the
+# test suite, and a --help smoke check.
+#
+# This workflow exists because nothing else in CI built or tested cli/. That gap is how
+# issue #1156 happened: three subcommand definitions (contract category, contract
+# notification, publisher doctor) were dropped by merge conflict resolutions and the crate
+# stopped compiling on main without anything noticing. ci.yml checks migration ordering
+# only, and api-tests.yml is disabled, so local verification was the sole check.
+#
+# Scope notes:
+#
+#   1. cli/ is a standalone Cargo package, not part of a workspace, so every command below
+#      is scoped with --manifest-path rather than run from the repository root.
+#   2. Formatting uses -p soroban-registry-cli, NOT --all. cli/ depends on backend/shared,
+#      backend/contract_abi, and backend/registry_client by path, and `cargo fmt --all`
+#      follows those paths into the backend, which has its own pre-existing formatting
+#      drift. Scoping to the package keeps this gate about the CLI.
+#   3. The same path dependencies mean a backend change can break the CLI, so the trigger
+#      paths below cover those three crates as well as cli/ itself.
+#
+# Deliberately not gated here: clippy. CONTRIBUTING.md prescribes -D warnings, but that
+# does not pass anywhere in this repository today, so enabling it would make this workflow
+# red on arrival and teach people to ignore it.
+
+on:
+  pull_request:
+    branches: [main, develop]
+    paths:
+      - "cli/**"
+      - "backend/shared/**"
+      - "backend/contract_abi/**"
+      - "backend/registry_client/**"
+      - ".github/workflows/cli-ci.yml"
+  push:
+    branches: [main]
+    paths:
+      - "cli/**"
+      - "backend/shared/**"
+      - "backend/contract_abi/**"
+      - "backend/registry_client/**"
+      - ".github/workflows/cli-ci.yml"
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cli-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  cli:
+    name: CLI (fmt, build, test)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install system build dependencies
+        run: |
+          set -euo pipefail
+          # openssl-sys is genuinely in the Linux build graph:
+          #   backend/shared -> rust-s3 -> aws-creds -> attohttpc -> native-tls -> openssl-sys
+          # so the CLI does not link without libssl headers. The keyring crate uses
+          # linux-keyutils rather than dbus, so no libdbus-1-dev is needed.
+          sudo apt-get update
+          sudo apt-get install -y pkg-config libssl-dev build-essential
+
+      - name: Install pinned toolchain
+        run: |
+          set -euo pipefail
+          # rust-toolchain.toml pins nightly and requests rustfmt + clippy; `rustup show`
+          # installs it on demand. Deliberately no dtolnay/actions-rs action here, which
+          # would override the pin with stable.
+          rustup show
+          rustc --version
+          cargo --version
+          cargo fmt --version
+
+      # Caching is an optimisation, never a correctness input: a stale or missing entry
+      # costs build time, not a wrong result. --locked below is what guarantees the
+      # dependency set.
+      - name: Cache cargo registry and build artifacts
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            cli/target
+          key: cli-${{ runner.os }}-${{ hashFiles('**/rust-toolchain.toml', 'cli/Cargo.lock') }}
+          restore-keys: |
+            cli-${{ runner.os }}-
+
+      - name: Check formatting
+        run: |
+          set -euo pipefail
+          echo "::group::cargo fmt --check"
+          if ! cargo fmt --manifest-path cli/Cargo.toml -p soroban-registry-cli --check; then
+            echo "::endgroup::"
+            echo "::error::CLI formatting check failed. Run 'cargo fmt --manifest-path cli/Cargo.toml -p soroban-registry-cli'."
+            exit 1
+          fi
+          echo "::endgroup::"
+
+      - name: Build
+        run: |
+          set -euo pipefail
+          echo "::group::cargo build --locked"
+          if ! cargo build --manifest-path cli/Cargo.toml --locked --all-targets; then
+            echo "::endgroup::"
+            echo "::error::CLI build failed. A clean checkout must compile, including test targets."
+            exit 1
+          fi
+          echo "::endgroup::"
+
+      - name: Test
+        run: |
+          set -euo pipefail
+          echo "::group::cargo test --locked"
+          if ! cargo test --manifest-path cli/Cargo.toml --locked; then
+            echo "::endgroup::"
+            echo "::error::CLI tests failed."
+            exit 1
+          fi
+          echo "::endgroup::"
+
+      # Catches the specific failure mode behind issue #1156: a command that still has a
+      # module and a dispatch arm but was dropped from the clap tree. The unit tests in
+      # main.rs assert the tree directly; this proves the built binary actually runs.
+      - name: Smoke check command tree
+        run: |
+          set -euo pipefail
+          echo "::group::soroban-registry --help"
+          cargo run --manifest-path cli/Cargo.toml --locked --quiet --bin soroban-registry -- --help
+          echo "::endgroup::"
+
+          # Arguments are passed explicitly rather than by splitting a string, so a
+          # subcommand name containing a space could never be silently mis-parsed.
+          check_subcommand() {
+            echo "::group::soroban-registry $* --help"
+            if cargo run --manifest-path cli/Cargo.toml --locked --quiet \
+                 --bin soroban-registry -- "$@" --help; then
+              echo "::endgroup::"
+              return 0
+            fi
+            echo "::endgroup::"
+            echo "::error::'soroban-registry $*' is not reachable in the built binary."
+            return 1
+          }
+
+          FAILED=0
+          check_subcommand contract category     || FAILED=1
+          check_subcommand contract notification || FAILED=1
+          check_subcommand publisher doctor      || FAILED=1
+
+          if [ "$FAILED" -ne 0 ]; then
+            echo "::error::Command tree smoke check failed. A subcommand present in the source is missing from the built CLI."
+            exit 1
+          fi
