@@ -843,6 +843,9 @@ mod tests {
             dependencies: vec![],
             is_cicd: false,
             wasm_artifact_base64: None,
+            policy: None,
+            dry_run: false,
+            explain: false,
         };
 
         assert!(req.validate().is_ok());
@@ -864,6 +867,9 @@ mod tests {
             dependencies: vec![],
             is_cicd: false,
             wasm_artifact_base64: None,
+            policy: None,
+            dry_run: false,
+            explain: false,
         };
 
         let result = req.validate();
@@ -888,6 +894,9 @@ mod tests {
             dependencies: vec![],
             is_cicd: false,
             wasm_artifact_base64: None,
+            policy: None,
+            dry_run: false,
+            explain: false,
         };
 
         let result = req.validate();
@@ -913,6 +922,9 @@ mod tests {
             dependencies: vec![],
             is_cicd: false,
             wasm_artifact_base64: None,
+            policy: None,
+            dry_run: false,
+            explain: false,
         };
 
         req.sanitize();

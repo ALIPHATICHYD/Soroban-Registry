@@ -206,7 +206,7 @@ pub async fn list(
 
     if let Some(export) = export {
         let path = export_file(&response.categories, export)?;
-        println!("{} {}", "✓ Exported to".green(), path.bright_black());
+        println!("{} {}", "Exported to".green(), path.bright_black());
     }
 
     Ok(())
@@ -226,7 +226,7 @@ pub async fn stats(
         println!("{}", render(&response.categories, format, true)?);
         if let Some(export) = export {
             let path = export_file(&response.categories, export)?;
-            eprintln!("{} {}", "✓ Exported to".green(), path.bright_black());
+            eprintln!("{} {}", "Exported to".green(), path.bright_black());
         }
         return Ok(());
     }
@@ -255,7 +255,7 @@ pub async fn stats(
 
     if let Some(export) = export {
         let path = export_file(&response.categories, export)?;
-        println!("\n{} {}", "✓ Exported to".green(), path.bright_black());
+        println!("\n{} {}", "Exported to".green(), path.bright_black());
     }
 
     Ok(())

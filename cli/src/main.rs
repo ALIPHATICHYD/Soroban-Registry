@@ -65,6 +65,7 @@ mod notification;
 mod package_signing;
 mod patch;
 mod plugins;
+mod policy;
 mod profiler;
 mod publisher;
 mod registry;
@@ -82,6 +83,7 @@ mod version;
 mod webhook;
 mod wizard;
 
+mod describe;
 mod diagnostic;
 mod output_format;
 mod search;
@@ -89,7 +91,7 @@ mod search_pagination;
 mod snapshot;
 
 use anyhow::Result;
-use clap::{ArgAction, Parser, Subcommand, ValueEnum};
+use clap::{ArgAction, CommandFactory, Parser, Subcommand, ValueEnum};
 use colored::Colorize;
 use patch::Severity;
 
@@ -134,6 +136,10 @@ pub struct Cli {
     /// Check for CLI updates before running the command.
     #[arg(long, global = true)]
     pub check_updates: bool,
+
+    /// Print machine-readable JSON command schema description (#1145)
+    #[arg(long, global = true)]
+    pub describe: bool,
 
     #[command(subcommand)]
     pub command: Commands,
@@ -221,6 +227,18 @@ pub enum Commands {
         /// Skip pre-submission contract tests
         #[arg(long)]
         skip_tests: bool,
+
+        /// Path to policy-as-code YAML or JSON file (#1148)
+        #[arg(long)]
+        policy: Option<String>,
+
+        /// Display policy evaluation rule details (#1148)
+        #[arg(long)]
+        explain: bool,
+
+        /// Evaluate policy and validate without submitting to registry (#1148)
+        #[arg(long)]
+        dry_run: bool,
     },
 
     /// List contracts in the registry
@@ -335,6 +353,18 @@ pub enum Commands {
         /// Target shell
         #[arg(value_enum)]
         shell: completion::CompletionShell,
+    },
+
+    /// Generate or verify CLI command schemas and shell completion scripts (#1145)
+    #[command(name = "generate-artifacts")]
+    GenerateArtifacts {
+        /// Verify that existing generated artifacts are up to date (fails CI on drift)
+        #[arg(long)]
+        check: bool,
+
+        /// Target output directory for generated artifacts
+        #[arg(long)]
+        output_dir: Option<String>,
     },
 
     /// Check CLI version and update availability
@@ -876,6 +906,18 @@ pub enum Commands {
         action: KeysCommands,
     },
 
+    /// Policy-as-code admission evaluation and reporting (#1148)
+    Policy {
+        #[command(subcommand)]
+        action: PolicyCommands,
+    },
+
+    /// Publisher environment diagnostics (#841)
+    Publisher {
+        #[command(subcommand)]
+        action: PublisherCommands,
+    },
+
     /// Contract deployment verification and security scan (#522)
     Contract {
         #[command(subcommand)]
@@ -1156,12 +1198,6 @@ pub enum Commands {
     Env {
         #[command(subcommand)]
         action: EnvCommands,
-    },
-
-    /// Publisher environment diagnostics
-    Publisher {
-        #[command(subcommand)]
-        action: PublisherCommands,
     },
 
     /// External command (may be provided by an installed plugin)
@@ -2897,6 +2933,29 @@ pub enum EnvCommands {
     },
 }
 
+/// Sub-commands for the `policy` group (#1148)
+#[derive(Debug, Subcommand)]
+pub enum PolicyCommands {
+    /// Run a policy-as-code admission check against a WASM artifact
+    Check {
+        /// Path to the local WASM artifact to evaluate
+        #[arg(long)]
+        wasm_path: Option<String>,
+        /// Path to the policy YAML/JSON file
+        #[arg(long)]
+        policy: String,
+        /// Show detailed rule-by-rule evaluation
+        #[arg(long)]
+        explain: bool,
+        /// Output results as JSON
+        #[arg(long)]
+        json: bool,
+        /// Evaluate without submitting the artifact
+        #[arg(long)]
+        dry_run: bool,
+    },
+}
+
 /// Sub-commands for the `publisher` group
 #[derive(Debug, Subcommand)]
 pub enum PublisherCommands {
@@ -3242,6 +3301,11 @@ pub enum UpgradeSubcommands {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    let root_cmd = Cli::command();
+    if describe::process_describe_if_requested(&root_cmd)? {
+        return Ok(());
+    }
+
     let mut cli = Cli::parse();
 
     if cli.check_updates {
@@ -3536,6 +3600,10 @@ pub async fn dispatch_command(
             completion::generate_script(shell);
             eprintln!("\n{}", completion::install_hint(shell));
         }
+        Commands::GenerateArtifacts { check, output_dir } => {
+            let path = output_dir.as_deref().map(std::path::Path::new);
+            describe::generate_or_check_artifacts(check, path)?;
+        }
         Commands::Analytics {
             query,
             period,
@@ -3582,6 +3650,9 @@ pub async fn dispatch_command(
             require_coverage,
             coverage_threshold,
             skip_tests,
+            policy,
+            explain,
+            dry_run,
         } => {
             let tags_vec = tags
                 .map(|t| t.split(',').map(|s| s.trim().to_string()).collect())
@@ -3592,23 +3663,37 @@ pub async fn dispatch_command(
                 name,
                 tags_vec
             );
-            commands::publish(
-                &cli.api_url,
-                &contract_id,
-                &name,
-                description.as_deref(),
-                network,
-                category.as_deref(),
-                tags_vec,
-                &publisher,
-                false,
-                &contract_path,
-                test_command.as_deref(),
-                require_coverage,
-                coverage_threshold,
-                skip_tests,
-            )
-            .await?;
+
+            if let Some(ref policy_path) = policy {
+                policy::run_policy_check(
+                    Some(contract_path.clone()),
+                    policy_path.clone(),
+                    explain,
+                    false,
+                    dry_run,
+                )
+                .await?;
+            }
+
+            if !dry_run {
+                commands::publish(
+                    &cli.api_url,
+                    &contract_id,
+                    &name,
+                    description.as_deref(),
+                    network,
+                    category.as_deref(),
+                    tags_vec,
+                    &publisher,
+                    false,
+                    &contract_path,
+                    test_command.as_deref(),
+                    require_coverage,
+                    coverage_threshold,
+                    skip_tests,
+                )
+                .await?;
+            }
         }
         Commands::List {
             limit,
@@ -4636,6 +4721,18 @@ pub async fn dispatch_command(
                 webhook::verify_signature_cmd(&secret, &payload, &signature)?;
             }
         },
+        Commands::Policy { action } => match action {
+            PolicyCommands::Check {
+                wasm_path,
+                policy,
+                explain,
+                json,
+                dry_run,
+            } => {
+                policy::run_policy_check(wasm_path, policy, explain, json, dry_run).await?;
+            }
+        },
+
         // ── Contract verify command (#522) ───────────────────────────────────
         Commands::Contract { action } => match action {
             ContractCommands::List {

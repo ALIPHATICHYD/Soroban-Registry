@@ -82,4 +82,17 @@ jobs:
             fi
             prev="$base"
           done
-          echo "✓ All $(ls database/migrations/*.sql | wc -l) migrations in order"
+          echo "OK All $(ls database/migrations/*.sql | wc -l) migrations in order"
+
+  # ── CLI Artifacts Validation ───────────────────────────────────────────
+  check-cli-artifacts:
+    name: Validate CLI generated artifacts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+      - name: Verify CLI command schemas and completions
+        working-directory: cli
+        run: cargo run --bin soroban-registry -- generate-artifacts --check
+
