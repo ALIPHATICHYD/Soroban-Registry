@@ -615,6 +615,9 @@ pub async fn publish(
         publisher_address: publisher.to_string(),
         dependencies: Vec::new(),
         is_cicd,
+        policy: None,
+        dry_run: false,
+        explain: false,
     };
 
     println!("\n{}", "Publishing contract...".bold().cyan());
@@ -2124,6 +2127,9 @@ mod tests {
             publisher_address: publisher.to_string(),
             dependencies: Vec::new(),
             is_cicd: false,
+            policy: None,
+            dry_run: false,
+            explain: false,
         }
     }
 

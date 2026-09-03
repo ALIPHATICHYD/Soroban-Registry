@@ -143,4 +143,3 @@ mod tests {
         assert!(generate_all_completions(dir.path(), true).is_ok());
     }
 }
-

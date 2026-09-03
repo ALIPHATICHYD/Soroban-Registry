@@ -107,9 +107,9 @@ fn build_schema(cmd: &Command, full_name: &str) -> CommandSchema {
         .or_else(|| cmd.get_long_about())
         .map(|s| s.to_string());
 
-    let deprecated = cmd
-        .get_about()
-        .map_or(false, |a| a.to_string().to_lowercase().contains("deprecated"));
+    let deprecated = cmd.get_about().map_or(false, |a| {
+        a.to_string().to_lowercase().contains("deprecated")
+    });
 
     let mut arguments = BTreeMap::new();
     for arg in cmd.get_arguments() {
@@ -129,16 +129,12 @@ fn build_schema(cmd: &Command, full_name: &str) -> CommandSchema {
         // Detect boolean flags FIRST: clap generates "true"/"false" as
         // possible values for ArgAction::SetTrue/SetFalse, which would
         // otherwise be misclassified as enum arguments.
-        let is_boolean = matches!(
-            arg.get_action(),
-            ArgAction::SetTrue | ArgAction::SetFalse
-        );
+        let is_boolean = matches!(arg.get_action(), ArgAction::SetTrue | ArgAction::SetFalse);
 
         let possible_vals: Vec<String> = if is_boolean {
             Vec::new() // skip clap's auto-generated true/false values
         } else {
-            arg
-                .get_possible_values()
+            arg.get_possible_values()
                 .into_iter()
                 .filter_map(|pv| {
                     if pv.is_hide_set() {
@@ -187,7 +183,9 @@ fn build_schema(cmd: &Command, full_name: &str) -> CommandSchema {
         };
 
         let arg_desc = arg.get_help().map(|h| h.to_string());
-        let arg_deprecated = arg_desc.as_deref().map_or(false, |h| h.to_lowercase().contains("deprecated"));
+        let arg_deprecated = arg_desc
+            .as_deref()
+            .map_or(false, |h| h.to_lowercase().contains("deprecated"));
 
         arguments.insert(
             arg_name,
@@ -213,9 +211,18 @@ fn build_schema(cmd: &Command, full_name: &str) -> CommandSchema {
     let formats = infer_output_formats(&arguments);
 
     let mut exit_codes = BTreeMap::new();
-    exit_codes.insert("0".to_string(), "success / valid command completion".to_string());
-    exit_codes.insert("1".to_string(), "command error / invalid status".to_string());
-    exit_codes.insert("2".to_string(), "usage error / invalid arguments".to_string());
+    exit_codes.insert(
+        "0".to_string(),
+        "success / valid command completion".to_string(),
+    );
+    exit_codes.insert(
+        "1".to_string(),
+        "command error / invalid status".to_string(),
+    );
+    exit_codes.insert(
+        "2".to_string(),
+        "usage error / invalid arguments".to_string(),
+    );
 
     CommandSchema {
         version: SCHEMA_VERSION.to_string(),
@@ -325,7 +332,11 @@ fn infer_output_formats(args: &BTreeMap<String, ArgumentSchema>) -> Vec<String> 
     }
 
     let mut formats = vec!["table".to_string()];
-    if args.contains_key("json") || args.values().any(|a| a.description.as_deref().unwrap_or("").contains("JSON")) {
+    if args.contains_key("json")
+        || args
+            .values()
+            .any(|a| a.description.as_deref().unwrap_or("").contains("JSON"))
+    {
         formats.push("json".to_string());
     }
 
@@ -400,7 +411,10 @@ pub fn generate_or_check_artifacts(check: bool, dir: Option<&Path>) -> Result<()
     crate::completion::generate_all_completions(target_dir.join("completions").as_path(), check)?;
 
     if !check {
-        println!("Successfully generated CLI artifacts in {}", target_dir.display());
+        println!(
+            "Successfully generated CLI artifacts in {}",
+            target_dir.display()
+        );
     }
 
     Ok(())
@@ -427,35 +441,54 @@ mod tests {
         let schema = build_schema(&cmd, cmd.get_name());
         // --json and --describe are boolean flags (ArgAction::SetTrue)
         if let Some(json_arg) = schema.arguments.get("json") {
-            assert_eq!(json_arg.arg_type, "boolean", "--json should be typed as boolean");
+            assert_eq!(
+                json_arg.arg_type, "boolean",
+                "--json should be typed as boolean"
+            );
         }
         if let Some(desc) = schema.arguments.get("describe") {
-            assert_eq!(desc.arg_type, "boolean", "--describe should be typed as boolean");
+            assert_eq!(
+                desc.arg_type, "boolean",
+                "--describe should be typed as boolean"
+            );
         }
     }
 
     #[test]
     fn enum_arguments_detected_from_possible_values() {
         let cmd = crate::Cli::command();
-        let contract_sub = cmd.find_subcommand("contract").expect("contract subcommand");
+        let contract_sub = cmd
+            .find_subcommand("contract")
+            .expect("contract subcommand");
         // The 'verify' subcommand should have a --format arg with enum values
         if let Some(verify) = contract_sub.find_subcommand("verify") {
             let schema = build_schema(verify, "soroban-registry contract verify");
             // Check that at least one argument is typed as enum
             let has_enum = schema.arguments.values().any(|a| a.arg_type == "enum");
-            assert!(has_enum, "expected at least one enum argument in contract verify");
+            assert!(
+                has_enum,
+                "expected at least one enum argument in contract verify"
+            );
         }
     }
 
     #[test]
     fn secret_arguments_flagged() {
         let cmd = crate::Cli::command();
-        let contract_sub = cmd.find_subcommand("contract").expect("contract subcommand");
+        let contract_sub = cmd
+            .find_subcommand("contract")
+            .expect("contract subcommand");
         if let Some(deprecate) = contract_sub.find_subcommand("deprecate") {
             let schema = build_schema(deprecate, "soroban-registry contract deprecate");
-            let pk = schema.arguments.get("private-key").expect("private-key arg");
+            let pk = schema
+                .arguments
+                .get("private-key")
+                .expect("private-key arg");
             assert!(pk.secret, "private-key should be flagged as secret");
-            assert!(pk.default_value.is_none(), "secret args must not expose default_value");
+            assert!(
+                pk.default_value.is_none(),
+                "secret args must not expose default_value"
+            );
         }
     }
 
@@ -480,7 +513,10 @@ mod tests {
         let cmd = crate::Cli::command();
         let schema = build_schema(&cmd, cmd.get_name());
         let verbose = schema.arguments.get("verbose").expect("verbose arg");
-        assert_eq!(verbose.arg_type, "number", "--verbose should be typed as number (count)");
+        assert_eq!(
+            verbose.arg_type, "number",
+            "--verbose should be typed as number (count)"
+        );
         assert!(verbose.repeatable, "--verbose should be repeatable");
     }
 

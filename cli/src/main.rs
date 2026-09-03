@@ -83,6 +83,7 @@ mod version;
 mod webhook;
 mod wizard;
 
+mod describe;
 mod diagnostic;
 mod output_format;
 mod search;
@@ -1197,12 +1198,6 @@ pub enum Commands {
     Env {
         #[command(subcommand)]
         action: EnvCommands,
-    },
-
-    /// Publisher environment diagnostics
-    Publisher {
-        #[command(subcommand)]
-        action: PublisherCommands,
     },
 
     /// External command (may be provided by an installed plugin)
@@ -2935,6 +2930,29 @@ pub enum EnvCommands {
     Switch {
         /// Environment name to activate
         environment: String,
+    },
+}
+
+/// Sub-commands for the `policy` group (#1148)
+#[derive(Debug, Subcommand)]
+pub enum PolicyCommands {
+    /// Run a policy-as-code admission check against a WASM artifact
+    Check {
+        /// Path to the local WASM artifact to evaluate
+        #[arg(long)]
+        wasm_path: Option<String>,
+        /// Path to the policy YAML/JSON file
+        #[arg(long)]
+        policy: String,
+        /// Show detailed rule-by-rule evaluation
+        #[arg(long)]
+        explain: bool,
+        /// Output results as JSON
+        #[arg(long)]
+        json: bool,
+        /// Evaluate without submitting the artifact
+        #[arg(long)]
+        dry_run: bool,
     },
 }
 

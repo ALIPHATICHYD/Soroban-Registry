@@ -6,10 +6,10 @@ use std::path::PathBuf;
 use std::process::Command;
 use stellar_xdr::curr::{
     Limits, ScSpecEntry, ScSpecEventDataFormat, ScSpecEventParamLocationV0, ScSpecEventParamV0,
-    ScSpecEventV0, ScSpecFunctionInputV0, ScSpecFunctionV0, ScSpecTypeUdt,
+    ScSpecEventV0, ScSpecFunctionInputV0, ScSpecFunctionV0, ScSpecTypeDef, ScSpecTypeUdt,
     ScSpecUdtEnumCaseV0, ScSpecUdtEnumV0, ScSpecUdtErrorEnumCaseV0, ScSpecUdtErrorEnumV0,
-    ScSpecUdtStructV0, ScSpecUdtUnionCaseTupleV0, ScSpecUdtUnionCaseV0, ScSpecUdtUnionV0,
-    ScSpecTypeDef, ScSymbol, StringM, VecM, WriteXdr,
+    ScSpecUdtStructV0, ScSpecUdtUnionCaseTupleV0, ScSpecUdtUnionCaseV0, ScSpecUdtUnionV0, ScSymbol,
+    StringM, VecM, WriteXdr,
 };
 use tempfile::tempdir;
 
@@ -43,7 +43,7 @@ fn append_custom_section(mut wasm: Vec<u8>, section_name: &str, data: &[u8]) -> 
     body.extend_from_slice(data);
 
     wasm.push(0x00); // custom section identifier
-    // LEB128 encode the section size
+                     // LEB128 encode the section size
     let mut size = body.len();
     loop {
         let mut byte = (size & 0x7F) as u8;
@@ -80,7 +80,10 @@ fn inspect_spec_missing_file_returns_error() {
 
     assert_eq!(json["status"], "invalid");
     assert_eq!(json["spec_section"]["present"], false);
-    assert!(json["diagnostics"][0]["message"].as_str().unwrap().contains("not found"));
+    assert!(json["diagnostics"][0]["message"]
+        .as_str()
+        .unwrap()
+        .contains("not found"));
 }
 
 #[test]
@@ -104,7 +107,10 @@ fn inspect_spec_missing_spec_section() {
     assert_eq!(json["status"], "invalid");
     assert_eq!(json["spec_section"]["present"], false);
     assert_eq!(json["spec_section"]["bytes"], 0);
-    assert!(json["diagnostics"][0]["message"].as_str().unwrap().contains("Missing 'contractspecv0'"));
+    assert!(json["diagnostics"][0]["message"]
+        .as_str()
+        .unwrap()
+        .contains("Missing 'contractspecv0'"));
 }
 
 #[test]
@@ -113,7 +119,8 @@ fn inspect_spec_malformed_xdr_section() {
     let wasm_path = dir.path().join("malformed.wasm");
 
     let malformed_data = vec![0xFF, 0xFF, 0xFF, 0xFF, 0x12, 0x34];
-    let wasm_bytes = append_custom_section(MINIMAL_WASM.to_vec(), "contractspecv0", &malformed_data);
+    let wasm_bytes =
+        append_custom_section(MINIMAL_WASM.to_vec(), "contractspecv0", &malformed_data);
     fs::write(&wasm_path, wasm_bytes).unwrap();
 
     let output = Command::new(get_binary_path())
@@ -130,7 +137,11 @@ fn inspect_spec_malformed_xdr_section() {
 
     assert_eq!(json["status"], "invalid");
     assert_eq!(json["spec_section"]["present"], true);
-    assert!(json["diagnostics"].as_array().unwrap().iter().any(|d| d["message"].as_str().unwrap().contains("Malformed XDR")));
+    assert!(json["diagnostics"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|d| d["message"].as_str().unwrap().contains("Malformed XDR")));
 }
 
 #[test]
@@ -145,7 +156,8 @@ fn inspect_spec_valid_spec_section() {
             doc: StringM::try_from("Recipient address").unwrap(),
             name: StringM::try_from("to").unwrap(),
             type_: ScSpecTypeDef::Address,
-        }]).unwrap(),
+        }])
+        .unwrap(),
         outputs: VecM::try_from(vec![ScSpecTypeDef::Bool]).unwrap(),
     });
 
@@ -162,7 +174,11 @@ fn inspect_spec_valid_spec_section() {
         .output()
         .expect("run inspect-spec");
 
-    assert!(output.status.success(), "inspect-spec stderr: {}", String::from_utf8_lossy(&output.stderr));
+    assert!(
+        output.status.success(),
+        "inspect-spec stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     let stdout = String::from_utf8_lossy(&output.stdout);
     let json: serde_json::Value = serde_json::from_str(&stdout).expect("valid JSON response");
 
@@ -214,7 +230,10 @@ fn inspect_spec_duplicate_function_names() {
         .output()
         .expect("run inspect-spec");
 
-    assert!(!output.status.success(), "expected non-zero exit for duplicate names");
+    assert!(
+        !output.status.success(),
+        "expected non-zero exit for duplicate names"
+    );
     let stdout = String::from_utf8_lossy(&output.stdout);
     let json: serde_json::Value = serde_json::from_str(&stdout).expect("valid JSON");
 
@@ -225,7 +244,10 @@ fn inspect_spec_duplicate_function_names() {
             .as_array()
             .unwrap()
             .iter()
-            .any(|d| d["message"].as_str().unwrap().contains("Duplicate function name")),
+            .any(|d| d["message"]
+                .as_str()
+                .unwrap()
+                .contains("Duplicate function name")),
         "expected duplicate function name diagnostic"
     );
 }
@@ -274,7 +296,10 @@ fn inspect_spec_duplicate_type_names() {
             .as_array()
             .unwrap()
             .iter()
-            .any(|d| d["message"].as_str().unwrap().contains("Duplicate type name")),
+            .any(|d| d["message"]
+                .as_str()
+                .unwrap()
+                .contains("Duplicate type name")),
         "expected duplicate type name diagnostic"
     );
 }
@@ -321,7 +346,10 @@ fn inspect_spec_unresolved_type_reference() {
             .as_array()
             .unwrap()
             .iter()
-            .any(|d| d["message"].as_str().unwrap().contains("Unresolved type reference")),
+            .any(|d| d["message"]
+                .as_str()
+                .unwrap()
+                .contains("Unresolved type reference")),
         "expected unresolved type reference diagnostic"
     );
 }
@@ -379,7 +407,11 @@ fn inspect_spec_events_and_errors_counting() {
         .output()
         .expect("run inspect-spec");
 
-    assert!(output.status.success(), "inspect-spec stderr: {}", String::from_utf8_lossy(&output.stderr));
+    assert!(
+        output.status.success(),
+        "inspect-spec stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     let stdout = String::from_utf8_lossy(&output.stdout);
     let json: serde_json::Value = serde_json::from_str(&stdout).expect("valid JSON");
 
@@ -440,7 +472,11 @@ fn inspect_spec_unions_and_enums_counting() {
         .output()
         .expect("run inspect-spec");
 
-    assert!(output.status.success(), "inspect-spec stderr: {}", String::from_utf8_lossy(&output.stderr));
+    assert!(
+        output.status.success(),
+        "inspect-spec stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     let stdout = String::from_utf8_lossy(&output.stdout);
     let json: serde_json::Value = serde_json::from_str(&stdout).expect("valid JSON");
 
@@ -521,11 +557,18 @@ fn inspect_spec_human_readable_output() {
         .output()
         .expect("run inspect-spec");
 
-    assert!(output.status.success(), "inspect-spec stderr: {}", String::from_utf8_lossy(&output.stderr));
+    assert!(
+        output.status.success(),
+        "inspect-spec stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     let stdout = String::from_utf8_lossy(&output.stdout);
 
     // Human-readable output should contain key sections
-    assert!(stdout.contains("Soroban Contract Specification Inspection"), "missing header");
+    assert!(
+        stdout.contains("Soroban Contract Specification Inspection"),
+        "missing header"
+    );
     assert!(stdout.contains("SHA-256:"), "missing SHA-256");
     assert!(stdout.contains("VALID"), "missing VALID status");
     assert!(stdout.contains("Functions:"), "missing Functions section");
@@ -545,9 +588,15 @@ fn inspect_spec_human_readable_invalid_exits_nonzero() {
         .output()
         .expect("run inspect-spec");
 
-    assert!(!output.status.success(), "expected non-zero exit for missing spec");
+    assert!(
+        !output.status.success(),
+        "expected non-zero exit for missing spec"
+    );
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("INVALID"), "should show INVALID in human-readable mode");
+    assert!(
+        stdout.contains("INVALID"),
+        "should show INVALID in human-readable mode"
+    );
 }
 
 #[test]
@@ -567,7 +616,9 @@ fn inspect_spec_wasm_sha256_matches_actual_hash() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     let json: serde_json::Value = serde_json::from_str(&stdout).expect("valid JSON");
 
-    let reported_hash = json["wasm_sha256"].as_str().expect("wasm_sha256 should be a string");
+    let reported_hash = json["wasm_sha256"]
+        .as_str()
+        .expect("wasm_sha256 should be a string");
     assert_eq!(reported_hash.len(), 64, "SHA-256 should be 64 hex chars");
 
     // Verify independently using sha2 crate
@@ -575,5 +626,8 @@ fn inspect_spec_wasm_sha256_matches_actual_hash() {
     let mut hasher = Sha256::new();
     hasher.update(MINIMAL_WASM);
     let expected = hex::encode(hasher.finalize());
-    assert_eq!(reported_hash, expected, "reported hash should match computed hash");
+    assert_eq!(
+        reported_hash, expected,
+        "reported hash should match computed hash"
+    );
 }
