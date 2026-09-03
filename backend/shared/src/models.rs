@@ -918,6 +918,15 @@ pub struct PublishRequest {
     /// Whether this was published via CI/CD (Issue #529)
     #[serde(default)]
     pub is_cicd: bool,
+    /// Optional policy-as-code YAML or JSON definition to evaluate prior to admission (#1148)
+    #[serde(default)]
+    pub policy: Option<String>,
+    /// Optional dry-run flag for policy admission evaluation
+    #[serde(default)]
+    pub dry_run: bool,
+    /// Optional explain flag for detailed policy evaluation report
+    #[serde(default)]
+    pub explain: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
@@ -5253,6 +5262,27 @@ pub struct SignedSnapshot {
     pub payload: SnapshotPayload,
     pub signature: Option<String>,
     pub public_key: Option<String>,
+}
+
+// ===========================================================================
+// POLICY-AS-CODE ADMISSION CHECKS (Issue #1148)
+// ===========================================================================
+
+/// Request body for POST /api/policy/check
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct PolicyCheckRequest {
+    /// Optional policy-as-code YAML or JSON definition to evaluate.
+    pub policy: Option<String>,
+    /// Admission context providing artifact, verification, provenance,
+    /// vulnerability, risk, dependency, interface, network, and metadata info.
+    #[serde(default)]
+    pub context: Option<crate::policy::AdmissionContext>,
+}
+
+/// Response body for POST /api/policy/check
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct PolicyCheckResponse {
+    pub evaluation: crate::policy::PolicyEvaluationResult,
 }
 
 #[cfg(test)]

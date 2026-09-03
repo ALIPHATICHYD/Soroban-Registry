@@ -65,6 +65,7 @@ mod notification;
 mod package_signing;
 mod patch;
 mod plugins;
+mod policy;
 mod profiler;
 mod publisher;
 mod registry;
@@ -221,6 +222,18 @@ pub enum Commands {
         /// Skip pre-submission contract tests
         #[arg(long)]
         skip_tests: bool,
+
+        /// Path to policy-as-code YAML or JSON file (#1148)
+        #[arg(long)]
+        policy: Option<String>,
+
+        /// Display policy evaluation rule details (#1148)
+        #[arg(long)]
+        explain: bool,
+
+        /// Evaluate policy and validate without submitting to registry (#1148)
+        #[arg(long)]
+        dry_run: bool,
     },
 
     /// List contracts in the registry
@@ -874,6 +887,12 @@ pub enum Commands {
     Keys {
         #[command(subcommand)]
         action: KeysCommands,
+    },
+
+    /// Policy-as-code admission evaluation and reporting (#1148)
+    Policy {
+        #[command(subcommand)]
+        action: PolicyCommands,
     },
 
     /// Contract deployment verification and security scan (#522)
@@ -2899,6 +2918,34 @@ pub enum EnvCommands {
 
 /// Sub-commands for the `publisher` group
 #[derive(Debug, Subcommand)]
+pub enum PolicyCommands {
+    /// Run a policy-as-code admission check against a WASM artifact
+    ///
+    /// Usage: soroban-registry policy check [--wasm-path <path>] --policy <policy-file> [--explain] [--json] [--dry-run]
+    Check {
+        /// Path to the local WASM artifact to evaluate
+        #[arg(long)]
+        wasm_path: Option<String>,
+
+        /// Path to the policy YAML/JSON file
+        #[arg(long)]
+        policy: String,
+
+        /// Show detailed rule-by-rule evaluation
+        #[arg(long)]
+        explain: bool,
+
+        /// Output results as JSON
+        #[arg(long)]
+        json: bool,
+
+        /// Evaluate without submitting the artifact
+        #[arg(long)]
+        dry_run: bool,
+    },
+}
+
+#[derive(Debug, Subcommand)]
 pub enum PublisherCommands {
     /// Diagnose the local publishing environment (config, session, signing key, connectivity)
     ///
@@ -3582,6 +3629,9 @@ pub async fn dispatch_command(
             require_coverage,
             coverage_threshold,
             skip_tests,
+            policy,
+            explain,
+            dry_run,
         } => {
             let tags_vec = tags
                 .map(|t| t.split(',').map(|s| s.trim().to_string()).collect())
@@ -3592,23 +3642,37 @@ pub async fn dispatch_command(
                 name,
                 tags_vec
             );
-            commands::publish(
-                &cli.api_url,
-                &contract_id,
-                &name,
-                description.as_deref(),
-                network,
-                category.as_deref(),
-                tags_vec,
-                &publisher,
-                false,
-                &contract_path,
-                test_command.as_deref(),
-                require_coverage,
-                coverage_threshold,
-                skip_tests,
-            )
-            .await?;
+
+            if let Some(ref policy_path) = policy {
+                policy::run_policy_check(
+                    Some(contract_path.clone()),
+                    policy_path.clone(),
+                    explain,
+                    false,
+                    dry_run,
+                )
+                .await?;
+            }
+
+            if !dry_run {
+                commands::publish(
+                    &cli.api_url,
+                    &contract_id,
+                    &name,
+                    description.as_deref(),
+                    network,
+                    category.as_deref(),
+                    tags_vec,
+                    &publisher,
+                    false,
+                    &contract_path,
+                    test_command.as_deref(),
+                    require_coverage,
+                    coverage_threshold,
+                    skip_tests,
+                )
+                .await?;
+            }
         }
         Commands::List {
             limit,
@@ -4636,6 +4700,18 @@ pub async fn dispatch_command(
                 webhook::verify_signature_cmd(&secret, &payload, &signature)?;
             }
         },
+        Commands::Policy { action } => match action {
+            PolicyCommands::Check {
+                wasm_path,
+                policy,
+                explain,
+                json,
+                dry_run,
+            } => {
+                policy::run_policy_check(wasm_path, policy, explain, json, dry_run).await?;
+            }
+        },
+
         // ── Contract verify command (#522) ───────────────────────────────────
         Commands::Contract { action } => match action {
             ContractCommands::List {

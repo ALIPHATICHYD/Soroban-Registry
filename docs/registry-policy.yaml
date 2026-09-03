@@ -1,0 +1,43 @@
+# Example Registry Admission Policy (version 1)
+# Evaluated by Soroban Registry backend, CLI, and CI/CD pipelines before contract publishing.
+
+version: 1
+name: soroban-registry-production-policy
+description: Production admission rules for Soroban contract artifacts
+
+rules:
+  # 1. Unsigned artifacts check
+  - name: require-signed-artifact
+    when: artifact.signature_verified != true
+    decision: deny
+    reason: "Unsigned contract artifacts are strictly not allowed"
+
+  # 2. Critical vulnerabilities check
+  - name: block-critical-vulnerabilities
+    when: risk.max_severity == "critical" || vulnerabilities.critical_count > 0
+    decision: deny
+    reason: "Artifacts with critical security vulnerabilities are denied admission"
+
+  # 3. Revoked dependencies check
+  - name: block-revoked-dependencies
+    when: dependency.has_revoked == true || dependency.revoked_count > 0
+    decision: deny
+    reason: "Contracts depending on revoked dependencies cannot be published"
+
+  # 4. Network identity check
+  - name: restrict-allowed-networks
+    when: network.identity in ["mainnet", "testnet"] != true
+    decision: deny
+    reason: "Publication is restricted to authorized networks (mainnet, testnet)"
+
+  # 5. Missing provenance check
+  - name: require-reproducible-provenance
+    when: provenance.present != true
+    decision: warn
+    reason: "Missing build provenance details; publishing will continue with warning"
+
+  # 6. Incompatible interfaces check
+  - name: block-incompatible-interface
+    when: interface.compatible != true || interface.breaking_changes > 0
+    decision: deny
+    reason: "Breaking or incompatible interface changes detected"
