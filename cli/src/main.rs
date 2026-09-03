@@ -48,6 +48,7 @@ mod conversions;
 mod coverage;
 mod dashboard;
 mod deploy;
+mod describe;
 mod env;
 mod events;
 mod export;
@@ -1199,12 +1200,6 @@ pub enum Commands {
         action: EnvCommands,
     },
 
-    /// Publisher environment diagnostics
-    Publisher {
-        #[command(subcommand)]
-        action: PublisherCommands,
-    },
-
     /// External command (may be provided by an installed plugin)
     #[command(external_subcommand)]
     External(Vec<String>),
@@ -1394,6 +1389,33 @@ pub enum CicdCommands {
         /// Path to contract directory
         #[arg(long, default_value = ".")]
         contract_path: String,
+    },
+}
+
+/// Sub-commands for the `policy` group
+#[derive(Debug, Subcommand)]
+pub enum PolicyCommands {
+    /// Evaluate a policy-as-code definition against a contract artifact
+    Check {
+        /// Path to the contract WASM/binary file (optional)
+        #[arg(long)]
+        wasm_path: Option<String>,
+
+        /// Path to the policy YAML/JSON file
+        #[arg(long)]
+        policy: String,
+
+        /// Show detailed per-rule evaluation results
+        #[arg(long, default_value_t = false)]
+        explain: bool,
+
+        /// Output results as machine-readable JSON
+        #[arg(long, default_value_t = false)]
+        json: bool,
+
+        /// Evaluate the policy without submitting any artifacts
+        #[arg(long, default_value_t = false)]
+        dry_run: bool,
     },
 }
 

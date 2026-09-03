@@ -135,7 +135,8 @@
     "track-deployment",
     "plugins",
     "cache",
-    "env"
+    "env",
+    "snapshot"
   ],
   "output": {
     "formats": [
