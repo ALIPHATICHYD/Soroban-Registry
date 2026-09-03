@@ -1,4 +1,4 @@
-use crate::output_format::{self, OutputFormat};
+use crate::output_format::{self};
 use anyhow::{Context, Result};
 use chrono::{DateTime, Duration, Utc};
 use serde::Serialize;

@@ -1,0 +1,181 @@
+# Backup and recovery stack, kept out of the main compose file so a normal
+# `docker compose up` does not pull backup infrastructure.
+#
+# Run it on its own:
+#
+#   docker compose -f docker-compose.backup.yml up -d --wait
+#   ./scripts/backup.sh --type full
+#   ./scripts/restore-test.sh
+#
+# MinIO stands in for Cloudflare R2, so the whole cycle - backup, off-site copy,
+# restore, verification - runs without a cloud account. The only production
+# difference is the endpoint and the credentials.
+#
+# The database container has pgBackRest installed rather than running it as a
+# sidecar: archive_command executes inside PostgreSQL's own environment, so the
+# binary has to be on the database host. Production installs the package the
+# same way.
+
+services:
+  # Self-signed certificate for MinIO. pgBackRest always talks TLS to an S3
+  # endpoint and Cloudflare R2 is HTTPS-only, so the local stand-in serves HTTPS
+  # too; the scripts trust it with verify-tls=n rather than pretending the
+  # production path is plaintext.
+  minio-certs:
+    image: alpine/openssl:latest
+    container_name: soroban-registry-minio-certs
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        set -e
+        if [ -s /certs/public.crt ] && [ -s /certs/private.key ]; then
+          echo "certificate already present"
+          exit 0
+        fi
+        openssl req -new -x509 -nodes -days 825 \
+          -newkey rsa:2048 \
+          -keyout /certs/private.key \
+          -out /certs/public.crt \
+          -subj "/CN=minio" \
+          -addext "subjectAltName=DNS:minio,DNS:localhost,IP:127.0.0.1"
+        chmod 644 /certs/public.crt
+        chmod 600 /certs/private.key
+        echo "self-signed certificate generated for CN=minio"
+    volumes:
+      - minio_certs:/certs
+    restart: "no"
+
+  # S3-compatible object storage standing in for Cloudflare R2.
+  minio:
+    image: minio/minio:latest
+    container_name: soroban-registry-minio
+    depends_on:
+      minio-certs:
+        condition: service_completed_successfully
+    command: server /data --certs-dir /certs --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      # Gives the bundled mc an alias to probe, over HTTPS like the server now
+      # serves; without it mc falls back to a plain-HTTP localhost alias.
+      MC_HOST_local: https://${MINIO_ROOT_USER:-minioadmin}:${MINIO_ROOT_PASSWORD:-minioadmin}@localhost:9000
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
+      - minio_certs:/certs:ro
+    healthcheck:
+      test: ["CMD", "mc", "--insecure", "ready", "local"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  # Creates the backup bucket once MinIO is up, then exits.
+  minio-init:
+    image: minio/mc:latest
+    container_name: soroban-registry-minio-init
+    depends_on:
+      minio:
+        condition: service_healthy
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      BUCKET: ${CLOUDFLARE_R2_BUCKET:-soroban-registry-backups}
+    entrypoint: >
+      /bin/sh -c "
+      mc --insecure alias set local https://minio:9000 $${MINIO_ROOT_USER} $${MINIO_ROOT_PASSWORD} &&
+      mc --insecure mb --ignore-existing local/$${BUCKET} &&
+      echo 'backup bucket ready: '$${BUCKET}
+      "
+    restart: "no"
+
+  # The database being protected: PostgreSQL with pgBackRest installed and
+  # continuous archiving turned on.
+  postgres-backup:
+    build:
+      context: ./database/pgbackrest
+      dockerfile: Dockerfile
+    image: soroban-registry-postgres-pgbackrest:16
+    container_name: soroban-registry-db-backup
+    depends_on:
+      minio-init:
+        condition: service_completed_successfully
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
+      POSTGRES_DB: ${POSTGRES_DB:-soroban_registry}
+      PGBACKREST_STANZA: ${PGBACKREST_STANZA:-soroban-registry}
+      # So the scripts reach the registry database without being told where.
+      PGDATABASE: ${POSTGRES_DB:-soroban_registry}
+    env_file:
+      - path: ./database/pgbackrest/pgbackrest.env
+        required: false
+      # Optional local override, gitignored: point repo2 at real Cloudflare R2
+      # instead of MinIO. Later files win, so this replaces the MinIO settings.
+      - path: ./database/pgbackrest/pgbackrest.local.env
+        required: false
+    ports:
+      - "5434:5432"
+    volumes:
+      - backup_db_data:/var/lib/postgresql/data
+      - pgbackrest_repo:/var/lib/pgbackrest
+      - pgbackrest_spool:/var/spool/pgbackrest
+      # The backup and verify scripts run where pgBackRest is, which is here.
+      - ./scripts:/opt/scripts:ro
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-soroban_registry}",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  # A throwaway PostgreSQL used by scripts/restore-test.sh to prove a backup can
+  # actually be restored. It shares the repository volume so pgBackRest can
+  # restore into it, and holds no data of its own.
+  postgres-restore-target:
+    build:
+      context: ./database/pgbackrest
+      dockerfile: Dockerfile
+    image: soroban-registry-postgres-pgbackrest:16
+    container_name: soroban-registry-restore-target
+    profiles: ["restore-test"]
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
+      POSTGRES_DB: ${POSTGRES_DB:-soroban_registry}
+      PGBACKREST_STANZA: ${PGBACKREST_STANZA:-soroban-registry}
+    env_file:
+      - path: ./database/pgbackrest/pgbackrest.env
+        required: false
+      # Optional local override, gitignored: point repo2 at real Cloudflare R2
+      # instead of MinIO. Later files win, so this replaces the MinIO settings.
+      - path: ./database/pgbackrest/pgbackrest.local.env
+        required: false
+    ports:
+      - "5435:5432"
+    volumes:
+      - restore_target_data:/var/lib/postgresql/data
+      # Read-only: a restore reads the repository, it must never write to it.
+      - pgbackrest_repo:/var/lib/pgbackrest:ro
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-soroban_registry}",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+volumes:
+  minio_data:
+  minio_certs:
+  backup_db_data:
+  pgbackrest_repo:
+  pgbackrest_spool:
+  restore_target_data:

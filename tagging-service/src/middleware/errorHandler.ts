@@ -1,5 +1,11 @@
 import { NextFunction, Request, Response } from "express";
-import { AppError, ErrorCategory, ErrorCode, isAppError, toErrorResponse } from "../errors.js";
+import {
+  AppError,
+  ErrorCategory,
+  ErrorCode,
+  isAppError,
+  toErrorResponse,
+} from "../errors.js";
 import { logger } from "../logger.js";
 
 function getClientIp(req: Request): string {
@@ -37,7 +43,10 @@ export function errorHandler(
         path: req.path,
         clientIp: getClientIp(req),
         details: err.details,
-        cause: err.cause instanceof Error ? { message: err.cause.message, stack: err.cause.stack } : undefined,
+        cause:
+          err.cause instanceof Error
+            ? { message: err.cause.message, stack: err.cause.stack }
+            : undefined,
       },
       `[${err.errorCode}] ${err.message}`,
     );
@@ -74,7 +83,11 @@ export function errorHandler(
   });
 }
 
-export function notFoundHandler(req: Request, res: Response, _next: NextFunction): void {
+export function notFoundHandler(
+  req: Request,
+  res: Response,
+  _next: NextFunction,
+): void {
   const requestId =
     (req.headers["x-request-id"] as string) ||
     (req.headers["x-correlation-id"] as string) ||

@@ -6,13 +6,13 @@
 //! all live in `shared::snapshot` so the CLI signs and verifies the same bytes.
 
 use axum::{
-    extract::{Path, State},
+    extract::{Path, Query, State},
     Json,
 };
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use chrono::{DateTime, Utc};
 use ed25519_dalek::{SigningKey, SECRET_KEY_LENGTH};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use shared::snapshot::{
     key_fingerprint, sign_snapshot, ContractSnapshot, LineageLink, SnapshotContract,
@@ -25,6 +25,15 @@ use crate::{
     handlers::db_internal_error,
     state::AppState,
 };
+
+/// Query parameters for GET /api/contracts/:id/snapshot
+#[derive(Debug, Default, Deserialize)]
+pub struct SnapshotQuery {
+    /// Embed the dependency graph and transitive risk report (Issue #1147).
+    /// Off by default: it is large, and including it raises the payload to
+    /// schema 1.1.
+    pub include_dependency_graph: Option<bool>,
+}
 
 const ENV_SIGNING_KEY: &str = "REGISTRY_SIGNING_KEY";
 const ENV_REGISTRY_URL: &str = "REGISTRY_PUBLIC_URL";
@@ -57,9 +66,7 @@ fn load_signing_key() -> Result<SigningKey, ApiError> {
 
     let seed = BASE64
         .decode(raw.trim())
-        .or_else(|_| {
-            base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(raw.trim())
-        })
+        .or_else(|_| base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(raw.trim()))
         .map_err(|_| {
             ApiError::internal_error(
                 "SNAPSHOT_SIGNING_KEY_INVALID",
@@ -124,7 +131,10 @@ type ContractRow = (
     get,
     path = "/api/contracts/{id}/snapshot",
     tag = "snapshots",
-    params(("id" = Uuid, Path, description = "Contract UUID")),
+    params(
+        ("id" = Uuid, Path, description = "Contract UUID"),
+        ("include_dependency_graph" = Option<bool>, Query, description = "Embed the dependency graph and transitive risk report. Raises the payload to schema 1.1, which older verifiers reject as UnsupportedSchema rather than mis-reporting a signature failure.")
+    ),
     responses(
         (status = 200, description = "Signed contract snapshot"),
         (status = 404, description = "Contract not found"),
@@ -134,6 +144,7 @@ type ContractRow = (
 pub async fn get_contract_snapshot(
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
+    Query(query): Query<SnapshotQuery>,
 ) -> ApiResult<Json<ContractSnapshot>> {
     let signing_key = load_signing_key()?;
 
@@ -165,7 +176,10 @@ pub async fn get_contract_snapshot(
         updated_at,
     )) = row
     else {
-        return Err(ApiError::not_found("ContractNotFound", "Contract not found"));
+        return Err(ApiError::not_found(
+            "ContractNotFound",
+            "Contract not found",
+        ));
     };
 
     let verification = fetch_verification(&state, contract_uuid).await?;
@@ -173,7 +187,37 @@ pub async fn get_contract_snapshot(
     let deprecation = fetch_deprecation(&state, contract_uuid).await?;
     let lineage = fetch_lineage(&state, contract_uuid).await?;
 
-    let payload = SnapshotPayload {
+    // Off by default. The graph is large, and its presence changes the schema
+    // version, so it is never added to a snapshot that did not ask for it.
+    let dependency_graph = if query.include_dependency_graph.unwrap_or(false) {
+        // `Network` has no FromStr; the row was selected as text, so map it
+        // back explicitly rather than round-tripping through serde.
+        let parsed_network = match network.as_str() {
+            "mainnet" => shared::Network::Mainnet,
+            "testnet" => shared::Network::Testnet,
+            "futurenet" => shared::Network::Futurenet,
+            other => {
+                return Err(ApiError::internal(format!(
+                    "contract has an unrecognized network: {other}"
+                )))
+            }
+        };
+        let report = crate::dependency_risk::assess(
+            &state,
+            contract_uuid,
+            parsed_network,
+            shared::dependency_graph::DEFAULT_MAX_DEPTH,
+            None,
+        )
+        .await?;
+        Some(serde_json::to_value(&report).map_err(|e| {
+            ApiError::internal(format!("failed to serialize dependency graph: {e}"))
+        })?)
+    } else {
+        None
+    };
+
+    let mut payload = SnapshotPayload {
         schema_version: SNAPSHOT_SCHEMA_VERSION.to_string(),
         exported_at: Utc::now(),
         registry_url: std::env::var(ENV_REGISTRY_URL).ok(),
@@ -198,10 +242,19 @@ pub async fn get_contract_snapshot(
         deprecation,
         policy_evaluation: None,
         lineage,
+        dependency_graph,
     };
 
+    // Derived from the content, never from the request, so a graph-bearing
+    // payload cannot claim to be 1.0 and mislead an older verifier into
+    // reporting a signature failure.
+    payload.schema_version = payload.required_schema_version().to_string();
+
     let snapshot = sign_snapshot(payload, &signing_key).map_err(|e| {
-        ApiError::internal_error("SNAPSHOT_SIGN_FAILED", format!("failed to sign snapshot: {e}"))
+        ApiError::internal_error(
+            "SNAPSHOT_SIGN_FAILED",
+            format!("failed to sign snapshot: {e}"),
+        )
     })?;
 
     Ok(Json(snapshot))
