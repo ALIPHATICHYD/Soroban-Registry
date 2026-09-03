@@ -18,6 +18,7 @@ pub mod wasm;
 pub use abi::*;
 pub use error::*;
 pub use models::*;
+pub use policy::*;
 pub use semver::*;
 pub use slug::*;
 pub use upgrade::*;

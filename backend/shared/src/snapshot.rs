@@ -75,6 +75,9 @@ pub struct SnapshotPayload {
     /// been deprecated.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub deprecation: Option<Value>,
+    /// Policy admission decision metadata, absent when no policy evaluation was attached.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub policy_evaluation: Option<Value>,
     /// Successor chain, oldest first, built by following
     /// `replacement_contract_id` transitively. Empty when nothing supersedes
     /// this contract.
