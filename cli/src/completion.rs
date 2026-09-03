@@ -64,6 +64,41 @@ pub fn install_hint(shell: CompletionShell) -> &'static str {
     }
 }
 
+/// Generate or check completion scripts for Bash, Zsh, Fish, and PowerShell in target directory.
+pub fn generate_all_completions(output_dir: &std::path::Path, check: bool) -> anyhow::Result<()> {
+    let shells = [
+        (CompletionShell::Bash, "soroban-registry.bash"),
+        (CompletionShell::Zsh, "_soroban-registry"),
+        (CompletionShell::Fish, "soroban-registry.fish"),
+        (CompletionShell::PowerShell, "soroban-registry.ps1"),
+    ];
+
+    for (shell, filename) in shells {
+        let mut cmd = crate::Cli::command();
+        let mut buf = Vec::new();
+        generate(Shell::from(shell), &mut cmd, "soroban-registry", &mut buf);
+        let script = String::from_utf8(buf)?;
+        let file_path = output_dir.join(filename);
+
+        if check {
+            if !file_path.exists() {
+                anyhow::bail!("Completion file missing: {}", file_path.display());
+            }
+            let existing = std::fs::read_to_string(&file_path)?;
+            if existing != script {
+                anyhow::bail!(
+                    "Completion file is out of date: {}. Run 'soroban-registry generate-artifacts' to regenerate.",
+                    file_path.display()
+                );
+            }
+        } else {
+            std::fs::write(&file_path, script)?;
+        }
+    }
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -93,5 +128,18 @@ mod tests {
     fn generated_zsh_contains_contract_subcommands() {
         let script = generate_on_large_stack(Shell::Zsh);
         assert!(script.contains("contract"));
+    }
+
+    #[test]
+    fn generate_all_completions_writes_all_files() {
+        let dir = tempfile::tempdir().unwrap();
+        generate_all_completions(dir.path(), false).unwrap();
+        assert!(dir.path().join("soroban-registry.bash").exists());
+        assert!(dir.path().join("_soroban-registry").exists());
+        assert!(dir.path().join("soroban-registry.fish").exists());
+        assert!(dir.path().join("soroban-registry.ps1").exists());
+
+        // Check verification mode passes on fresh files
+        assert!(generate_all_completions(dir.path(), true).is_ok());
     }
 }
