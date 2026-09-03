@@ -895,12 +895,6 @@ pub enum Commands {
         action: PolicyCommands,
     },
 
-    /// Publisher environment diagnostics (#841)
-    Publisher {
-        #[command(subcommand)]
-        action: PublisherCommands,
-    },
-
     /// Contract deployment verification and security scan (#522)
     Contract {
         #[command(subcommand)]
@@ -2923,6 +2917,34 @@ pub enum EnvCommands {
 }
 
 /// Sub-commands for the `publisher` group
+#[derive(Debug, Subcommand)]
+pub enum PolicyCommands {
+    /// Run a policy-as-code admission check against a WASM artifact
+    ///
+    /// Usage: soroban-registry policy check [--wasm-path <path>] --policy <policy-file> [--explain] [--json] [--dry-run]
+    Check {
+        /// Path to the local WASM artifact to evaluate
+        #[arg(long)]
+        wasm_path: Option<String>,
+
+        /// Path to the policy YAML/JSON file
+        #[arg(long)]
+        policy: String,
+
+        /// Show detailed rule-by-rule evaluation
+        #[arg(long)]
+        explain: bool,
+
+        /// Output results as JSON
+        #[arg(long)]
+        json: bool,
+
+        /// Evaluate without submitting the artifact
+        #[arg(long)]
+        dry_run: bool,
+    },
+}
+
 #[derive(Debug, Subcommand)]
 pub enum PublisherCommands {
     /// Diagnose the local publishing environment (config, session, signing key, connectivity)

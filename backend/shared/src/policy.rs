@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use thiserror::Error;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum PolicyDecision {
     Allow = 0,
@@ -34,7 +34,7 @@ impl std::fmt::Display for PolicyDecision {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct PolicyRule {
     pub name: String,
     pub when: String,
@@ -42,7 +42,7 @@ pub struct PolicyRule {
     pub reason: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct PolicyDefinition {
     pub version: u32,
     #[serde(default)]
@@ -94,7 +94,7 @@ impl PolicyDefinition {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, utoipa::ToSchema)]
 pub struct ArtifactContext {
     pub signature_verified: bool,
     pub size: u64,
@@ -102,52 +102,52 @@ pub struct ArtifactContext {
     pub is_wasm: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, utoipa::ToSchema)]
 pub struct VerificationContext {
     pub state: String,
     pub verified: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, utoipa::ToSchema)]
 pub struct ProvenanceContext {
     pub present: bool,
     pub builder_image: Option<String>,
     pub reproducible: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, utoipa::ToSchema)]
 pub struct VulnerabilityContext {
     pub count: usize,
     pub critical_count: usize,
     pub high_count: usize,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, utoipa::ToSchema)]
 pub struct RiskContext {
     pub max_severity: String,
     pub score: f64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, utoipa::ToSchema)]
 pub struct DependencyContext {
     pub revoked_count: usize,
     pub has_revoked: bool,
     pub risk_score: f64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, utoipa::ToSchema)]
 pub struct InterfaceContext {
     pub compatible: bool,
     pub breaking_changes: usize,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, utoipa::ToSchema)]
 pub struct NetworkContext {
     pub identity: String,
     pub passphrase: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, utoipa::ToSchema)]
 pub struct MetadataContext {
     pub complete: bool,
     pub completeness: f64,
@@ -157,7 +157,7 @@ pub struct MetadataContext {
     pub has_version: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, utoipa::ToSchema)]
 pub struct AdmissionContext {
     pub artifact: ArtifactContext,
     pub verification: VerificationContext,
@@ -170,7 +170,7 @@ pub struct AdmissionContext {
     pub metadata: MetadataContext,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct EvaluatedRule {
     pub name: String,
     pub condition: String,
@@ -180,7 +180,7 @@ pub struct EvaluatedRule {
     pub input_values: HashMap<String, serde_json::Value>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct PolicyEvaluationResult {
     pub policy_version: u32,
     pub decision: PolicyDecision,
