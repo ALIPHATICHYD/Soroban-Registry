@@ -918,6 +918,15 @@ pub struct PublishRequest {
     /// Whether this was published via CI/CD (Issue #529)
     #[serde(default)]
     pub is_cicd: bool,
+    /// Optional policy-as-code YAML or JSON definition to evaluate prior to admission (#1148)
+    #[serde(default)]
+    pub policy: Option<String>,
+    /// Optional dry-run flag for policy admission evaluation
+    #[serde(default)]
+    pub dry_run: bool,
+    /// Optional explain flag for detailed policy evaluation report
+    #[serde(default)]
+    pub explain: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]

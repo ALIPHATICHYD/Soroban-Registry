@@ -1,0 +1,153 @@
+{
+  "version": "1.0",
+  "command": "soroban-registry",
+  "description": "Soroban Registry CLI — discover, publish, verify, and deploy Soroban contracts",
+  "deprecated": false,
+  "arguments": {
+    "api-url": {
+      "type": "string",
+      "required": false,
+      "repeatable": false,
+      "secret": false,
+      "deprecated": false,
+      "description": "Registry API URL"
+    },
+    "check-updates": {
+      "type": "boolean",
+      "required": false,
+      "repeatable": false,
+      "secret": false,
+      "deprecated": false,
+      "description": "Check for CLI updates before running the command"
+    },
+    "describe": {
+      "type": "boolean",
+      "required": false,
+      "repeatable": false,
+      "secret": false,
+      "deprecated": false,
+      "description": "Print machine-readable JSON command schema description (#1145)"
+    },
+    "network": {
+      "type": "string",
+      "required": false,
+      "repeatable": false,
+      "secret": false,
+      "deprecated": false,
+      "description": "Stellar network to use (mainnet | testnet | futurenet)"
+    },
+    "no-cache": {
+      "type": "boolean",
+      "required": false,
+      "repeatable": false,
+      "secret": false,
+      "deprecated": false,
+      "description": "Skip local response cache and always fetch fresh data"
+    },
+    "profile": {
+      "type": "path",
+      "required": false,
+      "repeatable": false,
+      "secret": false,
+      "deprecated": false,
+      "description": "Registry configuration profile to use"
+    },
+    "timeout": {
+      "type": "number",
+      "required": false,
+      "repeatable": false,
+      "secret": false,
+      "deprecated": false,
+      "description": "Global timeout for network/API operations (seconds)"
+    },
+    "verbose": {
+      "type": "number",
+      "required": false,
+      "repeatable": true,
+      "secret": false,
+      "deprecated": false,
+      "description": "Enable verbose output. Repeat to increase verbosity (-v, -vv, -vvv)"
+    }
+  },
+  "subcommands": [
+    "analytics",
+    "stats",
+    "publish",
+    "list",
+    "info",
+    "search",
+    "compare",
+    "completion",
+    "generate-artifacts",
+    "version",
+    "dashboard",
+    "breaking-changes",
+    "migrate",
+    "upgrade-analyze",
+    "export",
+    "import",
+    "doc",
+    "openapi",
+    "deploy",
+    "versions",
+    "batch",
+    "upgrade",
+    "wizard",
+    "repl",
+    "history",
+    "patch",
+    "incident",
+    "multisig",
+    "fuzz",
+    "perf",
+    "profile",
+    "test",
+    "audit",
+    "sla",
+    "config",
+    "auth",
+    "backup",
+    "state",
+    "verify-formal",
+    "scan-deps",
+    "coverage",
+    "sign",
+    "verify-package",
+    "verify",
+    "verify-contract",
+    "keys",
+    "policy",
+    "publisher",
+    "contract",
+    "api-key",
+    "batch-verify",
+    "webhook",
+    "release-notes",
+    "cicd",
+    "network",
+    "batch-register",
+    "batch-audit",
+    "batch-deploy",
+    "batch-export",
+    "batch-import",
+    "batch-update",
+    "analyze",
+    "track-deployment",
+    "plugins",
+    "cache",
+    "env",
+    "snapshot"
+  ],
+  "output": {
+    "formats": [
+      "table",
+      "json"
+    ]
+  },
+  "exit_codes": {
+    "0": "success / valid command completion",
+    "1": "command error / invalid status",
+    "2": "usage error / invalid arguments"
+  },
+  "examples": []
+}
