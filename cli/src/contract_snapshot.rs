@@ -67,8 +67,9 @@ pub async fn run_export(
 
     // Confirm the registry signed what it sent us. Catches a misconfigured or
     // truncated response at export time rather than at audit time.
-    verify_snapshot(&snapshot, None, None)
-        .map_err(|e| anyhow::anyhow!("the registry returned a snapshot that fails its own signature check: {e}"))?;
+    verify_snapshot(&snapshot, None, None).map_err(|e| {
+        anyhow::anyhow!("the registry returned a snapshot that fails its own signature check: {e}")
+    })?;
 
     let pretty = serde_json::to_string_pretty(&snapshot)
         .context("failed to serialize the snapshot for writing")?;
@@ -156,7 +157,10 @@ pub async fn run_verify(
                 println!("  contract:    {}", snapshot.payload.contract.contract_id);
                 println!("  name:        {}", snapshot.payload.contract.name);
                 println!("  network:     {}", snapshot.payload.contract.network);
-                println!("  verified:    {}", snapshot.payload.verification.is_verified);
+                println!(
+                    "  verified:    {}",
+                    snapshot.payload.verification.is_verified
+                );
                 println!("  exported at: {}", snapshot.payload.exported_at);
                 println!("  signed by:   {}", snapshot.signature.key_fingerprint);
 
@@ -270,6 +274,7 @@ mod tests {
             },
             dependency_scan: None,
             deprecation: None,
+            dependency_graph: None,
             lineage: vec![LineageLink {
                 contract_id: "CNEXT".into(),
                 name: None,
@@ -293,9 +298,7 @@ mod tests {
         let parsed: ContractSnapshot = serde_json::from_str(&raw).unwrap();
 
         assert!(verify_snapshot(&parsed, None, None).is_ok());
-        assert!(
-            verify_snapshot(&parsed, Some(&parsed.signature.key_fingerprint), None).is_ok()
-        );
+        assert!(verify_snapshot(&parsed, Some(&parsed.signature.key_fingerprint), None).is_ok());
     }
 
     /// Editing the file on disk must be caught.
@@ -324,7 +327,10 @@ mod tests {
 
     #[test]
     fn error_kinds_are_stable() {
-        assert_eq!(error_kind(&SnapshotError::SignatureMismatch), "signature_mismatch");
+        assert_eq!(
+            error_kind(&SnapshotError::SignatureMismatch),
+            "signature_mismatch"
+        );
         assert_eq!(
             error_kind(&SnapshotError::UntrustedKey {
                 expected: "a".into(),

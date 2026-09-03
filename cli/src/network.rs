@@ -231,7 +231,7 @@ pub async fn status(json: bool) -> Result<()> {
         && matches!(testnet.status, NetworkStatus::Down)
         && matches!(futurenet.status, NetworkStatus::Down);
 
-    let mut networks: Vec<NetworkInfo> = if all_down {
+    let networks: Vec<NetworkInfo> = if all_down {
         // Serve from cache when offline
         if let Some(cache) = load_cache() {
             eprintln!(

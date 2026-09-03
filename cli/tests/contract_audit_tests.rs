@@ -192,7 +192,13 @@ fn test_contract_audit_json_flag_accepted() {
     // The command will fail because no lockfile exists at the default path,
     // but it should NOT fail because of an unrecognized flag.
     let output = Command::new(get_binary_path())
-        .args(["contract", "audit", "--json", "--lockfile", "/tmp/nonexistent_test_lockfile.json"])
+        .args([
+            "contract",
+            "audit",
+            "--json",
+            "--lockfile",
+            "/tmp/nonexistent_test_lockfile.json",
+        ])
         .output()
         .expect("Failed to execute command");
 

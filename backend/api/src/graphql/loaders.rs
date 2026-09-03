@@ -74,7 +74,7 @@ impl Loader<Uuid> for ContractVersionsLoader {
 
     async fn load(&self, keys: &[Uuid]) -> Result<HashMap<Uuid, Self::Value>, Self::Error> {
         let versions: Vec<ContractVersion> = sqlx::query_as(
-            "SELECT * FROM contract_versions WHERE contract_id = ANY($1) ORDER BY created_at DESC",
+            "SELECT * FROM contract_versions WHERE contract_id = ANY($1) ORDER BY created_at DESC, id ASC",
         )
         .bind(keys)
         .fetch_all(&self.pool)

@@ -1,0 +1,86 @@
+name: Backup and Recovery
+
+# Proves the recovery procedure still works, rather than assuming it does.
+# The rehearsal needs only the PostgreSQL binaries, so it runs on every change
+# to the backup code and on a schedule to catch drift.
+
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - "scripts/backup*.sh"
+      - "scripts/restore-test.sh"
+      - "scripts/pitr-rehearsal.sh"
+      - "scripts/disaster-recovery-drill.sh"
+      - "scripts/lib/backup-env.sh"
+      - "database/pgbackrest/**"
+      - "docker-compose.backup.yml"
+      - ".github/workflows/backup-recovery.yml"
+  pull_request:
+    branches: [main, develop]
+    paths:
+      - "scripts/backup*.sh"
+      - "scripts/restore-test.sh"
+      - "scripts/pitr-rehearsal.sh"
+      - "scripts/disaster-recovery-drill.sh"
+      - "scripts/lib/backup-env.sh"
+      - "database/pgbackrest/**"
+      - "docker-compose.backup.yml"
+      - ".github/workflows/backup-recovery.yml"
+  schedule:
+    # Weekly, so a rehearsal failure surfaces even when nobody touches the code.
+    - cron: "0 4 * * 1"
+  workflow_dispatch:
+
+jobs:
+  shellcheck:
+    name: Lint backup scripts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run shellcheck
+        run: |
+          sudo apt-get update && sudo apt-get install -y shellcheck
+          shellcheck scripts/backup.sh scripts/backup-verify.sh \
+            scripts/restore-test.sh scripts/disaster-recovery-drill.sh \
+            scripts/pitr-rehearsal.sh scripts/lib/backup-env.sh
+
+  pitr-rehearsal:
+    name: Point-in-time recovery rehearsal
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install PostgreSQL
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql postgresql-contrib
+          # Take whichever major version apt installed rather than pinning one.
+          server_bin=$(ls -d /usr/lib/postgresql/*/bin | sort -V | tail -1)
+          echo "$server_bin" >> "$GITHUB_PATH"
+          "$server_bin/initdb" --version
+
+      - name: Rehearse recovery to a point in time
+        # Runs as the runner user, which owns the checkout. initdb refuses to run
+        # as root, not as an unprivileged user, so there is nothing to sudo to -
+        # and sudoing to postgres would lose access to the workspace.
+        run: ./scripts/pitr-rehearsal.sh --json
+
+  compose-config:
+    name: Validate the backup stack
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate compose files
+        # Every variable the compose files mark required with :?. There is no
+        # .env on a runner, and `docker compose` silently reads one when it
+        # exists, so validating locally without --env-file can pass while CI
+        # fails on exactly this.
+        env:
+          POSTGRES_PASSWORD: validation-only
+          REPMGR_PASSWORD: validation-only
+          PGPOOL_ADMIN_PASSWORD: validation-only
+          GRAFANA_ADMIN_PASSWORD: validation-only
+        run: |
+          docker compose --env-file /dev/null -f docker-compose.yml config --quiet
+          docker compose --env-file /dev/null -f docker-compose.backup.yml config --quiet
