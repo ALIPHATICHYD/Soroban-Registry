@@ -1570,10 +1570,10 @@ _arguments "${_arguments_options[@]}" : \
 '--timeout=[Global timeout for network/API operations (seconds)]:TIMEOUT:_default' \
 '--profile=[Registry configuration profile to use]:PROFILE:_default' \
 '--coverage[Show coverage report]' \
-'-v[Verbose output]' \
-'--verbose[Verbose output]' \
 '--require-coverage[Require coverage data and fail if unavailable]' \
 '--no-cache[Skip local response cache and always fetch fresh data]' \
+'*-v[Enable verbose output. Repeat to increase verbosity (-v, -vv, -vvv)]' \
+'*--verbose[Enable verbose output. Repeat to increase verbosity (-v, -vv, -vvv)]' \
 '--check-updates[Check for CLI updates before running the command]' \
 '--describe[Print machine-readable JSON command schema description (#1145)]' \
 '-h[Print help (see more with '\''--help'\'')]' \
@@ -2387,13 +2387,13 @@ _arguments "${_arguments_options[@]}" : \
 ;;
 (scan-deps)
 _arguments "${_arguments_options[@]}" : \
-'--contract-id=[]:CONTRACT_ID:_default' \
-'--dependencies=[]:DEPENDENCIES:_default' \
+'--contract-id=[Contract address or registry UUID to scan]:CONTRACT_ID:_default' \
+'--dependencies=[Comma-separated dependency list to scan]:DEPENDENCIES:_default' \
 '--api-url=[Registry API URL]:API_URL:_default' \
 '--network=[Stellar network to use (mainnet | testnet | futurenet)]:NETWORK:_default' \
 '--timeout=[Global timeout for network/API operations (seconds)]:TIMEOUT:_default' \
 '--profile=[Registry configuration profile to use]:PROFILE:_default' \
-'--fail-on-high[]' \
+'--fail-on-high[Exit non-zero when a high-severity finding is reported]' \
 '--no-cache[Skip local response cache and always fetch fresh data]' \
 '*-v[Enable verbose output. Repeat to increase verbosity (-v, -vv, -vvv)]' \
 '*--verbose[Enable verbose output. Repeat to increase verbosity (-v, -vv, -vvv)]' \
@@ -2662,15 +2662,15 @@ _arguments "${_arguments_options[@]}" : \
         case $line[1] in
             (check)
 _arguments "${_arguments_options[@]}" : \
-'-p+[Path to policy YAML or JSON file]:POLICY:_default' \
-'--policy=[Path to policy YAML or JSON file]:POLICY:_default' \
+'--wasm-path=[Path to the contract WASM/binary file (optional)]:WASM_PATH:_default' \
+'--policy=[Path to the policy YAML/JSON file]:POLICY:_default' \
 '--api-url=[Registry API URL]:API_URL:_default' \
 '--network=[Stellar network to use (mainnet | testnet | futurenet)]:NETWORK:_default' \
 '--timeout=[Global timeout for network/API operations (seconds)]:TIMEOUT:_default' \
 '--profile=[Registry configuration profile to use]:PROFILE:_default' \
-'--explain[Display detailed evaluation results for each rule]' \
-'--json[Output evaluation results as machine-readable JSON]' \
-'--dry-run[Dry-run mode\: evaluate policy without submitting]' \
+'--explain[Show detailed per-rule evaluation results]' \
+'--json[Output results as machine-readable JSON]' \
+'--dry-run[Evaluate the policy without submitting any artifacts]' \
 '--no-cache[Skip local response cache and always fetch fresh data]' \
 '*-v[Enable verbose output. Repeat to increase verbosity (-v, -vv, -vvv)]' \
 '*--verbose[Enable verbose output. Repeat to increase verbosity (-v, -vv, -vvv)]' \
@@ -2678,7 +2678,6 @@ _arguments "${_arguments_options[@]}" : \
 '--describe[Print machine-readable JSON command schema description (#1145)]' \
 '-h[Print help (see more with '\''--help'\'')]' \
 '--help[Print help (see more with '\''--help'\'')]' \
-'::wasm_path -- Optional path to WASM contract file or project:_default' \
 && ret=0
 ;;
 (help)
@@ -2738,7 +2737,7 @@ _arguments "${_arguments_options[@]}" : \
 '--network=[Stellar network to use (mainnet | testnet | futurenet)]:NETWORK:_default' \
 '--timeout=[Global timeout for network/API operations (seconds)]:TIMEOUT:_default' \
 '--profile=[Registry configuration profile to use]:PROFILE:_default' \
-'--json[]' \
+'--json[Output results as machine-readable JSON]' \
 '--no-cache[Skip local response cache and always fetch fresh data]' \
 '*-v[Enable verbose output. Repeat to increase verbosity (-v, -vv, -vvv)]' \
 '*--verbose[Enable verbose output. Repeat to increase verbosity (-v, -vv, -vvv)]' \
@@ -2799,22 +2798,21 @@ _arguments "${_arguments_options[@]}" : \
         (( CURRENT += 1 ))
         curcontext="${curcontext%:*:*}:soroban-registry-contract-command-$line[1]:"
         case $line[1] in
-            (publish)
+            (list)
 _arguments "${_arguments_options[@]}" : \
-'--contract-id=[On-chain contract ID]:CONTRACT_ID:_default' \
-'--name=[Human-readable contract name]:NAME:_default' \
-'--description=[Optional description]:DESCRIPTION:_default' \
-'--network=[Network (mainnet, testnet, futurenet)]:NETWORK:_default' \
-'--category=[Category]:CATEGORY:_default' \
-'--tags=[Comma-separated tags]:TAGS:_default' \
-'--publisher=[Publisher Stellar address]:PUBLISHER:_default' \
-'--contract-path=[Path to contract project directory for preflight testing]:CONTRACT_PATH:_default' \
-'--policy=[Path to policy-as-code YAML or JSON file (#1148)]:POLICY:_default' \
+'-l+[Contracts per page (1-100)]:LIMIT:_default' \
+'--limit=[Contracts per page (1-100)]:LIMIT:_default' \
+'-o+[Contracts to skip; use it with --limit to page through the registry]:OFFSET:_default' \
+'--offset=[Contracts to skip; use it with --limit to page through the registry]:OFFSET:_default' \
+'--networks=[Filter by network (comma-separated\: mainnet,testnet,futurenet). Named \`networks\` because the global \`--network\` owns that arg id]:NETWORKS:_default' \
+'-c+[Filter by category (comma-separated\: DeFi,NFT)]:CATEGORY:_default' \
+'--category=[Filter by category (comma-separated\: DeFi,NFT)]:CATEGORY:_default' \
+'-f+[Output format\: table, json or csv]:FORMAT:_default' \
+'--format=[Output format\: table, json or csv]:FORMAT:_default' \
 '--api-url=[Registry API URL]:API_URL:_default' \
+'--network=[Stellar network to use (mainnet | testnet | futurenet)]:NETWORK:_default' \
 '--timeout=[Global timeout for network/API operations (seconds)]:TIMEOUT:_default' \
 '--profile=[Registry configuration profile to use]:PROFILE:_default' \
-'--explain[Display policy evaluation rule details (#1148)]' \
-'--dry-run[Evaluate policy and validate without submitting to registry (#1148)]' \
 '--no-cache[Skip local response cache and always fetch fresh data]' \
 '*-v[Enable verbose output. Repeat to increase verbosity (-v, -vv, -vvv)]' \
 '*--verbose[Enable verbose output. Repeat to increase verbosity (-v, -vv, -vvv)]' \
@@ -2822,6 +2820,34 @@ _arguments "${_arguments_options[@]}" : \
 '--describe[Print machine-readable JSON command schema description (#1145)]' \
 '-h[Print help (see more with '\''--help'\'')]' \
 '--help[Print help (see more with '\''--help'\'')]' \
+&& ret=0
+;;
+(search)
+_arguments "${_arguments_options[@]}" : \
+'--networks=[Filter by network (comma-separated\: mainnet,testnet,futurenet)]:NETWORKS:_default' \
+'--category=[Filter by category (comma-separated\: DeFi,NFT)]:CATEGORY:_default' \
+'--tags=[Filter by tag (comma-separated\: defi,amm)]:TAGS:_default' \
+'--limit=[Results per page (1-100)]:LIMIT:_default' \
+'(--cursor)--offset=[Start at this row offset. Offset pagination only — cannot be combined with --cursor]:OFFSET:_default' \
+'--cursor=[Resume from a continuation token returned by a previous run. Cursor pagination only — the token is opaque and must not be edited]:CURSOR:_default' \
+'--pagination=[Pagination mode\: cursor (stable, no skips or duplicates) or offset (relevance ordered). Defaults to cursor for --all, offset otherwise]:MODE:_default' \
+'--max-items=[Maximum items to fetch with --all (default 1000)]:MAX_ITEMS:_default' \
+'--max-pages=[Maximum pages to fetch with --all (default 100)]:MAX_PAGES:_default' \
+'--api-url=[Registry API URL]:API_URL:_default' \
+'--network=[Stellar network to use (mainnet | testnet | futurenet)]:NETWORK:_default' \
+'--timeout=[Global timeout for network/API operations (seconds)]:TIMEOUT:_default' \
+'--profile=[Registry configuration profile to use]:PROFILE:_default' \
+'--verified-only[Only show verified contracts]' \
+'--all[Fetch every page, up to --max-items / --max-pages]' \
+'--json[Output as JSON, including pagination metadata]' \
+'--no-cache[Skip local response cache and always fetch fresh data]' \
+'*-v[Enable verbose output. Repeat to increase verbosity (-v, -vv, -vvv)]' \
+'*--verbose[Enable verbose output. Repeat to increase verbosity (-v, -vv, -vvv)]' \
+'--check-updates[Check for CLI updates before running the command]' \
+'--describe[Print machine-readable JSON command schema description (#1145)]' \
+'-h[Print help (see more with '\''--help'\'')]' \
+'--help[Print help (see more with '\''--help'\'')]' \
+':query -- Search query:_default' \
 && ret=0
 ;;
 (snapshot)
@@ -2944,6 +2970,82 @@ _arguments "${_arguments_options[@]}" : \
 '::address -- On-chain contract address to verify (or comma-separated list for batch verification). Omit when using --wasm for local verification:_default' \
 && ret=0
 ;;
+(interfaces)
+_arguments "${_arguments_options[@]}" : \
+'--wasm=[Path to a local compiled WASM contract to inspect]:WASM:_default' \
+'--api-url=[Registry API URL]:API_URL:_default' \
+'--network=[Stellar network to use (mainnet | testnet | futurenet)]:NETWORK:_default' \
+'--timeout=[Global timeout for network/API operations (seconds)]:TIMEOUT:_default' \
+'--profile=[Registry configuration profile to use]:PROFILE:_default' \
+'--json[Output results as machine-readable JSON]' \
+'--no-cache[Skip local response cache and always fetch fresh data]' \
+'*-v[Enable verbose output. Repeat to increase verbosity (-v, -vv, -vvv)]' \
+'*--verbose[Enable verbose output. Repeat to increase verbosity (-v, -vv, -vvv)]' \
+'--check-updates[Check for CLI updates before running the command]' \
+'--describe[Print machine-readable JSON command schema description (#1145)]' \
+'-h[Print help (see more with '\''--help'\'')]' \
+'--help[Print help (see more with '\''--help'\'')]' \
+&& ret=0
+;;
+(provenance)
+_arguments "${_arguments_options[@]}" : \
+'--manifest=[Path to a local provenance manifest (JSON) to display]:MANIFEST:_default' \
+'--api-url=[Registry API URL]:API_URL:_default' \
+'--network=[Stellar network to use (mainnet | testnet | futurenet)]:NETWORK:_default' \
+'--timeout=[Global timeout for network/API operations (seconds)]:TIMEOUT:_default' \
+'--profile=[Registry configuration profile to use]:PROFILE:_default' \
+'--json[Output results as machine-readable JSON]' \
+'--no-cache[Skip local response cache and always fetch fresh data]' \
+'*-v[Enable verbose output. Repeat to increase verbosity (-v, -vv, -vvv)]' \
+'*--verbose[Enable verbose output. Repeat to increase verbosity (-v, -vv, -vvv)]' \
+'--check-updates[Check for CLI updates before running the command]' \
+'--describe[Print machine-readable JSON command schema description (#1145)]' \
+'-h[Print help (see more with '\''--help'\'')]' \
+'--help[Print help (see more with '\''--help'\'')]' \
+&& ret=0
+;;
+(verify-build)
+_arguments "${_arguments_options[@]}" : \
+'--manifest=[Path to a local provenance manifest (JSON) describing the recorded build]:MANIFEST:_default' \
+'--source-dir=[Directory containing the contract'\''s source to rebuild]:SOURCE_DIR:_default' \
+'--expected-hash=[The registry-recorded WASM artifact hash to compare the rebuild against]:EXPECTED_HASH:_default' \
+'--api-url=[Registry API URL]:API_URL:_default' \
+'--network=[Stellar network to use (mainnet | testnet | futurenet)]:NETWORK:_default' \
+'--timeout=[Global timeout for network/API operations (seconds)]:TIMEOUT:_default' \
+'--profile=[Registry configuration profile to use]:PROFILE:_default' \
+'--allow-toolchain-mismatch[Proceed with the rebuild even if the locally installed rustc version doesn'\''t match the version recorded in provenance]' \
+'--json[Output results as machine-readable JSON]' \
+'--no-cache[Skip local response cache and always fetch fresh data]' \
+'*-v[Enable verbose output. Repeat to increase verbosity (-v, -vv, -vvv)]' \
+'*--verbose[Enable verbose output. Repeat to increase verbosity (-v, -vv, -vvv)]' \
+'--check-updates[Check for CLI updates before running the command]' \
+'--describe[Print machine-readable JSON command schema description (#1145)]' \
+'-h[Print help (see more with '\''--help'\'')]' \
+'--help[Print help (see more with '\''--help'\'')]' \
+&& ret=0
+;;
+(compatibility)
+_arguments "${_arguments_options[@]}" : \
+'--from=[Path to the earlier/baseline compiled WASM contract]:FROM:_default' \
+'--to=[Path to the newer/candidate compiled WASM contract]:TO:_default' \
+'--from-network-passphrase=[Network passphrase associated with the \`--from\` artifact]:FROM_NETWORK_PASSPHRASE:_default' \
+'--to-network-passphrase=[Network passphrase associated with the \`--to\` artifact]:TO_NETWORK_PASSPHRASE:_default' \
+'--fail-on=[Minimum severity that triggers a non-zero exit under --strict\: breaking | potential | unknown]:FAIL_ON:_default' \
+'--api-url=[Registry API URL]:API_URL:_default' \
+'--network=[Stellar network to use (mainnet | testnet | futurenet)]:NETWORK:_default' \
+'--timeout=[Global timeout for network/API operations (seconds)]:TIMEOUT:_default' \
+'--profile=[Registry configuration profile to use]:PROFILE:_default' \
+'--strict[Exit non-zero when changes at or above the --fail-on threshold are found (default threshold\: potentially_breaking)]' \
+'--json[Output results as machine-readable JSON]' \
+'--no-cache[Skip local response cache and always fetch fresh data]' \
+'*-v[Enable verbose output. Repeat to increase verbosity (-v, -vv, -vvv)]' \
+'*--verbose[Enable verbose output. Repeat to increase verbosity (-v, -vv, -vvv)]' \
+'--check-updates[Check for CLI updates before running the command]' \
+'--describe[Print machine-readable JSON command schema description (#1145)]' \
+'-h[Print help (see more with '\''--help'\'')]' \
+'--help[Print help (see more with '\''--help'\'')]' \
+&& ret=0
+;;
 (details)
 _arguments "${_arguments_options[@]}" : \
 '--network=[Stellar network (mainnet | testnet | futurenet)]:NETWORK:_default' \
@@ -3063,6 +3165,154 @@ _arguments "${_arguments_options[@]}" : \
 ':address -- On-chain contract address:_default' \
 && ret=0
 ;;
+(dependencies)
+_arguments "${_arguments_options[@]}" : \
+'--network=[Stellar network (mainnet | testnet | futurenet)]:NETWORK:_default' \
+'--depth=[Maximum traversal depth (capped server-side)]:DEPTH:_default' \
+'--api-url=[Registry API URL]:API_URL:_default' \
+'--timeout=[Global timeout for network/API operations (seconds)]:TIMEOUT:_default' \
+'--profile=[Registry configuration profile to use]:PROFILE:_default' \
+'--transitive[Walk the whole dependency closure, not just direct edges]' \
+'--include-telemetry[Include on-chain call edges alongside declared ones]' \
+'--json[Print the registry response as JSON]' \
+'--no-cache[Skip local response cache and always fetch fresh data]' \
+'*-v[Enable verbose output. Repeat to increase verbosity (-v, -vv, -vvv)]' \
+'*--verbose[Enable verbose output. Repeat to increase verbosity (-v, -vv, -vvv)]' \
+'--check-updates[Check for CLI updates before running the command]' \
+'--describe[Print machine-readable JSON command schema description (#1145)]' \
+'-h[Print help (see more with '\''--help'\'')]' \
+'--help[Print help (see more with '\''--help'\'')]' \
+':address -- On-chain contract address or registry UUID:_default' \
+&& ret=0
+;;
+(dependents)
+_arguments "${_arguments_options[@]}" : \
+'--network=[Stellar network (mainnet | testnet | futurenet)]:NETWORK:_default' \
+'--depth=[Maximum traversal depth (capped server-side)]:DEPTH:_default' \
+'--api-url=[Registry API URL]:API_URL:_default' \
+'--timeout=[Global timeout for network/API operations (seconds)]:TIMEOUT:_default' \
+'--profile=[Registry configuration profile to use]:PROFILE:_default' \
+'--transitive[Walk the whole dependent closure, not just direct edges]' \
+'--include-telemetry[Include on-chain call edges alongside declared ones]' \
+'--json[Print the registry response as JSON]' \
+'--no-cache[Skip local response cache and always fetch fresh data]' \
+'*-v[Enable verbose output. Repeat to increase verbosity (-v, -vv, -vvv)]' \
+'*--verbose[Enable verbose output. Repeat to increase verbosity (-v, -vv, -vvv)]' \
+'--check-updates[Check for CLI updates before running the command]' \
+'--describe[Print machine-readable JSON command schema description (#1145)]' \
+'-h[Print help (see more with '\''--help'\'')]' \
+'--help[Print help (see more with '\''--help'\'')]' \
+':address -- On-chain contract address or registry UUID:_default' \
+&& ret=0
+;;
+(dependency-risk)
+_arguments "${_arguments_options[@]}" : \
+'--network=[Stellar network (mainnet | testnet | futurenet)]:NETWORK:_default' \
+'--depth=[Maximum traversal depth (capped server-side)]:DEPTH:_default' \
+'--fail-on=[Exit 1 when overall risk meets or exceeds this level]:FAIL_ON:_default' \
+'--api-url=[Registry API URL]:API_URL:_default' \
+'--timeout=[Global timeout for network/API operations (seconds)]:TIMEOUT:_default' \
+'--profile=[Registry configuration profile to use]:PROFILE:_default' \
+'--json[Print the registry response as JSON]' \
+'--no-cache[Skip local response cache and always fetch fresh data]' \
+'*-v[Enable verbose output. Repeat to increase verbosity (-v, -vv, -vvv)]' \
+'*--verbose[Enable verbose output. Repeat to increase verbosity (-v, -vv, -vvv)]' \
+'--check-updates[Check for CLI updates before running the command]' \
+'--describe[Print machine-readable JSON command schema description (#1145)]' \
+'-h[Print help (see more with '\''--help'\'')]' \
+'--help[Print help (see more with '\''--help'\'')]' \
+':address -- On-chain contract address or registry UUID:_default' \
+&& ret=0
+;;
+(category)
+_arguments "${_arguments_options[@]}" : \
+'--api-url=[Registry API URL]:API_URL:_default' \
+'--network=[Stellar network to use (mainnet | testnet | futurenet)]:NETWORK:_default' \
+'--timeout=[Global timeout for network/API operations (seconds)]:TIMEOUT:_default' \
+'--profile=[Registry configuration profile to use]:PROFILE:_default' \
+'--no-cache[Skip local response cache and always fetch fresh data]' \
+'*-v[Enable verbose output. Repeat to increase verbosity (-v, -vv, -vvv)]' \
+'*--verbose[Enable verbose output. Repeat to increase verbosity (-v, -vv, -vvv)]' \
+'--check-updates[Check for CLI updates before running the command]' \
+'--describe[Print machine-readable JSON command schema description (#1145)]' \
+'-h[Print help (see more with '\''--help'\'')]' \
+'--help[Print help (see more with '\''--help'\'')]' \
+":: :_soroban-registry__subcmd__contract__subcmd__category_commands" \
+"*::: :->category" \
+&& ret=0
+
+    case $state in
+    (category)
+        words=($line[1] "${words[@]}")
+        (( CURRENT += 1 ))
+        curcontext="${curcontext%:*:*}:soroban-registry-contract-category-command-$line[1]:"
+        case $line[1] in
+            (list)
+_arguments "${_arguments_options[@]}" : \
+'--network=[Scope contract counts to a single network (mainnet | testnet | futurenet)]:NETWORK:_default' \
+'--format=[Output format for stdout\: table, json, csv, yaml]:FORMAT:_default' \
+'--export=[Also write the category list to a file\: csv or json]:EXPORT:_default' \
+'--api-url=[Registry API URL]:API_URL:_default' \
+'--timeout=[Global timeout for network/API operations (seconds)]:TIMEOUT:_default' \
+'--profile=[Registry configuration profile to use]:PROFILE:_default' \
+'--no-cache[Skip local response cache and always fetch fresh data]' \
+'*-v[Enable verbose output. Repeat to increase verbosity (-v, -vv, -vvv)]' \
+'*--verbose[Enable verbose output. Repeat to increase verbosity (-v, -vv, -vvv)]' \
+'--check-updates[Check for CLI updates before running the command]' \
+'--describe[Print machine-readable JSON command schema description (#1145)]' \
+'-h[Print help (see more with '\''--help'\'')]' \
+'--help[Print help (see more with '\''--help'\'')]' \
+&& ret=0
+;;
+(stats)
+_arguments "${_arguments_options[@]}" : \
+'--network=[Scope statistics to a single network (mainnet | testnet | futurenet)]:NETWORK:_default' \
+'--format=[Output format for stdout\: table, json, csv, yaml]:FORMAT:_default' \
+'--export=[Also write the statistics to a file\: csv or json]:EXPORT:_default' \
+'--api-url=[Registry API URL]:API_URL:_default' \
+'--timeout=[Global timeout for network/API operations (seconds)]:TIMEOUT:_default' \
+'--profile=[Registry configuration profile to use]:PROFILE:_default' \
+'--no-cache[Skip local response cache and always fetch fresh data]' \
+'*-v[Enable verbose output. Repeat to increase verbosity (-v, -vv, -vvv)]' \
+'*--verbose[Enable verbose output. Repeat to increase verbosity (-v, -vv, -vvv)]' \
+'--check-updates[Check for CLI updates before running the command]' \
+'--describe[Print machine-readable JSON command schema description (#1145)]' \
+'-h[Print help (see more with '\''--help'\'')]' \
+'--help[Print help (see more with '\''--help'\'')]' \
+&& ret=0
+;;
+(help)
+_arguments "${_arguments_options[@]}" : \
+":: :_soroban-registry__subcmd__contract__subcmd__category__subcmd__help_commands" \
+"*::: :->help" \
+&& ret=0
+
+    case $state in
+    (help)
+        words=($line[1] "${words[@]}")
+        (( CURRENT += 1 ))
+        curcontext="${curcontext%:*:*}:soroban-registry-contract-category-help-command-$line[1]:"
+        case $line[1] in
+            (list)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(stats)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(help)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+        esac
+    ;;
+esac
+;;
+        esac
+    ;;
+esac
+;;
 (update)
 _arguments "${_arguments_options[@]}" : \
 '--name=[Updated contract name]:NAME:_default' \
@@ -3181,6 +3431,166 @@ _arguments "${_arguments_options[@]}" : \
 ':address -- Contract address or registry UUID to deprecate:_default' \
 && ret=0
 ;;
+(notification)
+_arguments "${_arguments_options[@]}" : \
+'--api-url=[Registry API URL]:API_URL:_default' \
+'--network=[Stellar network to use (mainnet | testnet | futurenet)]:NETWORK:_default' \
+'--timeout=[Global timeout for network/API operations (seconds)]:TIMEOUT:_default' \
+'--profile=[Registry configuration profile to use]:PROFILE:_default' \
+'--no-cache[Skip local response cache and always fetch fresh data]' \
+'*-v[Enable verbose output. Repeat to increase verbosity (-v, -vv, -vvv)]' \
+'*--verbose[Enable verbose output. Repeat to increase verbosity (-v, -vv, -vvv)]' \
+'--check-updates[Check for CLI updates before running the command]' \
+'--describe[Print machine-readable JSON command schema description (#1145)]' \
+'-h[Print help (see more with '\''--help'\'')]' \
+'--help[Print help (see more with '\''--help'\'')]' \
+":: :_soroban-registry__subcmd__contract__subcmd__notification_commands" \
+"*::: :->notification" \
+&& ret=0
+
+    case $state in
+    (notification)
+        words=($line[1] "${words[@]}")
+        (( CURRENT += 1 ))
+        curcontext="${curcontext%:*:*}:soroban-registry-contract-notification-command-$line[1]:"
+        case $line[1] in
+            (subscribe)
+_arguments "${_arguments_options[@]}" : \
+'--alerts=[Alert types (comma-separated)\: updates, audits, security, deployments]:ALERTS:_default' \
+'--channels=[Notification channels (comma-separated)\: email, webhook, cli]:CHANNELS:_default' \
+'--frequency=[Notification frequency\: instant, daily, weekly]:FREQUENCY:_default' \
+'--networks=[Filter by networks (comma-separated, e.g. mainnet,testnet)]:NETWORKS:_default' \
+'--categories=[Filter by categories (comma-separated, e.g. defi,token)]:CATEGORIES:_default' \
+'--target=[Email address or webhook URL for the chosen channel]:TARGET:_default' \
+'--api-url=[Registry API URL]:API_URL:_default' \
+'--network=[Stellar network to use (mainnet | testnet | futurenet)]:NETWORK:_default' \
+'--timeout=[Global timeout for network/API operations (seconds)]:TIMEOUT:_default' \
+'--profile=[Registry configuration profile to use]:PROFILE:_default' \
+'--no-cache[Skip local response cache and always fetch fresh data]' \
+'*-v[Enable verbose output. Repeat to increase verbosity (-v, -vv, -vvv)]' \
+'*--verbose[Enable verbose output. Repeat to increase verbosity (-v, -vv, -vvv)]' \
+'--check-updates[Check for CLI updates before running the command]' \
+'--describe[Print machine-readable JSON command schema description (#1145)]' \
+'-h[Print help (see more with '\''--help'\'')]' \
+'--help[Print help (see more with '\''--help'\'')]' \
+':address -- On-chain contract address:_default' \
+&& ret=0
+;;
+(unsubscribe)
+_arguments "${_arguments_options[@]}" : \
+'--api-url=[Registry API URL]:API_URL:_default' \
+'--network=[Stellar network to use (mainnet | testnet | futurenet)]:NETWORK:_default' \
+'--timeout=[Global timeout for network/API operations (seconds)]:TIMEOUT:_default' \
+'--profile=[Registry configuration profile to use]:PROFILE:_default' \
+'--no-cache[Skip local response cache and always fetch fresh data]' \
+'*-v[Enable verbose output. Repeat to increase verbosity (-v, -vv, -vvv)]' \
+'*--verbose[Enable verbose output. Repeat to increase verbosity (-v, -vv, -vvv)]' \
+'--check-updates[Check for CLI updates before running the command]' \
+'--describe[Print machine-readable JSON command schema description (#1145)]' \
+'-h[Print help (see more with '\''--help'\'')]' \
+'--help[Print help (see more with '\''--help'\'')]' \
+':address -- On-chain contract address:_default' \
+&& ret=0
+;;
+(list)
+_arguments "${_arguments_options[@]}" : \
+'--api-url=[Registry API URL]:API_URL:_default' \
+'--network=[Stellar network to use (mainnet | testnet | futurenet)]:NETWORK:_default' \
+'--timeout=[Global timeout for network/API operations (seconds)]:TIMEOUT:_default' \
+'--profile=[Registry configuration profile to use]:PROFILE:_default' \
+'--json[Output as JSON]' \
+'--no-cache[Skip local response cache and always fetch fresh data]' \
+'*-v[Enable verbose output. Repeat to increase verbosity (-v, -vv, -vvv)]' \
+'*--verbose[Enable verbose output. Repeat to increase verbosity (-v, -vv, -vvv)]' \
+'--check-updates[Check for CLI updates before running the command]' \
+'--describe[Print machine-readable JSON command schema description (#1145)]' \
+'-h[Print help (see more with '\''--help'\'')]' \
+'--help[Print help (see more with '\''--help'\'')]' \
+'::address -- Filter by contract address (omit to list all):_default' \
+&& ret=0
+;;
+(configure)
+_arguments "${_arguments_options[@]}" : \
+'--alerts=[New alert types (comma-separated)]:ALERTS:_default' \
+'--channels=[New channels (comma-separated)]:CHANNELS:_default' \
+'--frequency=[New frequency\: instant, daily, weekly]:FREQUENCY:_default' \
+'--networks=[New network filter (comma-separated)]:NETWORKS:_default' \
+'--categories=[New category filter (comma-separated)]:CATEGORIES:_default' \
+'--target=[New email address or webhook URL]:TARGET:_default' \
+'--api-url=[Registry API URL]:API_URL:_default' \
+'--network=[Stellar network to use (mainnet | testnet | futurenet)]:NETWORK:_default' \
+'--timeout=[Global timeout for network/API operations (seconds)]:TIMEOUT:_default' \
+'--profile=[Registry configuration profile to use]:PROFILE:_default' \
+'--no-cache[Skip local response cache and always fetch fresh data]' \
+'*-v[Enable verbose output. Repeat to increase verbosity (-v, -vv, -vvv)]' \
+'*--verbose[Enable verbose output. Repeat to increase verbosity (-v, -vv, -vvv)]' \
+'--check-updates[Check for CLI updates before running the command]' \
+'--describe[Print machine-readable JSON command schema description (#1145)]' \
+'-h[Print help (see more with '\''--help'\'')]' \
+'--help[Print help (see more with '\''--help'\'')]' \
+':address -- On-chain contract address:_default' \
+&& ret=0
+;;
+(test)
+_arguments "${_arguments_options[@]}" : \
+'--api-url=[Registry API URL]:API_URL:_default' \
+'--network=[Stellar network to use (mainnet | testnet | futurenet)]:NETWORK:_default' \
+'--timeout=[Global timeout for network/API operations (seconds)]:TIMEOUT:_default' \
+'--profile=[Registry configuration profile to use]:PROFILE:_default' \
+'--no-cache[Skip local response cache and always fetch fresh data]' \
+'*-v[Enable verbose output. Repeat to increase verbosity (-v, -vv, -vvv)]' \
+'*--verbose[Enable verbose output. Repeat to increase verbosity (-v, -vv, -vvv)]' \
+'--check-updates[Check for CLI updates before running the command]' \
+'--describe[Print machine-readable JSON command schema description (#1145)]' \
+'-h[Print help (see more with '\''--help'\'')]' \
+'--help[Print help (see more with '\''--help'\'')]' \
+':address -- On-chain contract address:_default' \
+&& ret=0
+;;
+(help)
+_arguments "${_arguments_options[@]}" : \
+":: :_soroban-registry__subcmd__contract__subcmd__notification__subcmd__help_commands" \
+"*::: :->help" \
+&& ret=0
+
+    case $state in
+    (help)
+        words=($line[1] "${words[@]}")
+        (( CURRENT += 1 ))
+        curcontext="${curcontext%:*:*}:soroban-registry-contract-notification-help-command-$line[1]:"
+        case $line[1] in
+            (subscribe)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(unsubscribe)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(list)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(configure)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(test)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(help)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+        esac
+    ;;
+esac
+;;
+        esac
+    ;;
+esac
+;;
 (help)
 _arguments "${_arguments_options[@]}" : \
 ":: :_soroban-registry__subcmd__contract__subcmd__help_commands" \
@@ -3193,7 +3603,11 @@ _arguments "${_arguments_options[@]}" : \
         (( CURRENT += 1 ))
         curcontext="${curcontext%:*:*}:soroban-registry-contract-help-command-$line[1]:"
         case $line[1] in
-            (publish)
+            (list)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(search)
 _arguments "${_arguments_options[@]}" : \
 && ret=0
 ;;
@@ -3221,6 +3635,22 @@ _arguments "${_arguments_options[@]}" : \
 _arguments "${_arguments_options[@]}" : \
 && ret=0
 ;;
+(interfaces)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(provenance)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(verify-build)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(compatibility)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
 (details)
 _arguments "${_arguments_options[@]}" : \
 && ret=0
@@ -3245,6 +3675,42 @@ _arguments "${_arguments_options[@]}" : \
 _arguments "${_arguments_options[@]}" : \
 && ret=0
 ;;
+(dependencies)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(dependents)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(dependency-risk)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(category)
+_arguments "${_arguments_options[@]}" : \
+":: :_soroban-registry__subcmd__contract__subcmd__help__subcmd__category_commands" \
+"*::: :->category" \
+&& ret=0
+
+    case $state in
+    (category)
+        words=($line[1] "${words[@]}")
+        (( CURRENT += 1 ))
+        curcontext="${curcontext%:*:*}:soroban-registry-contract-help-category-command-$line[1]:"
+        case $line[1] in
+            (list)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(stats)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+        esac
+    ;;
+esac
+;;
 (update)
 _arguments "${_arguments_options[@]}" : \
 && ret=0
@@ -3264,6 +3730,42 @@ _arguments "${_arguments_options[@]}" : \
 (deprecate)
 _arguments "${_arguments_options[@]}" : \
 && ret=0
+;;
+(notification)
+_arguments "${_arguments_options[@]}" : \
+":: :_soroban-registry__subcmd__contract__subcmd__help__subcmd__notification_commands" \
+"*::: :->notification" \
+&& ret=0
+
+    case $state in
+    (notification)
+        words=($line[1] "${words[@]}")
+        (( CURRENT += 1 ))
+        curcontext="${curcontext%:*:*}:soroban-registry-contract-help-notification-command-$line[1]:"
+        case $line[1] in
+            (subscribe)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(unsubscribe)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(list)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(configure)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(test)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+        esac
+    ;;
+esac
 ;;
 (help)
 _arguments "${_arguments_options[@]}" : \
@@ -4770,6 +5272,136 @@ esac
     ;;
 esac
 ;;
+(snapshot)
+_arguments "${_arguments_options[@]}" : \
+'--api-url=[Registry API URL]:API_URL:_default' \
+'--network=[Stellar network to use (mainnet | testnet | futurenet)]:NETWORK:_default' \
+'--timeout=[Global timeout for network/API operations (seconds)]:TIMEOUT:_default' \
+'--profile=[Registry configuration profile to use]:PROFILE:_default' \
+'--no-cache[Skip local response cache and always fetch fresh data]' \
+'*-v[Enable verbose output. Repeat to increase verbosity (-v, -vv, -vvv)]' \
+'*--verbose[Enable verbose output. Repeat to increase verbosity (-v, -vv, -vvv)]' \
+'--check-updates[Check for CLI updates before running the command]' \
+'--describe[Print machine-readable JSON command schema description (#1145)]' \
+'-h[Print help (see more with '\''--help'\'')]' \
+'--help[Print help (see more with '\''--help'\'')]' \
+":: :_soroban-registry__subcmd__snapshot_commands" \
+"*::: :->snapshot" \
+&& ret=0
+
+    case $state in
+    (snapshot)
+        words=($line[1] "${words[@]}")
+        (( CURRENT += 1 ))
+        curcontext="${curcontext%:*:*}:soroban-registry-snapshot-command-$line[1]:"
+        case $line[1] in
+            (export)
+_arguments "${_arguments_options[@]}" : \
+'-o+[Output file path]:OUTPUT:_default' \
+'--output=[Output file path]:OUTPUT:_default' \
+'--api-url=[Registry API URL]:API_URL:_default' \
+'--network=[Stellar network to use (mainnet | testnet | futurenet)]:NETWORK:_default' \
+'--timeout=[Global timeout for network/API operations (seconds)]:TIMEOUT:_default' \
+'--profile=[Registry configuration profile to use]:PROFILE:_default' \
+'--no-cache[Skip local response cache and always fetch fresh data]' \
+'*-v[Enable verbose output. Repeat to increase verbosity (-v, -vv, -vvv)]' \
+'*--verbose[Enable verbose output. Repeat to increase verbosity (-v, -vv, -vvv)]' \
+'--check-updates[Check for CLI updates before running the command]' \
+'--describe[Print machine-readable JSON command schema description (#1145)]' \
+'-h[Print help (see more with '\''--help'\'')]' \
+'--help[Print help (see more with '\''--help'\'')]' \
+&& ret=0
+;;
+(sign)
+_arguments "${_arguments_options[@]}" : \
+'--key=[Path to the signing key (Ed25519 PEM or base64)]:KEY:_default' \
+'--api-url=[Registry API URL]:API_URL:_default' \
+'--network=[Stellar network to use (mainnet | testnet | futurenet)]:NETWORK:_default' \
+'--timeout=[Global timeout for network/API operations (seconds)]:TIMEOUT:_default' \
+'--profile=[Registry configuration profile to use]:PROFILE:_default' \
+'--no-cache[Skip local response cache and always fetch fresh data]' \
+'*-v[Enable verbose output. Repeat to increase verbosity (-v, -vv, -vvv)]' \
+'*--verbose[Enable verbose output. Repeat to increase verbosity (-v, -vv, -vvv)]' \
+'--check-updates[Check for CLI updates before running the command]' \
+'--describe[Print machine-readable JSON command schema description (#1145)]' \
+'-h[Print help (see more with '\''--help'\'')]' \
+'--help[Print help (see more with '\''--help'\'')]' \
+':snapshot_file -- Path to the snapshot JSON file:_default' \
+&& ret=0
+;;
+(verify)
+_arguments "${_arguments_options[@]}" : \
+'--trust-key=[Path to the trusted public key]:TRUST_KEY:_default' \
+'--api-url=[Registry API URL]:API_URL:_default' \
+'--network=[Stellar network to use (mainnet | testnet | futurenet)]:NETWORK:_default' \
+'--timeout=[Global timeout for network/API operations (seconds)]:TIMEOUT:_default' \
+'--profile=[Registry configuration profile to use]:PROFILE:_default' \
+'--no-cache[Skip local response cache and always fetch fresh data]' \
+'*-v[Enable verbose output. Repeat to increase verbosity (-v, -vv, -vvv)]' \
+'*--verbose[Enable verbose output. Repeat to increase verbosity (-v, -vv, -vvv)]' \
+'--check-updates[Check for CLI updates before running the command]' \
+'--describe[Print machine-readable JSON command schema description (#1145)]' \
+'-h[Print help (see more with '\''--help'\'')]' \
+'--help[Print help (see more with '\''--help'\'')]' \
+':snapshot_file -- Path to the snapshot JSON file:_default' \
+&& ret=0
+;;
+(inspect)
+_arguments "${_arguments_options[@]}" : \
+'--api-url=[Registry API URL]:API_URL:_default' \
+'--network=[Stellar network to use (mainnet | testnet | futurenet)]:NETWORK:_default' \
+'--timeout=[Global timeout for network/API operations (seconds)]:TIMEOUT:_default' \
+'--profile=[Registry configuration profile to use]:PROFILE:_default' \
+'--no-cache[Skip local response cache and always fetch fresh data]' \
+'*-v[Enable verbose output. Repeat to increase verbosity (-v, -vv, -vvv)]' \
+'*--verbose[Enable verbose output. Repeat to increase verbosity (-v, -vv, -vvv)]' \
+'--check-updates[Check for CLI updates before running the command]' \
+'--describe[Print machine-readable JSON command schema description (#1145)]' \
+'-h[Print help (see more with '\''--help'\'')]' \
+'--help[Print help (see more with '\''--help'\'')]' \
+':snapshot_file -- Path to the snapshot JSON file:_default' \
+&& ret=0
+;;
+(help)
+_arguments "${_arguments_options[@]}" : \
+":: :_soroban-registry__subcmd__snapshot__subcmd__help_commands" \
+"*::: :->help" \
+&& ret=0
+
+    case $state in
+    (help)
+        words=($line[1] "${words[@]}")
+        (( CURRENT += 1 ))
+        curcontext="${curcontext%:*:*}:soroban-registry-snapshot-help-command-$line[1]:"
+        case $line[1] in
+            (export)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(sign)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(verify)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(inspect)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(help)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+        esac
+    ;;
+esac
+;;
+        esac
+    ;;
+esac
+;;
 (help)
 _arguments "${_arguments_options[@]}" : \
 ":: :_soroban-registry__subcmd__help_commands" \
@@ -5426,7 +6058,11 @@ _arguments "${_arguments_options[@]}" : \
         (( CURRENT += 1 ))
         curcontext="${curcontext%:*:*}:soroban-registry-help-contract-command-$line[1]:"
         case $line[1] in
-            (publish)
+            (list)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(search)
 _arguments "${_arguments_options[@]}" : \
 && ret=0
 ;;
@@ -5454,6 +6090,22 @@ _arguments "${_arguments_options[@]}" : \
 _arguments "${_arguments_options[@]}" : \
 && ret=0
 ;;
+(interfaces)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(provenance)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(verify-build)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(compatibility)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
 (details)
 _arguments "${_arguments_options[@]}" : \
 && ret=0
@@ -5478,6 +6130,42 @@ _arguments "${_arguments_options[@]}" : \
 _arguments "${_arguments_options[@]}" : \
 && ret=0
 ;;
+(dependencies)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(dependents)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(dependency-risk)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(category)
+_arguments "${_arguments_options[@]}" : \
+":: :_soroban-registry__subcmd__help__subcmd__contract__subcmd__category_commands" \
+"*::: :->category" \
+&& ret=0
+
+    case $state in
+    (category)
+        words=($line[1] "${words[@]}")
+        (( CURRENT += 1 ))
+        curcontext="${curcontext%:*:*}:soroban-registry-help-contract-category-command-$line[1]:"
+        case $line[1] in
+            (list)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(stats)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+        esac
+    ;;
+esac
+;;
 (update)
 _arguments "${_arguments_options[@]}" : \
 && ret=0
@@ -5497,6 +6185,42 @@ _arguments "${_arguments_options[@]}" : \
 (deprecate)
 _arguments "${_arguments_options[@]}" : \
 && ret=0
+;;
+(notification)
+_arguments "${_arguments_options[@]}" : \
+":: :_soroban-registry__subcmd__help__subcmd__contract__subcmd__notification_commands" \
+"*::: :->notification" \
+&& ret=0
+
+    case $state in
+    (notification)
+        words=($line[1] "${words[@]}")
+        (( CURRENT += 1 ))
+        curcontext="${curcontext%:*:*}:soroban-registry-help-contract-notification-command-$line[1]:"
+        case $line[1] in
+            (subscribe)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(unsubscribe)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(list)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(configure)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(test)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+        esac
+    ;;
+esac
 ;;
         esac
     ;;
@@ -5842,6 +6566,38 @@ _arguments "${_arguments_options[@]}" : \
     ;;
 esac
 ;;
+(snapshot)
+_arguments "${_arguments_options[@]}" : \
+":: :_soroban-registry__subcmd__help__subcmd__snapshot_commands" \
+"*::: :->snapshot" \
+&& ret=0
+
+    case $state in
+    (snapshot)
+        words=($line[1] "${words[@]}")
+        (( CURRENT += 1 ))
+        curcontext="${curcontext%:*:*}:soroban-registry-help-snapshot-command-$line[1]:"
+        case $line[1] in
+            (export)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(sign)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(verify)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(inspect)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+        esac
+    ;;
+esac
+;;
 (help)
 _arguments "${_arguments_options[@]}" : \
 && ret=0
@@ -5892,12 +6648,12 @@ _soroban-registry_commands() {
 'test:Run integration tests' \
 'audit:Run a local contract security audit' \
 'sla:SLA compliance monitoring' \
-'config:' \
+'config:Read and edit persisted user configuration values' \
 'auth:Manage authentication sessions and API tokens' \
 'backup:Manage contract backups and disaster recovery' \
 'state:Inspect and modify contract state (dev/test mutation only)' \
 'verify-formal:Run formal verification analysis against a deployed or local contract' \
-'scan-deps:' \
+'scan-deps:Scan a contract'\''s dependencies for known vulnerabilities' \
 'coverage:Measure and report code coverage for contract tests' \
 'sign:Sign a contract package with your private key' \
 'verify-package:Verify a signed contract package' \
@@ -5924,6 +6680,7 @@ _soroban-registry_commands() {
 'plugins:Plugin management (install, configure, run)' \
 'cache:Manage local cache of registry API responses (#845)' \
 'env:Manage environment variable sets for different deployments (#843)' \
+'snapshot:Manage signed offline registry snapshots (#1146)' \
 'help:Print this message or the help of the given subcommand(s)' \
     )
     _describe -t commands 'soroban-registry commands' commands "$@"
@@ -6451,24 +7208,34 @@ _soroban-registry__subcmd__config__subcmd__set_commands() {
 (( $+functions[_soroban-registry__subcmd__contract_commands] )) ||
 _soroban-registry__subcmd__contract_commands() {
     local commands; commands=(
-'publish:Publish a contract with optional policy-as-code admission evaluation (#1148)' \
+'list:List registered contracts, a page at a time' \
+'search:Search the registry, one page at a time or across every page' \
 'snapshot:Export a signed, offline-verifiable snapshot of a contract (#1116)' \
 'verify-snapshot:Verify a previously exported contract snapshot (#1116)' \
 'risk:Assess security and operational risks for a contract (#837)' \
 'deploy:Deploy and register a new contract in the registry' \
 'register:Register one or more contracts in the registry' \
 'verify:Verify a contract — a local WASM artifact before publishing, or a deployed contract'\''s authenticity against the on-chain registry' \
+'interfaces:Derive and display a contract'\''s deterministic interface fingerprint (functions, types, events, errors) from a local compiled WASM artifact' \
+'provenance:Display build-provenance metadata recorded for a contract, read from a local manifest file' \
+'verify-build:Attempt to independently reproduce a contract'\''s published WASM artifact from source, and compare its hash against the expected (registry-recorded) artifact hash' \
+'compatibility:Structurally compare two local compiled WASM artifacts and classify ABI changes as compatible, potentially breaking, breaking, or unknown' \
 'details:Display detailed information about a contract' \
 'stats:Show contract registry statistics and analytics' \
 'export:Export contracts and related registry data for backup or migration' \
 'highlight:Manage featured (highlighted) contracts (#832)' \
 'interaction:View a contract'\''s interactions and call patterns (#835)' \
 'dependency:Analyze a contract'\''s dependencies and relationships (#836, #1008)' \
+'dependencies:List what a contract depends on (#1147)' \
+'dependents:List what depends on a contract (#1147)' \
+'dependency-risk:Report direct and inherited risk across a contract'\''s dependencies (#1147)' \
+'category:List and inspect contract categories' \
 'update:Update contract metadata after registration (#828)' \
 'import:Import contracts into the registry from an external file (#831)' \
 'rollback:Rollback a deprecated contract to active state (#1091)' \
 'audit:Detect drift between local lockfile and registry state (#1060)' \
 'deprecate:Deprecate a contract with publisher-signed authorization (#1091)' \
+'notification:Manage contract event notifications and alerts (#838)' \
 'help:Print this message or the help of the given subcommand(s)' \
     )
     _describe -t commands 'soroban-registry contract commands' commands "$@"
@@ -6478,10 +7245,73 @@ _soroban-registry__subcmd__contract__subcmd__audit_commands() {
     local commands; commands=()
     _describe -t commands 'soroban-registry contract audit commands' commands "$@"
 }
+(( $+functions[_soroban-registry__subcmd__contract__subcmd__category_commands] )) ||
+_soroban-registry__subcmd__contract__subcmd__category_commands() {
+    local commands; commands=(
+'list:List all categories with descriptions and contract counts' \
+'stats:Show detailed per-category statistics (counts, recent, trending)' \
+'help:Print this message or the help of the given subcommand(s)' \
+    )
+    _describe -t commands 'soroban-registry contract category commands' commands "$@"
+}
+(( $+functions[_soroban-registry__subcmd__contract__subcmd__category__subcmd__help_commands] )) ||
+_soroban-registry__subcmd__contract__subcmd__category__subcmd__help_commands() {
+    local commands; commands=(
+'list:List all categories with descriptions and contract counts' \
+'stats:Show detailed per-category statistics (counts, recent, trending)' \
+'help:Print this message or the help of the given subcommand(s)' \
+    )
+    _describe -t commands 'soroban-registry contract category help commands' commands "$@"
+}
+(( $+functions[_soroban-registry__subcmd__contract__subcmd__category__subcmd__help__subcmd__help_commands] )) ||
+_soroban-registry__subcmd__contract__subcmd__category__subcmd__help__subcmd__help_commands() {
+    local commands; commands=()
+    _describe -t commands 'soroban-registry contract category help help commands' commands "$@"
+}
+(( $+functions[_soroban-registry__subcmd__contract__subcmd__category__subcmd__help__subcmd__list_commands] )) ||
+_soroban-registry__subcmd__contract__subcmd__category__subcmd__help__subcmd__list_commands() {
+    local commands; commands=()
+    _describe -t commands 'soroban-registry contract category help list commands' commands "$@"
+}
+(( $+functions[_soroban-registry__subcmd__contract__subcmd__category__subcmd__help__subcmd__stats_commands] )) ||
+_soroban-registry__subcmd__contract__subcmd__category__subcmd__help__subcmd__stats_commands() {
+    local commands; commands=()
+    _describe -t commands 'soroban-registry contract category help stats commands' commands "$@"
+}
+(( $+functions[_soroban-registry__subcmd__contract__subcmd__category__subcmd__list_commands] )) ||
+_soroban-registry__subcmd__contract__subcmd__category__subcmd__list_commands() {
+    local commands; commands=()
+    _describe -t commands 'soroban-registry contract category list commands' commands "$@"
+}
+(( $+functions[_soroban-registry__subcmd__contract__subcmd__category__subcmd__stats_commands] )) ||
+_soroban-registry__subcmd__contract__subcmd__category__subcmd__stats_commands() {
+    local commands; commands=()
+    _describe -t commands 'soroban-registry contract category stats commands' commands "$@"
+}
+(( $+functions[_soroban-registry__subcmd__contract__subcmd__compatibility_commands] )) ||
+_soroban-registry__subcmd__contract__subcmd__compatibility_commands() {
+    local commands; commands=()
+    _describe -t commands 'soroban-registry contract compatibility commands' commands "$@"
+}
+(( $+functions[_soroban-registry__subcmd__contract__subcmd__dependencies_commands] )) ||
+_soroban-registry__subcmd__contract__subcmd__dependencies_commands() {
+    local commands; commands=()
+    _describe -t commands 'soroban-registry contract dependencies commands' commands "$@"
+}
 (( $+functions[_soroban-registry__subcmd__contract__subcmd__dependency_commands] )) ||
 _soroban-registry__subcmd__contract__subcmd__dependency_commands() {
     local commands; commands=()
     _describe -t commands 'soroban-registry contract dependency commands' commands "$@"
+}
+(( $+functions[_soroban-registry__subcmd__contract__subcmd__dependency-risk_commands] )) ||
+_soroban-registry__subcmd__contract__subcmd__dependency-risk_commands() {
+    local commands; commands=()
+    _describe -t commands 'soroban-registry contract dependency-risk commands' commands "$@"
+}
+(( $+functions[_soroban-registry__subcmd__contract__subcmd__dependents_commands] )) ||
+_soroban-registry__subcmd__contract__subcmd__dependents_commands() {
+    local commands; commands=()
+    _describe -t commands 'soroban-registry contract dependents commands' commands "$@"
 }
 (( $+functions[_soroban-registry__subcmd__contract__subcmd__deploy_commands] )) ||
 _soroban-registry__subcmd__contract__subcmd__deploy_commands() {
@@ -6506,24 +7336,34 @@ _soroban-registry__subcmd__contract__subcmd__export_commands() {
 (( $+functions[_soroban-registry__subcmd__contract__subcmd__help_commands] )) ||
 _soroban-registry__subcmd__contract__subcmd__help_commands() {
     local commands; commands=(
-'publish:Publish a contract with optional policy-as-code admission evaluation (#1148)' \
+'list:List registered contracts, a page at a time' \
+'search:Search the registry, one page at a time or across every page' \
 'snapshot:Export a signed, offline-verifiable snapshot of a contract (#1116)' \
 'verify-snapshot:Verify a previously exported contract snapshot (#1116)' \
 'risk:Assess security and operational risks for a contract (#837)' \
 'deploy:Deploy and register a new contract in the registry' \
 'register:Register one or more contracts in the registry' \
 'verify:Verify a contract — a local WASM artifact before publishing, or a deployed contract'\''s authenticity against the on-chain registry' \
+'interfaces:Derive and display a contract'\''s deterministic interface fingerprint (functions, types, events, errors) from a local compiled WASM artifact' \
+'provenance:Display build-provenance metadata recorded for a contract, read from a local manifest file' \
+'verify-build:Attempt to independently reproduce a contract'\''s published WASM artifact from source, and compare its hash against the expected (registry-recorded) artifact hash' \
+'compatibility:Structurally compare two local compiled WASM artifacts and classify ABI changes as compatible, potentially breaking, breaking, or unknown' \
 'details:Display detailed information about a contract' \
 'stats:Show contract registry statistics and analytics' \
 'export:Export contracts and related registry data for backup or migration' \
 'highlight:Manage featured (highlighted) contracts (#832)' \
 'interaction:View a contract'\''s interactions and call patterns (#835)' \
 'dependency:Analyze a contract'\''s dependencies and relationships (#836, #1008)' \
+'dependencies:List what a contract depends on (#1147)' \
+'dependents:List what depends on a contract (#1147)' \
+'dependency-risk:Report direct and inherited risk across a contract'\''s dependencies (#1147)' \
+'category:List and inspect contract categories' \
 'update:Update contract metadata after registration (#828)' \
 'import:Import contracts into the registry from an external file (#831)' \
 'rollback:Rollback a deprecated contract to active state (#1091)' \
 'audit:Detect drift between local lockfile and registry state (#1060)' \
 'deprecate:Deprecate a contract with publisher-signed authorization (#1091)' \
+'notification:Manage contract event notifications and alerts (#838)' \
 'help:Print this message or the help of the given subcommand(s)' \
     )
     _describe -t commands 'soroban-registry contract help commands' commands "$@"
@@ -6533,10 +7373,48 @@ _soroban-registry__subcmd__contract__subcmd__help__subcmd__audit_commands() {
     local commands; commands=()
     _describe -t commands 'soroban-registry contract help audit commands' commands "$@"
 }
+(( $+functions[_soroban-registry__subcmd__contract__subcmd__help__subcmd__category_commands] )) ||
+_soroban-registry__subcmd__contract__subcmd__help__subcmd__category_commands() {
+    local commands; commands=(
+'list:List all categories with descriptions and contract counts' \
+'stats:Show detailed per-category statistics (counts, recent, trending)' \
+    )
+    _describe -t commands 'soroban-registry contract help category commands' commands "$@"
+}
+(( $+functions[_soroban-registry__subcmd__contract__subcmd__help__subcmd__category__subcmd__list_commands] )) ||
+_soroban-registry__subcmd__contract__subcmd__help__subcmd__category__subcmd__list_commands() {
+    local commands; commands=()
+    _describe -t commands 'soroban-registry contract help category list commands' commands "$@"
+}
+(( $+functions[_soroban-registry__subcmd__contract__subcmd__help__subcmd__category__subcmd__stats_commands] )) ||
+_soroban-registry__subcmd__contract__subcmd__help__subcmd__category__subcmd__stats_commands() {
+    local commands; commands=()
+    _describe -t commands 'soroban-registry contract help category stats commands' commands "$@"
+}
+(( $+functions[_soroban-registry__subcmd__contract__subcmd__help__subcmd__compatibility_commands] )) ||
+_soroban-registry__subcmd__contract__subcmd__help__subcmd__compatibility_commands() {
+    local commands; commands=()
+    _describe -t commands 'soroban-registry contract help compatibility commands' commands "$@"
+}
+(( $+functions[_soroban-registry__subcmd__contract__subcmd__help__subcmd__dependencies_commands] )) ||
+_soroban-registry__subcmd__contract__subcmd__help__subcmd__dependencies_commands() {
+    local commands; commands=()
+    _describe -t commands 'soroban-registry contract help dependencies commands' commands "$@"
+}
 (( $+functions[_soroban-registry__subcmd__contract__subcmd__help__subcmd__dependency_commands] )) ||
 _soroban-registry__subcmd__contract__subcmd__help__subcmd__dependency_commands() {
     local commands; commands=()
     _describe -t commands 'soroban-registry contract help dependency commands' commands "$@"
+}
+(( $+functions[_soroban-registry__subcmd__contract__subcmd__help__subcmd__dependency-risk_commands] )) ||
+_soroban-registry__subcmd__contract__subcmd__help__subcmd__dependency-risk_commands() {
+    local commands; commands=()
+    _describe -t commands 'soroban-registry contract help dependency-risk commands' commands "$@"
+}
+(( $+functions[_soroban-registry__subcmd__contract__subcmd__help__subcmd__dependents_commands] )) ||
+_soroban-registry__subcmd__contract__subcmd__help__subcmd__dependents_commands() {
+    local commands; commands=()
+    _describe -t commands 'soroban-registry contract help dependents commands' commands "$@"
 }
 (( $+functions[_soroban-registry__subcmd__contract__subcmd__help__subcmd__deploy_commands] )) ||
 _soroban-registry__subcmd__contract__subcmd__help__subcmd__deploy_commands() {
@@ -6578,10 +7456,56 @@ _soroban-registry__subcmd__contract__subcmd__help__subcmd__interaction_commands(
     local commands; commands=()
     _describe -t commands 'soroban-registry contract help interaction commands' commands "$@"
 }
-(( $+functions[_soroban-registry__subcmd__contract__subcmd__help__subcmd__publish_commands] )) ||
-_soroban-registry__subcmd__contract__subcmd__help__subcmd__publish_commands() {
+(( $+functions[_soroban-registry__subcmd__contract__subcmd__help__subcmd__interfaces_commands] )) ||
+_soroban-registry__subcmd__contract__subcmd__help__subcmd__interfaces_commands() {
     local commands; commands=()
-    _describe -t commands 'soroban-registry contract help publish commands' commands "$@"
+    _describe -t commands 'soroban-registry contract help interfaces commands' commands "$@"
+}
+(( $+functions[_soroban-registry__subcmd__contract__subcmd__help__subcmd__list_commands] )) ||
+_soroban-registry__subcmd__contract__subcmd__help__subcmd__list_commands() {
+    local commands; commands=()
+    _describe -t commands 'soroban-registry contract help list commands' commands "$@"
+}
+(( $+functions[_soroban-registry__subcmd__contract__subcmd__help__subcmd__notification_commands] )) ||
+_soroban-registry__subcmd__contract__subcmd__help__subcmd__notification_commands() {
+    local commands; commands=(
+'subscribe:Subscribe to alerts for a contract address' \
+'unsubscribe:Unsubscribe from alerts for a contract address' \
+'list:List active notification rules' \
+'configure:Update an existing notification rule' \
+'test:Send a test alert for a subscribed contract' \
+    )
+    _describe -t commands 'soroban-registry contract help notification commands' commands "$@"
+}
+(( $+functions[_soroban-registry__subcmd__contract__subcmd__help__subcmd__notification__subcmd__configure_commands] )) ||
+_soroban-registry__subcmd__contract__subcmd__help__subcmd__notification__subcmd__configure_commands() {
+    local commands; commands=()
+    _describe -t commands 'soroban-registry contract help notification configure commands' commands "$@"
+}
+(( $+functions[_soroban-registry__subcmd__contract__subcmd__help__subcmd__notification__subcmd__list_commands] )) ||
+_soroban-registry__subcmd__contract__subcmd__help__subcmd__notification__subcmd__list_commands() {
+    local commands; commands=()
+    _describe -t commands 'soroban-registry contract help notification list commands' commands "$@"
+}
+(( $+functions[_soroban-registry__subcmd__contract__subcmd__help__subcmd__notification__subcmd__subscribe_commands] )) ||
+_soroban-registry__subcmd__contract__subcmd__help__subcmd__notification__subcmd__subscribe_commands() {
+    local commands; commands=()
+    _describe -t commands 'soroban-registry contract help notification subscribe commands' commands "$@"
+}
+(( $+functions[_soroban-registry__subcmd__contract__subcmd__help__subcmd__notification__subcmd__test_commands] )) ||
+_soroban-registry__subcmd__contract__subcmd__help__subcmd__notification__subcmd__test_commands() {
+    local commands; commands=()
+    _describe -t commands 'soroban-registry contract help notification test commands' commands "$@"
+}
+(( $+functions[_soroban-registry__subcmd__contract__subcmd__help__subcmd__notification__subcmd__unsubscribe_commands] )) ||
+_soroban-registry__subcmd__contract__subcmd__help__subcmd__notification__subcmd__unsubscribe_commands() {
+    local commands; commands=()
+    _describe -t commands 'soroban-registry contract help notification unsubscribe commands' commands "$@"
+}
+(( $+functions[_soroban-registry__subcmd__contract__subcmd__help__subcmd__provenance_commands] )) ||
+_soroban-registry__subcmd__contract__subcmd__help__subcmd__provenance_commands() {
+    local commands; commands=()
+    _describe -t commands 'soroban-registry contract help provenance commands' commands "$@"
 }
 (( $+functions[_soroban-registry__subcmd__contract__subcmd__help__subcmd__register_commands] )) ||
 _soroban-registry__subcmd__contract__subcmd__help__subcmd__register_commands() {
@@ -6597,6 +7521,11 @@ _soroban-registry__subcmd__contract__subcmd__help__subcmd__risk_commands() {
 _soroban-registry__subcmd__contract__subcmd__help__subcmd__rollback_commands() {
     local commands; commands=()
     _describe -t commands 'soroban-registry contract help rollback commands' commands "$@"
+}
+(( $+functions[_soroban-registry__subcmd__contract__subcmd__help__subcmd__search_commands] )) ||
+_soroban-registry__subcmd__contract__subcmd__help__subcmd__search_commands() {
+    local commands; commands=()
+    _describe -t commands 'soroban-registry contract help search commands' commands "$@"
 }
 (( $+functions[_soroban-registry__subcmd__contract__subcmd__help__subcmd__snapshot_commands] )) ||
 _soroban-registry__subcmd__contract__subcmd__help__subcmd__snapshot_commands() {
@@ -6618,6 +7547,11 @@ _soroban-registry__subcmd__contract__subcmd__help__subcmd__verify_commands() {
     local commands; commands=()
     _describe -t commands 'soroban-registry contract help verify commands' commands "$@"
 }
+(( $+functions[_soroban-registry__subcmd__contract__subcmd__help__subcmd__verify-build_commands] )) ||
+_soroban-registry__subcmd__contract__subcmd__help__subcmd__verify-build_commands() {
+    local commands; commands=()
+    _describe -t commands 'soroban-registry contract help verify-build commands' commands "$@"
+}
 (( $+functions[_soroban-registry__subcmd__contract__subcmd__help__subcmd__verify-snapshot_commands] )) ||
 _soroban-registry__subcmd__contract__subcmd__help__subcmd__verify-snapshot_commands() {
     local commands; commands=()
@@ -6638,10 +7572,99 @@ _soroban-registry__subcmd__contract__subcmd__interaction_commands() {
     local commands; commands=()
     _describe -t commands 'soroban-registry contract interaction commands' commands "$@"
 }
-(( $+functions[_soroban-registry__subcmd__contract__subcmd__publish_commands] )) ||
-_soroban-registry__subcmd__contract__subcmd__publish_commands() {
+(( $+functions[_soroban-registry__subcmd__contract__subcmd__interfaces_commands] )) ||
+_soroban-registry__subcmd__contract__subcmd__interfaces_commands() {
     local commands; commands=()
-    _describe -t commands 'soroban-registry contract publish commands' commands "$@"
+    _describe -t commands 'soroban-registry contract interfaces commands' commands "$@"
+}
+(( $+functions[_soroban-registry__subcmd__contract__subcmd__list_commands] )) ||
+_soroban-registry__subcmd__contract__subcmd__list_commands() {
+    local commands; commands=()
+    _describe -t commands 'soroban-registry contract list commands' commands "$@"
+}
+(( $+functions[_soroban-registry__subcmd__contract__subcmd__notification_commands] )) ||
+_soroban-registry__subcmd__contract__subcmd__notification_commands() {
+    local commands; commands=(
+'subscribe:Subscribe to alerts for a contract address' \
+'unsubscribe:Unsubscribe from alerts for a contract address' \
+'list:List active notification rules' \
+'configure:Update an existing notification rule' \
+'test:Send a test alert for a subscribed contract' \
+'help:Print this message or the help of the given subcommand(s)' \
+    )
+    _describe -t commands 'soroban-registry contract notification commands' commands "$@"
+}
+(( $+functions[_soroban-registry__subcmd__contract__subcmd__notification__subcmd__configure_commands] )) ||
+_soroban-registry__subcmd__contract__subcmd__notification__subcmd__configure_commands() {
+    local commands; commands=()
+    _describe -t commands 'soroban-registry contract notification configure commands' commands "$@"
+}
+(( $+functions[_soroban-registry__subcmd__contract__subcmd__notification__subcmd__help_commands] )) ||
+_soroban-registry__subcmd__contract__subcmd__notification__subcmd__help_commands() {
+    local commands; commands=(
+'subscribe:Subscribe to alerts for a contract address' \
+'unsubscribe:Unsubscribe from alerts for a contract address' \
+'list:List active notification rules' \
+'configure:Update an existing notification rule' \
+'test:Send a test alert for a subscribed contract' \
+'help:Print this message or the help of the given subcommand(s)' \
+    )
+    _describe -t commands 'soroban-registry contract notification help commands' commands "$@"
+}
+(( $+functions[_soroban-registry__subcmd__contract__subcmd__notification__subcmd__help__subcmd__configure_commands] )) ||
+_soroban-registry__subcmd__contract__subcmd__notification__subcmd__help__subcmd__configure_commands() {
+    local commands; commands=()
+    _describe -t commands 'soroban-registry contract notification help configure commands' commands "$@"
+}
+(( $+functions[_soroban-registry__subcmd__contract__subcmd__notification__subcmd__help__subcmd__help_commands] )) ||
+_soroban-registry__subcmd__contract__subcmd__notification__subcmd__help__subcmd__help_commands() {
+    local commands; commands=()
+    _describe -t commands 'soroban-registry contract notification help help commands' commands "$@"
+}
+(( $+functions[_soroban-registry__subcmd__contract__subcmd__notification__subcmd__help__subcmd__list_commands] )) ||
+_soroban-registry__subcmd__contract__subcmd__notification__subcmd__help__subcmd__list_commands() {
+    local commands; commands=()
+    _describe -t commands 'soroban-registry contract notification help list commands' commands "$@"
+}
+(( $+functions[_soroban-registry__subcmd__contract__subcmd__notification__subcmd__help__subcmd__subscribe_commands] )) ||
+_soroban-registry__subcmd__contract__subcmd__notification__subcmd__help__subcmd__subscribe_commands() {
+    local commands; commands=()
+    _describe -t commands 'soroban-registry contract notification help subscribe commands' commands "$@"
+}
+(( $+functions[_soroban-registry__subcmd__contract__subcmd__notification__subcmd__help__subcmd__test_commands] )) ||
+_soroban-registry__subcmd__contract__subcmd__notification__subcmd__help__subcmd__test_commands() {
+    local commands; commands=()
+    _describe -t commands 'soroban-registry contract notification help test commands' commands "$@"
+}
+(( $+functions[_soroban-registry__subcmd__contract__subcmd__notification__subcmd__help__subcmd__unsubscribe_commands] )) ||
+_soroban-registry__subcmd__contract__subcmd__notification__subcmd__help__subcmd__unsubscribe_commands() {
+    local commands; commands=()
+    _describe -t commands 'soroban-registry contract notification help unsubscribe commands' commands "$@"
+}
+(( $+functions[_soroban-registry__subcmd__contract__subcmd__notification__subcmd__list_commands] )) ||
+_soroban-registry__subcmd__contract__subcmd__notification__subcmd__list_commands() {
+    local commands; commands=()
+    _describe -t commands 'soroban-registry contract notification list commands' commands "$@"
+}
+(( $+functions[_soroban-registry__subcmd__contract__subcmd__notification__subcmd__subscribe_commands] )) ||
+_soroban-registry__subcmd__contract__subcmd__notification__subcmd__subscribe_commands() {
+    local commands; commands=()
+    _describe -t commands 'soroban-registry contract notification subscribe commands' commands "$@"
+}
+(( $+functions[_soroban-registry__subcmd__contract__subcmd__notification__subcmd__test_commands] )) ||
+_soroban-registry__subcmd__contract__subcmd__notification__subcmd__test_commands() {
+    local commands; commands=()
+    _describe -t commands 'soroban-registry contract notification test commands' commands "$@"
+}
+(( $+functions[_soroban-registry__subcmd__contract__subcmd__notification__subcmd__unsubscribe_commands] )) ||
+_soroban-registry__subcmd__contract__subcmd__notification__subcmd__unsubscribe_commands() {
+    local commands; commands=()
+    _describe -t commands 'soroban-registry contract notification unsubscribe commands' commands "$@"
+}
+(( $+functions[_soroban-registry__subcmd__contract__subcmd__provenance_commands] )) ||
+_soroban-registry__subcmd__contract__subcmd__provenance_commands() {
+    local commands; commands=()
+    _describe -t commands 'soroban-registry contract provenance commands' commands "$@"
 }
 (( $+functions[_soroban-registry__subcmd__contract__subcmd__register_commands] )) ||
 _soroban-registry__subcmd__contract__subcmd__register_commands() {
@@ -6657,6 +7680,11 @@ _soroban-registry__subcmd__contract__subcmd__risk_commands() {
 _soroban-registry__subcmd__contract__subcmd__rollback_commands() {
     local commands; commands=()
     _describe -t commands 'soroban-registry contract rollback commands' commands "$@"
+}
+(( $+functions[_soroban-registry__subcmd__contract__subcmd__search_commands] )) ||
+_soroban-registry__subcmd__contract__subcmd__search_commands() {
+    local commands; commands=()
+    _describe -t commands 'soroban-registry contract search commands' commands "$@"
 }
 (( $+functions[_soroban-registry__subcmd__contract__subcmd__snapshot_commands] )) ||
 _soroban-registry__subcmd__contract__subcmd__snapshot_commands() {
@@ -6677,6 +7705,11 @@ _soroban-registry__subcmd__contract__subcmd__update_commands() {
 _soroban-registry__subcmd__contract__subcmd__verify_commands() {
     local commands; commands=()
     _describe -t commands 'soroban-registry contract verify commands' commands "$@"
+}
+(( $+functions[_soroban-registry__subcmd__contract__subcmd__verify-build_commands] )) ||
+_soroban-registry__subcmd__contract__subcmd__verify-build_commands() {
+    local commands; commands=()
+    _describe -t commands 'soroban-registry contract verify-build commands' commands "$@"
 }
 (( $+functions[_soroban-registry__subcmd__contract__subcmd__verify-snapshot_commands] )) ||
 _soroban-registry__subcmd__contract__subcmd__verify-snapshot_commands() {
@@ -6858,12 +7891,12 @@ _soroban-registry__subcmd__help_commands() {
 'test:Run integration tests' \
 'audit:Run a local contract security audit' \
 'sla:SLA compliance monitoring' \
-'config:' \
+'config:Read and edit persisted user configuration values' \
 'auth:Manage authentication sessions and API tokens' \
 'backup:Manage contract backups and disaster recovery' \
 'state:Inspect and modify contract state (dev/test mutation only)' \
 'verify-formal:Run formal verification analysis against a deployed or local contract' \
-'scan-deps:' \
+'scan-deps:Scan a contract'\''s dependencies for known vulnerabilities' \
 'coverage:Measure and report code coverage for contract tests' \
 'sign:Sign a contract package with your private key' \
 'verify-package:Verify a signed contract package' \
@@ -6890,6 +7923,7 @@ _soroban-registry__subcmd__help_commands() {
 'plugins:Plugin management (install, configure, run)' \
 'cache:Manage local cache of registry API responses (#845)' \
 'env:Manage environment variable sets for different deployments (#843)' \
+'snapshot:Manage signed offline registry snapshots (#1146)' \
 'help:Print this message or the help of the given subcommand(s)' \
     )
     _describe -t commands 'soroban-registry help commands' commands "$@"
@@ -7171,24 +8205,34 @@ _soroban-registry__subcmd__help__subcmd__config__subcmd__set_commands() {
 (( $+functions[_soroban-registry__subcmd__help__subcmd__contract_commands] )) ||
 _soroban-registry__subcmd__help__subcmd__contract_commands() {
     local commands; commands=(
-'publish:Publish a contract with optional policy-as-code admission evaluation (#1148)' \
+'list:List registered contracts, a page at a time' \
+'search:Search the registry, one page at a time or across every page' \
 'snapshot:Export a signed, offline-verifiable snapshot of a contract (#1116)' \
 'verify-snapshot:Verify a previously exported contract snapshot (#1116)' \
 'risk:Assess security and operational risks for a contract (#837)' \
 'deploy:Deploy and register a new contract in the registry' \
 'register:Register one or more contracts in the registry' \
 'verify:Verify a contract — a local WASM artifact before publishing, or a deployed contract'\''s authenticity against the on-chain registry' \
+'interfaces:Derive and display a contract'\''s deterministic interface fingerprint (functions, types, events, errors) from a local compiled WASM artifact' \
+'provenance:Display build-provenance metadata recorded for a contract, read from a local manifest file' \
+'verify-build:Attempt to independently reproduce a contract'\''s published WASM artifact from source, and compare its hash against the expected (registry-recorded) artifact hash' \
+'compatibility:Structurally compare two local compiled WASM artifacts and classify ABI changes as compatible, potentially breaking, breaking, or unknown' \
 'details:Display detailed information about a contract' \
 'stats:Show contract registry statistics and analytics' \
 'export:Export contracts and related registry data for backup or migration' \
 'highlight:Manage featured (highlighted) contracts (#832)' \
 'interaction:View a contract'\''s interactions and call patterns (#835)' \
 'dependency:Analyze a contract'\''s dependencies and relationships (#836, #1008)' \
+'dependencies:List what a contract depends on (#1147)' \
+'dependents:List what depends on a contract (#1147)' \
+'dependency-risk:Report direct and inherited risk across a contract'\''s dependencies (#1147)' \
+'category:List and inspect contract categories' \
 'update:Update contract metadata after registration (#828)' \
 'import:Import contracts into the registry from an external file (#831)' \
 'rollback:Rollback a deprecated contract to active state (#1091)' \
 'audit:Detect drift between local lockfile and registry state (#1060)' \
 'deprecate:Deprecate a contract with publisher-signed authorization (#1091)' \
+'notification:Manage contract event notifications and alerts (#838)' \
     )
     _describe -t commands 'soroban-registry help contract commands' commands "$@"
 }
@@ -7197,10 +8241,48 @@ _soroban-registry__subcmd__help__subcmd__contract__subcmd__audit_commands() {
     local commands; commands=()
     _describe -t commands 'soroban-registry help contract audit commands' commands "$@"
 }
+(( $+functions[_soroban-registry__subcmd__help__subcmd__contract__subcmd__category_commands] )) ||
+_soroban-registry__subcmd__help__subcmd__contract__subcmd__category_commands() {
+    local commands; commands=(
+'list:List all categories with descriptions and contract counts' \
+'stats:Show detailed per-category statistics (counts, recent, trending)' \
+    )
+    _describe -t commands 'soroban-registry help contract category commands' commands "$@"
+}
+(( $+functions[_soroban-registry__subcmd__help__subcmd__contract__subcmd__category__subcmd__list_commands] )) ||
+_soroban-registry__subcmd__help__subcmd__contract__subcmd__category__subcmd__list_commands() {
+    local commands; commands=()
+    _describe -t commands 'soroban-registry help contract category list commands' commands "$@"
+}
+(( $+functions[_soroban-registry__subcmd__help__subcmd__contract__subcmd__category__subcmd__stats_commands] )) ||
+_soroban-registry__subcmd__help__subcmd__contract__subcmd__category__subcmd__stats_commands() {
+    local commands; commands=()
+    _describe -t commands 'soroban-registry help contract category stats commands' commands "$@"
+}
+(( $+functions[_soroban-registry__subcmd__help__subcmd__contract__subcmd__compatibility_commands] )) ||
+_soroban-registry__subcmd__help__subcmd__contract__subcmd__compatibility_commands() {
+    local commands; commands=()
+    _describe -t commands 'soroban-registry help contract compatibility commands' commands "$@"
+}
+(( $+functions[_soroban-registry__subcmd__help__subcmd__contract__subcmd__dependencies_commands] )) ||
+_soroban-registry__subcmd__help__subcmd__contract__subcmd__dependencies_commands() {
+    local commands; commands=()
+    _describe -t commands 'soroban-registry help contract dependencies commands' commands "$@"
+}
 (( $+functions[_soroban-registry__subcmd__help__subcmd__contract__subcmd__dependency_commands] )) ||
 _soroban-registry__subcmd__help__subcmd__contract__subcmd__dependency_commands() {
     local commands; commands=()
     _describe -t commands 'soroban-registry help contract dependency commands' commands "$@"
+}
+(( $+functions[_soroban-registry__subcmd__help__subcmd__contract__subcmd__dependency-risk_commands] )) ||
+_soroban-registry__subcmd__help__subcmd__contract__subcmd__dependency-risk_commands() {
+    local commands; commands=()
+    _describe -t commands 'soroban-registry help contract dependency-risk commands' commands "$@"
+}
+(( $+functions[_soroban-registry__subcmd__help__subcmd__contract__subcmd__dependents_commands] )) ||
+_soroban-registry__subcmd__help__subcmd__contract__subcmd__dependents_commands() {
+    local commands; commands=()
+    _describe -t commands 'soroban-registry help contract dependents commands' commands "$@"
 }
 (( $+functions[_soroban-registry__subcmd__help__subcmd__contract__subcmd__deploy_commands] )) ||
 _soroban-registry__subcmd__help__subcmd__contract__subcmd__deploy_commands() {
@@ -7237,10 +8319,56 @@ _soroban-registry__subcmd__help__subcmd__contract__subcmd__interaction_commands(
     local commands; commands=()
     _describe -t commands 'soroban-registry help contract interaction commands' commands "$@"
 }
-(( $+functions[_soroban-registry__subcmd__help__subcmd__contract__subcmd__publish_commands] )) ||
-_soroban-registry__subcmd__help__subcmd__contract__subcmd__publish_commands() {
+(( $+functions[_soroban-registry__subcmd__help__subcmd__contract__subcmd__interfaces_commands] )) ||
+_soroban-registry__subcmd__help__subcmd__contract__subcmd__interfaces_commands() {
     local commands; commands=()
-    _describe -t commands 'soroban-registry help contract publish commands' commands "$@"
+    _describe -t commands 'soroban-registry help contract interfaces commands' commands "$@"
+}
+(( $+functions[_soroban-registry__subcmd__help__subcmd__contract__subcmd__list_commands] )) ||
+_soroban-registry__subcmd__help__subcmd__contract__subcmd__list_commands() {
+    local commands; commands=()
+    _describe -t commands 'soroban-registry help contract list commands' commands "$@"
+}
+(( $+functions[_soroban-registry__subcmd__help__subcmd__contract__subcmd__notification_commands] )) ||
+_soroban-registry__subcmd__help__subcmd__contract__subcmd__notification_commands() {
+    local commands; commands=(
+'subscribe:Subscribe to alerts for a contract address' \
+'unsubscribe:Unsubscribe from alerts for a contract address' \
+'list:List active notification rules' \
+'configure:Update an existing notification rule' \
+'test:Send a test alert for a subscribed contract' \
+    )
+    _describe -t commands 'soroban-registry help contract notification commands' commands "$@"
+}
+(( $+functions[_soroban-registry__subcmd__help__subcmd__contract__subcmd__notification__subcmd__configure_commands] )) ||
+_soroban-registry__subcmd__help__subcmd__contract__subcmd__notification__subcmd__configure_commands() {
+    local commands; commands=()
+    _describe -t commands 'soroban-registry help contract notification configure commands' commands "$@"
+}
+(( $+functions[_soroban-registry__subcmd__help__subcmd__contract__subcmd__notification__subcmd__list_commands] )) ||
+_soroban-registry__subcmd__help__subcmd__contract__subcmd__notification__subcmd__list_commands() {
+    local commands; commands=()
+    _describe -t commands 'soroban-registry help contract notification list commands' commands "$@"
+}
+(( $+functions[_soroban-registry__subcmd__help__subcmd__contract__subcmd__notification__subcmd__subscribe_commands] )) ||
+_soroban-registry__subcmd__help__subcmd__contract__subcmd__notification__subcmd__subscribe_commands() {
+    local commands; commands=()
+    _describe -t commands 'soroban-registry help contract notification subscribe commands' commands "$@"
+}
+(( $+functions[_soroban-registry__subcmd__help__subcmd__contract__subcmd__notification__subcmd__test_commands] )) ||
+_soroban-registry__subcmd__help__subcmd__contract__subcmd__notification__subcmd__test_commands() {
+    local commands; commands=()
+    _describe -t commands 'soroban-registry help contract notification test commands' commands "$@"
+}
+(( $+functions[_soroban-registry__subcmd__help__subcmd__contract__subcmd__notification__subcmd__unsubscribe_commands] )) ||
+_soroban-registry__subcmd__help__subcmd__contract__subcmd__notification__subcmd__unsubscribe_commands() {
+    local commands; commands=()
+    _describe -t commands 'soroban-registry help contract notification unsubscribe commands' commands "$@"
+}
+(( $+functions[_soroban-registry__subcmd__help__subcmd__contract__subcmd__provenance_commands] )) ||
+_soroban-registry__subcmd__help__subcmd__contract__subcmd__provenance_commands() {
+    local commands; commands=()
+    _describe -t commands 'soroban-registry help contract provenance commands' commands "$@"
 }
 (( $+functions[_soroban-registry__subcmd__help__subcmd__contract__subcmd__register_commands] )) ||
 _soroban-registry__subcmd__help__subcmd__contract__subcmd__register_commands() {
@@ -7256,6 +8384,11 @@ _soroban-registry__subcmd__help__subcmd__contract__subcmd__risk_commands() {
 _soroban-registry__subcmd__help__subcmd__contract__subcmd__rollback_commands() {
     local commands; commands=()
     _describe -t commands 'soroban-registry help contract rollback commands' commands "$@"
+}
+(( $+functions[_soroban-registry__subcmd__help__subcmd__contract__subcmd__search_commands] )) ||
+_soroban-registry__subcmd__help__subcmd__contract__subcmd__search_commands() {
+    local commands; commands=()
+    _describe -t commands 'soroban-registry help contract search commands' commands "$@"
 }
 (( $+functions[_soroban-registry__subcmd__help__subcmd__contract__subcmd__snapshot_commands] )) ||
 _soroban-registry__subcmd__help__subcmd__contract__subcmd__snapshot_commands() {
@@ -7276,6 +8409,11 @@ _soroban-registry__subcmd__help__subcmd__contract__subcmd__update_commands() {
 _soroban-registry__subcmd__help__subcmd__contract__subcmd__verify_commands() {
     local commands; commands=()
     _describe -t commands 'soroban-registry help contract verify commands' commands "$@"
+}
+(( $+functions[_soroban-registry__subcmd__help__subcmd__contract__subcmd__verify-build_commands] )) ||
+_soroban-registry__subcmd__help__subcmd__contract__subcmd__verify-build_commands() {
+    local commands; commands=()
+    _describe -t commands 'soroban-registry help contract verify-build commands' commands "$@"
 }
 (( $+functions[_soroban-registry__subcmd__help__subcmd__contract__subcmd__verify-snapshot_commands] )) ||
 _soroban-registry__subcmd__help__subcmd__contract__subcmd__verify-snapshot_commands() {
@@ -7657,7 +8795,7 @@ _soroban-registry__subcmd__help__subcmd__plugins__subcmd__uninstall_commands() {
 (( $+functions[_soroban-registry__subcmd__help__subcmd__policy_commands] )) ||
 _soroban-registry__subcmd__help__subcmd__policy_commands() {
     local commands; commands=(
-'check:Evaluate a policy-as-code file against a contract artifact or context' \
+'check:Evaluate a policy-as-code definition against a contract artifact' \
     )
     _describe -t commands 'soroban-registry help policy commands' commands "$@"
 }
@@ -7710,7 +8848,7 @@ _soroban-registry__subcmd__help__subcmd__publish_commands() {
 (( $+functions[_soroban-registry__subcmd__help__subcmd__publisher_commands] )) ||
 _soroban-registry__subcmd__help__subcmd__publisher_commands() {
     local commands; commands=(
-'doctor:Run publisher environment diagnostics' \
+'doctor:Diagnose the local publishing environment (config, session, signing key, connectivity)' \
     )
     _describe -t commands 'soroban-registry help publisher commands' commands "$@"
 }
@@ -7792,6 +8930,36 @@ _soroban-registry__subcmd__help__subcmd__sla__subcmd__record_commands() {
 _soroban-registry__subcmd__help__subcmd__sla__subcmd__status_commands() {
     local commands; commands=()
     _describe -t commands 'soroban-registry help sla status commands' commands "$@"
+}
+(( $+functions[_soroban-registry__subcmd__help__subcmd__snapshot_commands] )) ||
+_soroban-registry__subcmd__help__subcmd__snapshot_commands() {
+    local commands; commands=(
+'export:Export a signed offline registry snapshot' \
+'sign:Sign a registry snapshot' \
+'verify:Verify a signed registry snapshot locally' \
+'inspect:Inspect a registry snapshot metadata' \
+    )
+    _describe -t commands 'soroban-registry help snapshot commands' commands "$@"
+}
+(( $+functions[_soroban-registry__subcmd__help__subcmd__snapshot__subcmd__export_commands] )) ||
+_soroban-registry__subcmd__help__subcmd__snapshot__subcmd__export_commands() {
+    local commands; commands=()
+    _describe -t commands 'soroban-registry help snapshot export commands' commands "$@"
+}
+(( $+functions[_soroban-registry__subcmd__help__subcmd__snapshot__subcmd__inspect_commands] )) ||
+_soroban-registry__subcmd__help__subcmd__snapshot__subcmd__inspect_commands() {
+    local commands; commands=()
+    _describe -t commands 'soroban-registry help snapshot inspect commands' commands "$@"
+}
+(( $+functions[_soroban-registry__subcmd__help__subcmd__snapshot__subcmd__sign_commands] )) ||
+_soroban-registry__subcmd__help__subcmd__snapshot__subcmd__sign_commands() {
+    local commands; commands=()
+    _describe -t commands 'soroban-registry help snapshot sign commands' commands "$@"
+}
+(( $+functions[_soroban-registry__subcmd__help__subcmd__snapshot__subcmd__verify_commands] )) ||
+_soroban-registry__subcmd__help__subcmd__snapshot__subcmd__verify_commands() {
+    local commands; commands=()
+    _describe -t commands 'soroban-registry help snapshot verify commands' commands "$@"
 }
 (( $+functions[_soroban-registry__subcmd__help__subcmd__state_commands] )) ||
 _soroban-registry__subcmd__help__subcmd__state_commands() {
@@ -8627,7 +9795,7 @@ _soroban-registry__subcmd__plugins__subcmd__uninstall_commands() {
 (( $+functions[_soroban-registry__subcmd__policy_commands] )) ||
 _soroban-registry__subcmd__policy_commands() {
     local commands; commands=(
-'check:Evaluate a policy-as-code file against a contract artifact or context' \
+'check:Evaluate a policy-as-code definition against a contract artifact' \
 'help:Print this message or the help of the given subcommand(s)' \
     )
     _describe -t commands 'soroban-registry policy commands' commands "$@"
@@ -8640,7 +9808,7 @@ _soroban-registry__subcmd__policy__subcmd__check_commands() {
 (( $+functions[_soroban-registry__subcmd__policy__subcmd__help_commands] )) ||
 _soroban-registry__subcmd__policy__subcmd__help_commands() {
     local commands; commands=(
-'check:Evaluate a policy-as-code file against a contract artifact or context' \
+'check:Evaluate a policy-as-code definition against a contract artifact' \
 'help:Print this message or the help of the given subcommand(s)' \
     )
     _describe -t commands 'soroban-registry policy help commands' commands "$@"
@@ -8742,7 +9910,7 @@ _soroban-registry__subcmd__publish_commands() {
 (( $+functions[_soroban-registry__subcmd__publisher_commands] )) ||
 _soroban-registry__subcmd__publisher_commands() {
     local commands; commands=(
-'doctor:Run publisher environment diagnostics' \
+'doctor:Diagnose the local publishing environment (config, session, signing key, connectivity)' \
 'help:Print this message or the help of the given subcommand(s)' \
     )
     _describe -t commands 'soroban-registry publisher commands' commands "$@"
@@ -8755,7 +9923,7 @@ _soroban-registry__subcmd__publisher__subcmd__doctor_commands() {
 (( $+functions[_soroban-registry__subcmd__publisher__subcmd__help_commands] )) ||
 _soroban-registry__subcmd__publisher__subcmd__help_commands() {
     local commands; commands=(
-'doctor:Run publisher environment diagnostics' \
+'doctor:Diagnose the local publishing environment (config, session, signing key, connectivity)' \
 'help:Print this message or the help of the given subcommand(s)' \
     )
     _describe -t commands 'soroban-registry publisher help commands' commands "$@"
@@ -8911,6 +10079,73 @@ _soroban-registry__subcmd__sla__subcmd__record_commands() {
 _soroban-registry__subcmd__sla__subcmd__status_commands() {
     local commands; commands=()
     _describe -t commands 'soroban-registry sla status commands' commands "$@"
+}
+(( $+functions[_soroban-registry__subcmd__snapshot_commands] )) ||
+_soroban-registry__subcmd__snapshot_commands() {
+    local commands; commands=(
+'export:Export a signed offline registry snapshot' \
+'sign:Sign a registry snapshot' \
+'verify:Verify a signed registry snapshot locally' \
+'inspect:Inspect a registry snapshot metadata' \
+'help:Print this message or the help of the given subcommand(s)' \
+    )
+    _describe -t commands 'soroban-registry snapshot commands' commands "$@"
+}
+(( $+functions[_soroban-registry__subcmd__snapshot__subcmd__export_commands] )) ||
+_soroban-registry__subcmd__snapshot__subcmd__export_commands() {
+    local commands; commands=()
+    _describe -t commands 'soroban-registry snapshot export commands' commands "$@"
+}
+(( $+functions[_soroban-registry__subcmd__snapshot__subcmd__help_commands] )) ||
+_soroban-registry__subcmd__snapshot__subcmd__help_commands() {
+    local commands; commands=(
+'export:Export a signed offline registry snapshot' \
+'sign:Sign a registry snapshot' \
+'verify:Verify a signed registry snapshot locally' \
+'inspect:Inspect a registry snapshot metadata' \
+'help:Print this message or the help of the given subcommand(s)' \
+    )
+    _describe -t commands 'soroban-registry snapshot help commands' commands "$@"
+}
+(( $+functions[_soroban-registry__subcmd__snapshot__subcmd__help__subcmd__export_commands] )) ||
+_soroban-registry__subcmd__snapshot__subcmd__help__subcmd__export_commands() {
+    local commands; commands=()
+    _describe -t commands 'soroban-registry snapshot help export commands' commands "$@"
+}
+(( $+functions[_soroban-registry__subcmd__snapshot__subcmd__help__subcmd__help_commands] )) ||
+_soroban-registry__subcmd__snapshot__subcmd__help__subcmd__help_commands() {
+    local commands; commands=()
+    _describe -t commands 'soroban-registry snapshot help help commands' commands "$@"
+}
+(( $+functions[_soroban-registry__subcmd__snapshot__subcmd__help__subcmd__inspect_commands] )) ||
+_soroban-registry__subcmd__snapshot__subcmd__help__subcmd__inspect_commands() {
+    local commands; commands=()
+    _describe -t commands 'soroban-registry snapshot help inspect commands' commands "$@"
+}
+(( $+functions[_soroban-registry__subcmd__snapshot__subcmd__help__subcmd__sign_commands] )) ||
+_soroban-registry__subcmd__snapshot__subcmd__help__subcmd__sign_commands() {
+    local commands; commands=()
+    _describe -t commands 'soroban-registry snapshot help sign commands' commands "$@"
+}
+(( $+functions[_soroban-registry__subcmd__snapshot__subcmd__help__subcmd__verify_commands] )) ||
+_soroban-registry__subcmd__snapshot__subcmd__help__subcmd__verify_commands() {
+    local commands; commands=()
+    _describe -t commands 'soroban-registry snapshot help verify commands' commands "$@"
+}
+(( $+functions[_soroban-registry__subcmd__snapshot__subcmd__inspect_commands] )) ||
+_soroban-registry__subcmd__snapshot__subcmd__inspect_commands() {
+    local commands; commands=()
+    _describe -t commands 'soroban-registry snapshot inspect commands' commands "$@"
+}
+(( $+functions[_soroban-registry__subcmd__snapshot__subcmd__sign_commands] )) ||
+_soroban-registry__subcmd__snapshot__subcmd__sign_commands() {
+    local commands; commands=()
+    _describe -t commands 'soroban-registry snapshot sign commands' commands "$@"
+}
+(( $+functions[_soroban-registry__subcmd__snapshot__subcmd__verify_commands] )) ||
+_soroban-registry__subcmd__snapshot__subcmd__verify_commands() {
+    local commands; commands=()
+    _describe -t commands 'soroban-registry snapshot verify commands' commands "$@"
 }
 (( $+functions[_soroban-registry__subcmd__state_commands] )) ||
 _soroban-registry__subcmd__state_commands() {

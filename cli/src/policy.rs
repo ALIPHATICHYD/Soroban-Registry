@@ -73,7 +73,12 @@ pub async fn run_policy_check(
                     "[SKIPPED]".dimmed()
                 };
 
-                println!("  {} {} (Matched: {})", status_str, rule.name.bold(), rule.matched);
+                println!(
+                    "  {} {} (Matched: {})",
+                    status_str,
+                    rule.name.bold(),
+                    rule.matched
+                );
                 println!("         Condition: {}", rule.condition.italic());
                 if let Some(ref reason) = rule.reason {
                     println!("         Reason   : {}", reason);
@@ -102,7 +107,10 @@ pub async fn run_policy_check(
         }
 
         if dry_run {
-            println!("\n{}", "[DRY-RUN] No artifacts were submitted.".blue().bold());
+            println!(
+                "\n{}",
+                "[DRY-RUN] No artifacts were submitted.".blue().bold()
+            );
         }
     }
 

@@ -68,12 +68,12 @@ Register-ArgumentCompleter -Native -CommandName 'soroban-registry' -ScriptBlock 
             [CompletionResult]::new('test', 'test', [CompletionResultType]::ParameterValue, 'Run integration tests')
             [CompletionResult]::new('audit', 'audit', [CompletionResultType]::ParameterValue, 'Run a local contract security audit')
             [CompletionResult]::new('sla', 'sla', [CompletionResultType]::ParameterValue, 'SLA compliance monitoring')
-            [CompletionResult]::new('config', 'config', [CompletionResultType]::ParameterValue, 'config')
+            [CompletionResult]::new('config', 'config', [CompletionResultType]::ParameterValue, 'Read and edit persisted user configuration values')
             [CompletionResult]::new('auth', 'auth', [CompletionResultType]::ParameterValue, 'Manage authentication sessions and API tokens')
             [CompletionResult]::new('backup', 'backup', [CompletionResultType]::ParameterValue, 'Manage contract backups and disaster recovery')
             [CompletionResult]::new('state', 'state', [CompletionResultType]::ParameterValue, 'Inspect and modify contract state (dev/test mutation only)')
             [CompletionResult]::new('verify-formal', 'verify-formal', [CompletionResultType]::ParameterValue, 'Run formal verification analysis against a deployed or local contract')
-            [CompletionResult]::new('scan-deps', 'scan-deps', [CompletionResultType]::ParameterValue, 'scan-deps')
+            [CompletionResult]::new('scan-deps', 'scan-deps', [CompletionResultType]::ParameterValue, 'Scan a contract''s dependencies for known vulnerabilities')
             [CompletionResult]::new('coverage', 'coverage', [CompletionResultType]::ParameterValue, 'Measure and report code coverage for contract tests')
             [CompletionResult]::new('sign', 'sign', [CompletionResultType]::ParameterValue, 'Sign a contract package with your private key')
             [CompletionResult]::new('verify-package', 'verify-package', [CompletionResultType]::ParameterValue, 'Verify a signed contract package')
@@ -100,6 +100,7 @@ Register-ArgumentCompleter -Native -CommandName 'soroban-registry' -ScriptBlock 
             [CompletionResult]::new('plugins', 'plugins', [CompletionResultType]::ParameterValue, 'Plugin management (install, configure, run)')
             [CompletionResult]::new('cache', 'cache', [CompletionResultType]::ParameterValue, 'Manage local cache of registry API responses (#845)')
             [CompletionResult]::new('env', 'env', [CompletionResultType]::ParameterValue, 'Manage environment variable sets for different deployments (#843)')
+            [CompletionResult]::new('snapshot', 'snapshot', [CompletionResultType]::ParameterValue, 'Manage signed offline registry snapshots (#1146)')
             [CompletionResult]::new('help', 'help', [CompletionResultType]::ParameterValue, 'Print this message or the help of the given subcommand(s)')
             break
         }
@@ -1354,10 +1355,10 @@ Register-ArgumentCompleter -Native -CommandName 'soroban-registry' -ScriptBlock 
             [CompletionResult]::new('--timeout', '--timeout', [CompletionResultType]::ParameterName, 'Global timeout for network/API operations (seconds)')
             [CompletionResult]::new('--profile', '--profile', [CompletionResultType]::ParameterName, 'Registry configuration profile to use')
             [CompletionResult]::new('--coverage', '--coverage', [CompletionResultType]::ParameterName, 'Show coverage report')
-            [CompletionResult]::new('-v', '-v', [CompletionResultType]::ParameterName, 'Verbose output')
-            [CompletionResult]::new('--verbose', '--verbose', [CompletionResultType]::ParameterName, 'Verbose output')
             [CompletionResult]::new('--require-coverage', '--require-coverage', [CompletionResultType]::ParameterName, 'Require coverage data and fail if unavailable')
             [CompletionResult]::new('--no-cache', '--no-cache', [CompletionResultType]::ParameterName, 'Skip local response cache and always fetch fresh data')
+            [CompletionResult]::new('-v', '-v', [CompletionResultType]::ParameterName, 'Enable verbose output. Repeat to increase verbosity (-v, -vv, -vvv)')
+            [CompletionResult]::new('--verbose', '--verbose', [CompletionResultType]::ParameterName, 'Enable verbose output. Repeat to increase verbosity (-v, -vv, -vvv)')
             [CompletionResult]::new('--check-updates', '--check-updates', [CompletionResultType]::ParameterName, 'Check for CLI updates before running the command')
             [CompletionResult]::new('--describe', '--describe', [CompletionResultType]::ParameterName, 'Print machine-readable JSON command schema description (#1145)')
             [CompletionResult]::new('-h', '-h', [CompletionResultType]::ParameterName, 'Print help (see more with ''--help'')')
@@ -2016,13 +2017,13 @@ Register-ArgumentCompleter -Native -CommandName 'soroban-registry' -ScriptBlock 
             break
         }
         'soroban-registry;scan-deps' {
-            [CompletionResult]::new('--contract-id', '--contract-id', [CompletionResultType]::ParameterName, 'contract-id')
-            [CompletionResult]::new('--dependencies', '--dependencies', [CompletionResultType]::ParameterName, 'dependencies')
+            [CompletionResult]::new('--contract-id', '--contract-id', [CompletionResultType]::ParameterName, 'Contract address or registry UUID to scan')
+            [CompletionResult]::new('--dependencies', '--dependencies', [CompletionResultType]::ParameterName, 'Comma-separated dependency list to scan')
             [CompletionResult]::new('--api-url', '--api-url', [CompletionResultType]::ParameterName, 'Registry API URL')
             [CompletionResult]::new('--network', '--network', [CompletionResultType]::ParameterName, 'Stellar network to use (mainnet | testnet | futurenet)')
             [CompletionResult]::new('--timeout', '--timeout', [CompletionResultType]::ParameterName, 'Global timeout for network/API operations (seconds)')
             [CompletionResult]::new('--profile', '--profile', [CompletionResultType]::ParameterName, 'Registry configuration profile to use')
-            [CompletionResult]::new('--fail-on-high', '--fail-on-high', [CompletionResultType]::ParameterName, 'fail-on-high')
+            [CompletionResult]::new('--fail-on-high', '--fail-on-high', [CompletionResultType]::ParameterName, 'Exit non-zero when a high-severity finding is reported')
             [CompletionResult]::new('--no-cache', '--no-cache', [CompletionResultType]::ParameterName, 'Skip local response cache and always fetch fresh data')
             [CompletionResult]::new('-v', '-v', [CompletionResultType]::ParameterName, 'Enable verbose output. Repeat to increase verbosity (-v, -vv, -vvv)')
             [CompletionResult]::new('--verbose', '--verbose', [CompletionResultType]::ParameterName, 'Enable verbose output. Repeat to increase verbosity (-v, -vv, -vvv)')
@@ -2241,20 +2242,20 @@ Register-ArgumentCompleter -Native -CommandName 'soroban-registry' -ScriptBlock 
             [CompletionResult]::new('--describe', '--describe', [CompletionResultType]::ParameterName, 'Print machine-readable JSON command schema description (#1145)')
             [CompletionResult]::new('-h', '-h', [CompletionResultType]::ParameterName, 'Print help (see more with ''--help'')')
             [CompletionResult]::new('--help', '--help', [CompletionResultType]::ParameterName, 'Print help (see more with ''--help'')')
-            [CompletionResult]::new('check', 'check', [CompletionResultType]::ParameterValue, 'Evaluate a policy-as-code file against a contract artifact or context')
+            [CompletionResult]::new('check', 'check', [CompletionResultType]::ParameterValue, 'Evaluate a policy-as-code definition against a contract artifact')
             [CompletionResult]::new('help', 'help', [CompletionResultType]::ParameterValue, 'Print this message or the help of the given subcommand(s)')
             break
         }
         'soroban-registry;policy;check' {
-            [CompletionResult]::new('-p', '-p', [CompletionResultType]::ParameterName, 'Path to policy YAML or JSON file')
-            [CompletionResult]::new('--policy', '--policy', [CompletionResultType]::ParameterName, 'Path to policy YAML or JSON file')
+            [CompletionResult]::new('--wasm-path', '--wasm-path', [CompletionResultType]::ParameterName, 'Path to the contract WASM/binary file (optional)')
+            [CompletionResult]::new('--policy', '--policy', [CompletionResultType]::ParameterName, 'Path to the policy YAML/JSON file')
             [CompletionResult]::new('--api-url', '--api-url', [CompletionResultType]::ParameterName, 'Registry API URL')
             [CompletionResult]::new('--network', '--network', [CompletionResultType]::ParameterName, 'Stellar network to use (mainnet | testnet | futurenet)')
             [CompletionResult]::new('--timeout', '--timeout', [CompletionResultType]::ParameterName, 'Global timeout for network/API operations (seconds)')
             [CompletionResult]::new('--profile', '--profile', [CompletionResultType]::ParameterName, 'Registry configuration profile to use')
-            [CompletionResult]::new('--explain', '--explain', [CompletionResultType]::ParameterName, 'Display detailed evaluation results for each rule')
-            [CompletionResult]::new('--json', '--json', [CompletionResultType]::ParameterName, 'Output evaluation results as machine-readable JSON')
-            [CompletionResult]::new('--dry-run', '--dry-run', [CompletionResultType]::ParameterName, 'Dry-run mode: evaluate policy without submitting')
+            [CompletionResult]::new('--explain', '--explain', [CompletionResultType]::ParameterName, 'Show detailed per-rule evaluation results')
+            [CompletionResult]::new('--json', '--json', [CompletionResultType]::ParameterName, 'Output results as machine-readable JSON')
+            [CompletionResult]::new('--dry-run', '--dry-run', [CompletionResultType]::ParameterName, 'Evaluate the policy without submitting any artifacts')
             [CompletionResult]::new('--no-cache', '--no-cache', [CompletionResultType]::ParameterName, 'Skip local response cache and always fetch fresh data')
             [CompletionResult]::new('-v', '-v', [CompletionResultType]::ParameterName, 'Enable verbose output. Repeat to increase verbosity (-v, -vv, -vvv)')
             [CompletionResult]::new('--verbose', '--verbose', [CompletionResultType]::ParameterName, 'Enable verbose output. Repeat to increase verbosity (-v, -vv, -vvv)')
@@ -2265,7 +2266,7 @@ Register-ArgumentCompleter -Native -CommandName 'soroban-registry' -ScriptBlock 
             break
         }
         'soroban-registry;policy;help' {
-            [CompletionResult]::new('check', 'check', [CompletionResultType]::ParameterValue, 'Evaluate a policy-as-code file against a contract artifact or context')
+            [CompletionResult]::new('check', 'check', [CompletionResultType]::ParameterValue, 'Evaluate a policy-as-code definition against a contract artifact')
             [CompletionResult]::new('help', 'help', [CompletionResultType]::ParameterValue, 'Print this message or the help of the given subcommand(s)')
             break
         }
@@ -2287,7 +2288,7 @@ Register-ArgumentCompleter -Native -CommandName 'soroban-registry' -ScriptBlock 
             [CompletionResult]::new('--describe', '--describe', [CompletionResultType]::ParameterName, 'Print machine-readable JSON command schema description (#1145)')
             [CompletionResult]::new('-h', '-h', [CompletionResultType]::ParameterName, 'Print help (see more with ''--help'')')
             [CompletionResult]::new('--help', '--help', [CompletionResultType]::ParameterName, 'Print help (see more with ''--help'')')
-            [CompletionResult]::new('doctor', 'doctor', [CompletionResultType]::ParameterValue, 'Run publisher environment diagnostics')
+            [CompletionResult]::new('doctor', 'doctor', [CompletionResultType]::ParameterValue, 'Diagnose the local publishing environment (config, session, signing key, connectivity)')
             [CompletionResult]::new('help', 'help', [CompletionResultType]::ParameterValue, 'Print this message or the help of the given subcommand(s)')
             break
         }
@@ -2296,7 +2297,7 @@ Register-ArgumentCompleter -Native -CommandName 'soroban-registry' -ScriptBlock 
             [CompletionResult]::new('--network', '--network', [CompletionResultType]::ParameterName, 'Stellar network to use (mainnet | testnet | futurenet)')
             [CompletionResult]::new('--timeout', '--timeout', [CompletionResultType]::ParameterName, 'Global timeout for network/API operations (seconds)')
             [CompletionResult]::new('--profile', '--profile', [CompletionResultType]::ParameterName, 'Registry configuration profile to use')
-            [CompletionResult]::new('--json', '--json', [CompletionResultType]::ParameterName, 'json')
+            [CompletionResult]::new('--json', '--json', [CompletionResultType]::ParameterName, 'Output results as machine-readable JSON')
             [CompletionResult]::new('--no-cache', '--no-cache', [CompletionResultType]::ParameterName, 'Skip local response cache and always fetch fresh data')
             [CompletionResult]::new('-v', '-v', [CompletionResultType]::ParameterName, 'Enable verbose output. Repeat to increase verbosity (-v, -vv, -vvv)')
             [CompletionResult]::new('--verbose', '--verbose', [CompletionResultType]::ParameterName, 'Enable verbose output. Repeat to increase verbosity (-v, -vv, -vvv)')
@@ -2307,7 +2308,7 @@ Register-ArgumentCompleter -Native -CommandName 'soroban-registry' -ScriptBlock 
             break
         }
         'soroban-registry;publisher;help' {
-            [CompletionResult]::new('doctor', 'doctor', [CompletionResultType]::ParameterValue, 'Run publisher environment diagnostics')
+            [CompletionResult]::new('doctor', 'doctor', [CompletionResultType]::ParameterValue, 'Diagnose the local publishing environment (config, session, signing key, connectivity)')
             [CompletionResult]::new('help', 'help', [CompletionResultType]::ParameterValue, 'Print this message or the help of the given subcommand(s)')
             break
         }
@@ -2329,42 +2330,77 @@ Register-ArgumentCompleter -Native -CommandName 'soroban-registry' -ScriptBlock 
             [CompletionResult]::new('--describe', '--describe', [CompletionResultType]::ParameterName, 'Print machine-readable JSON command schema description (#1145)')
             [CompletionResult]::new('-h', '-h', [CompletionResultType]::ParameterName, 'Print help (see more with ''--help'')')
             [CompletionResult]::new('--help', '--help', [CompletionResultType]::ParameterName, 'Print help (see more with ''--help'')')
-            [CompletionResult]::new('publish', 'publish', [CompletionResultType]::ParameterValue, 'Publish a contract with optional policy-as-code admission evaluation (#1148)')
+            [CompletionResult]::new('list', 'list', [CompletionResultType]::ParameterValue, 'List registered contracts, a page at a time')
+            [CompletionResult]::new('search', 'search', [CompletionResultType]::ParameterValue, 'Search the registry, one page at a time or across every page')
             [CompletionResult]::new('snapshot', 'snapshot', [CompletionResultType]::ParameterValue, 'Export a signed, offline-verifiable snapshot of a contract (#1116)')
             [CompletionResult]::new('verify-snapshot', 'verify-snapshot', [CompletionResultType]::ParameterValue, 'Verify a previously exported contract snapshot (#1116)')
             [CompletionResult]::new('risk', 'risk', [CompletionResultType]::ParameterValue, 'Assess security and operational risks for a contract (#837)')
             [CompletionResult]::new('deploy', 'deploy', [CompletionResultType]::ParameterValue, 'Deploy and register a new contract in the registry')
             [CompletionResult]::new('register', 'register', [CompletionResultType]::ParameterValue, 'Register one or more contracts in the registry')
             [CompletionResult]::new('verify', 'verify', [CompletionResultType]::ParameterValue, 'Verify a contract — a local WASM artifact before publishing, or a deployed contract''s authenticity against the on-chain registry')
+            [CompletionResult]::new('interfaces', 'interfaces', [CompletionResultType]::ParameterValue, 'Derive and display a contract''s deterministic interface fingerprint (functions, types, events, errors) from a local compiled WASM artifact')
+            [CompletionResult]::new('provenance', 'provenance', [CompletionResultType]::ParameterValue, 'Display build-provenance metadata recorded for a contract, read from a local manifest file')
+            [CompletionResult]::new('verify-build', 'verify-build', [CompletionResultType]::ParameterValue, 'Attempt to independently reproduce a contract''s published WASM artifact from source, and compare its hash against the expected (registry-recorded) artifact hash')
+            [CompletionResult]::new('compatibility', 'compatibility', [CompletionResultType]::ParameterValue, 'Structurally compare two local compiled WASM artifacts and classify ABI changes as compatible, potentially breaking, breaking, or unknown')
             [CompletionResult]::new('details', 'details', [CompletionResultType]::ParameterValue, 'Display detailed information about a contract')
             [CompletionResult]::new('stats', 'stats', [CompletionResultType]::ParameterValue, 'Show contract registry statistics and analytics')
             [CompletionResult]::new('export', 'export', [CompletionResultType]::ParameterValue, 'Export contracts and related registry data for backup or migration')
             [CompletionResult]::new('highlight', 'highlight', [CompletionResultType]::ParameterValue, 'Manage featured (highlighted) contracts (#832)')
             [CompletionResult]::new('interaction', 'interaction', [CompletionResultType]::ParameterValue, 'View a contract''s interactions and call patterns (#835)')
             [CompletionResult]::new('dependency', 'dependency', [CompletionResultType]::ParameterValue, 'Analyze a contract''s dependencies and relationships (#836, #1008)')
+            [CompletionResult]::new('dependencies', 'dependencies', [CompletionResultType]::ParameterValue, 'List what a contract depends on (#1147)')
+            [CompletionResult]::new('dependents', 'dependents', [CompletionResultType]::ParameterValue, 'List what depends on a contract (#1147)')
+            [CompletionResult]::new('dependency-risk', 'dependency-risk', [CompletionResultType]::ParameterValue, 'Report direct and inherited risk across a contract''s dependencies (#1147)')
+            [CompletionResult]::new('category', 'category', [CompletionResultType]::ParameterValue, 'List and inspect contract categories')
             [CompletionResult]::new('update', 'update', [CompletionResultType]::ParameterValue, 'Update contract metadata after registration (#828)')
             [CompletionResult]::new('import', 'import', [CompletionResultType]::ParameterValue, 'Import contracts into the registry from an external file (#831)')
             [CompletionResult]::new('rollback', 'rollback', [CompletionResultType]::ParameterValue, 'Rollback a deprecated contract to active state (#1091)')
             [CompletionResult]::new('audit', 'audit', [CompletionResultType]::ParameterValue, 'Detect drift between local lockfile and registry state (#1060)')
             [CompletionResult]::new('deprecate', 'deprecate', [CompletionResultType]::ParameterValue, 'Deprecate a contract with publisher-signed authorization (#1091)')
+            [CompletionResult]::new('notification', 'notification', [CompletionResultType]::ParameterValue, 'Manage contract event notifications and alerts (#838)')
             [CompletionResult]::new('help', 'help', [CompletionResultType]::ParameterValue, 'Print this message or the help of the given subcommand(s)')
             break
         }
-        'soroban-registry;contract;publish' {
-            [CompletionResult]::new('--contract-id', '--contract-id', [CompletionResultType]::ParameterName, 'On-chain contract ID')
-            [CompletionResult]::new('--name', '--name', [CompletionResultType]::ParameterName, 'Human-readable contract name')
-            [CompletionResult]::new('--description', '--description', [CompletionResultType]::ParameterName, 'Optional description')
-            [CompletionResult]::new('--network', '--network', [CompletionResultType]::ParameterName, 'Network (mainnet, testnet, futurenet)')
-            [CompletionResult]::new('--category', '--category', [CompletionResultType]::ParameterName, 'Category')
-            [CompletionResult]::new('--tags', '--tags', [CompletionResultType]::ParameterName, 'Comma-separated tags')
-            [CompletionResult]::new('--publisher', '--publisher', [CompletionResultType]::ParameterName, 'Publisher Stellar address')
-            [CompletionResult]::new('--contract-path', '--contract-path', [CompletionResultType]::ParameterName, 'Path to contract project directory for preflight testing')
-            [CompletionResult]::new('--policy', '--policy', [CompletionResultType]::ParameterName, 'Path to policy-as-code YAML or JSON file (#1148)')
+        'soroban-registry;contract;list' {
+            [CompletionResult]::new('-l', '-l', [CompletionResultType]::ParameterName, 'Contracts per page (1-100)')
+            [CompletionResult]::new('--limit', '--limit', [CompletionResultType]::ParameterName, 'Contracts per page (1-100)')
+            [CompletionResult]::new('-o', '-o', [CompletionResultType]::ParameterName, 'Contracts to skip; use it with --limit to page through the registry')
+            [CompletionResult]::new('--offset', '--offset', [CompletionResultType]::ParameterName, 'Contracts to skip; use it with --limit to page through the registry')
+            [CompletionResult]::new('--networks', '--networks', [CompletionResultType]::ParameterName, 'Filter by network (comma-separated: mainnet,testnet,futurenet). Named `networks` because the global `--network` owns that arg id')
+            [CompletionResult]::new('-c', '-c', [CompletionResultType]::ParameterName, 'Filter by category (comma-separated: DeFi,NFT)')
+            [CompletionResult]::new('--category', '--category', [CompletionResultType]::ParameterName, 'Filter by category (comma-separated: DeFi,NFT)')
+            [CompletionResult]::new('-f', '-f', [CompletionResultType]::ParameterName, 'Output format: table, json or csv')
+            [CompletionResult]::new('--format', '--format', [CompletionResultType]::ParameterName, 'Output format: table, json or csv')
             [CompletionResult]::new('--api-url', '--api-url', [CompletionResultType]::ParameterName, 'Registry API URL')
+            [CompletionResult]::new('--network', '--network', [CompletionResultType]::ParameterName, 'Stellar network to use (mainnet | testnet | futurenet)')
             [CompletionResult]::new('--timeout', '--timeout', [CompletionResultType]::ParameterName, 'Global timeout for network/API operations (seconds)')
             [CompletionResult]::new('--profile', '--profile', [CompletionResultType]::ParameterName, 'Registry configuration profile to use')
-            [CompletionResult]::new('--explain', '--explain', [CompletionResultType]::ParameterName, 'Display policy evaluation rule details (#1148)')
-            [CompletionResult]::new('--dry-run', '--dry-run', [CompletionResultType]::ParameterName, 'Evaluate policy and validate without submitting to registry (#1148)')
+            [CompletionResult]::new('--no-cache', '--no-cache', [CompletionResultType]::ParameterName, 'Skip local response cache and always fetch fresh data')
+            [CompletionResult]::new('-v', '-v', [CompletionResultType]::ParameterName, 'Enable verbose output. Repeat to increase verbosity (-v, -vv, -vvv)')
+            [CompletionResult]::new('--verbose', '--verbose', [CompletionResultType]::ParameterName, 'Enable verbose output. Repeat to increase verbosity (-v, -vv, -vvv)')
+            [CompletionResult]::new('--check-updates', '--check-updates', [CompletionResultType]::ParameterName, 'Check for CLI updates before running the command')
+            [CompletionResult]::new('--describe', '--describe', [CompletionResultType]::ParameterName, 'Print machine-readable JSON command schema description (#1145)')
+            [CompletionResult]::new('-h', '-h', [CompletionResultType]::ParameterName, 'Print help (see more with ''--help'')')
+            [CompletionResult]::new('--help', '--help', [CompletionResultType]::ParameterName, 'Print help (see more with ''--help'')')
+            break
+        }
+        'soroban-registry;contract;search' {
+            [CompletionResult]::new('--networks', '--networks', [CompletionResultType]::ParameterName, 'Filter by network (comma-separated: mainnet,testnet,futurenet)')
+            [CompletionResult]::new('--category', '--category', [CompletionResultType]::ParameterName, 'Filter by category (comma-separated: DeFi,NFT)')
+            [CompletionResult]::new('--tags', '--tags', [CompletionResultType]::ParameterName, 'Filter by tag (comma-separated: defi,amm)')
+            [CompletionResult]::new('--limit', '--limit', [CompletionResultType]::ParameterName, 'Results per page (1-100)')
+            [CompletionResult]::new('--offset', '--offset', [CompletionResultType]::ParameterName, 'Start at this row offset. Offset pagination only — cannot be combined with --cursor')
+            [CompletionResult]::new('--cursor', '--cursor', [CompletionResultType]::ParameterName, 'Resume from a continuation token returned by a previous run. Cursor pagination only — the token is opaque and must not be edited')
+            [CompletionResult]::new('--pagination', '--pagination', [CompletionResultType]::ParameterName, 'Pagination mode: cursor (stable, no skips or duplicates) or offset (relevance ordered). Defaults to cursor for --all, offset otherwise')
+            [CompletionResult]::new('--max-items', '--max-items', [CompletionResultType]::ParameterName, 'Maximum items to fetch with --all (default 1000)')
+            [CompletionResult]::new('--max-pages', '--max-pages', [CompletionResultType]::ParameterName, 'Maximum pages to fetch with --all (default 100)')
+            [CompletionResult]::new('--api-url', '--api-url', [CompletionResultType]::ParameterName, 'Registry API URL')
+            [CompletionResult]::new('--network', '--network', [CompletionResultType]::ParameterName, 'Stellar network to use (mainnet | testnet | futurenet)')
+            [CompletionResult]::new('--timeout', '--timeout', [CompletionResultType]::ParameterName, 'Global timeout for network/API operations (seconds)')
+            [CompletionResult]::new('--profile', '--profile', [CompletionResultType]::ParameterName, 'Registry configuration profile to use')
+            [CompletionResult]::new('--verified-only', '--verified-only', [CompletionResultType]::ParameterName, 'Only show verified contracts')
+            [CompletionResult]::new('--all', '--all', [CompletionResultType]::ParameterName, 'Fetch every page, up to --max-items / --max-pages')
+            [CompletionResult]::new('--json', '--json', [CompletionResultType]::ParameterName, 'Output as JSON, including pagination metadata')
             [CompletionResult]::new('--no-cache', '--no-cache', [CompletionResultType]::ParameterName, 'Skip local response cache and always fetch fresh data')
             [CompletionResult]::new('-v', '-v', [CompletionResultType]::ParameterName, 'Enable verbose output. Repeat to increase verbosity (-v, -vv, -vvv)')
             [CompletionResult]::new('--verbose', '--verbose', [CompletionResultType]::ParameterName, 'Enable verbose output. Repeat to increase verbosity (-v, -vv, -vvv)')
@@ -2483,6 +2519,78 @@ Register-ArgumentCompleter -Native -CommandName 'soroban-registry' -ScriptBlock 
             [CompletionResult]::new('--help', '--help', [CompletionResultType]::ParameterName, 'Print help (see more with ''--help'')')
             break
         }
+        'soroban-registry;contract;interfaces' {
+            [CompletionResult]::new('--wasm', '--wasm', [CompletionResultType]::ParameterName, 'Path to a local compiled WASM contract to inspect')
+            [CompletionResult]::new('--api-url', '--api-url', [CompletionResultType]::ParameterName, 'Registry API URL')
+            [CompletionResult]::new('--network', '--network', [CompletionResultType]::ParameterName, 'Stellar network to use (mainnet | testnet | futurenet)')
+            [CompletionResult]::new('--timeout', '--timeout', [CompletionResultType]::ParameterName, 'Global timeout for network/API operations (seconds)')
+            [CompletionResult]::new('--profile', '--profile', [CompletionResultType]::ParameterName, 'Registry configuration profile to use')
+            [CompletionResult]::new('--json', '--json', [CompletionResultType]::ParameterName, 'Output results as machine-readable JSON')
+            [CompletionResult]::new('--no-cache', '--no-cache', [CompletionResultType]::ParameterName, 'Skip local response cache and always fetch fresh data')
+            [CompletionResult]::new('-v', '-v', [CompletionResultType]::ParameterName, 'Enable verbose output. Repeat to increase verbosity (-v, -vv, -vvv)')
+            [CompletionResult]::new('--verbose', '--verbose', [CompletionResultType]::ParameterName, 'Enable verbose output. Repeat to increase verbosity (-v, -vv, -vvv)')
+            [CompletionResult]::new('--check-updates', '--check-updates', [CompletionResultType]::ParameterName, 'Check for CLI updates before running the command')
+            [CompletionResult]::new('--describe', '--describe', [CompletionResultType]::ParameterName, 'Print machine-readable JSON command schema description (#1145)')
+            [CompletionResult]::new('-h', '-h', [CompletionResultType]::ParameterName, 'Print help (see more with ''--help'')')
+            [CompletionResult]::new('--help', '--help', [CompletionResultType]::ParameterName, 'Print help (see more with ''--help'')')
+            break
+        }
+        'soroban-registry;contract;provenance' {
+            [CompletionResult]::new('--manifest', '--manifest', [CompletionResultType]::ParameterName, 'Path to a local provenance manifest (JSON) to display')
+            [CompletionResult]::new('--api-url', '--api-url', [CompletionResultType]::ParameterName, 'Registry API URL')
+            [CompletionResult]::new('--network', '--network', [CompletionResultType]::ParameterName, 'Stellar network to use (mainnet | testnet | futurenet)')
+            [CompletionResult]::new('--timeout', '--timeout', [CompletionResultType]::ParameterName, 'Global timeout for network/API operations (seconds)')
+            [CompletionResult]::new('--profile', '--profile', [CompletionResultType]::ParameterName, 'Registry configuration profile to use')
+            [CompletionResult]::new('--json', '--json', [CompletionResultType]::ParameterName, 'Output results as machine-readable JSON')
+            [CompletionResult]::new('--no-cache', '--no-cache', [CompletionResultType]::ParameterName, 'Skip local response cache and always fetch fresh data')
+            [CompletionResult]::new('-v', '-v', [CompletionResultType]::ParameterName, 'Enable verbose output. Repeat to increase verbosity (-v, -vv, -vvv)')
+            [CompletionResult]::new('--verbose', '--verbose', [CompletionResultType]::ParameterName, 'Enable verbose output. Repeat to increase verbosity (-v, -vv, -vvv)')
+            [CompletionResult]::new('--check-updates', '--check-updates', [CompletionResultType]::ParameterName, 'Check for CLI updates before running the command')
+            [CompletionResult]::new('--describe', '--describe', [CompletionResultType]::ParameterName, 'Print machine-readable JSON command schema description (#1145)')
+            [CompletionResult]::new('-h', '-h', [CompletionResultType]::ParameterName, 'Print help (see more with ''--help'')')
+            [CompletionResult]::new('--help', '--help', [CompletionResultType]::ParameterName, 'Print help (see more with ''--help'')')
+            break
+        }
+        'soroban-registry;contract;verify-build' {
+            [CompletionResult]::new('--manifest', '--manifest', [CompletionResultType]::ParameterName, 'Path to a local provenance manifest (JSON) describing the recorded build')
+            [CompletionResult]::new('--source-dir', '--source-dir', [CompletionResultType]::ParameterName, 'Directory containing the contract''s source to rebuild')
+            [CompletionResult]::new('--expected-hash', '--expected-hash', [CompletionResultType]::ParameterName, 'The registry-recorded WASM artifact hash to compare the rebuild against')
+            [CompletionResult]::new('--api-url', '--api-url', [CompletionResultType]::ParameterName, 'Registry API URL')
+            [CompletionResult]::new('--network', '--network', [CompletionResultType]::ParameterName, 'Stellar network to use (mainnet | testnet | futurenet)')
+            [CompletionResult]::new('--timeout', '--timeout', [CompletionResultType]::ParameterName, 'Global timeout for network/API operations (seconds)')
+            [CompletionResult]::new('--profile', '--profile', [CompletionResultType]::ParameterName, 'Registry configuration profile to use')
+            [CompletionResult]::new('--allow-toolchain-mismatch', '--allow-toolchain-mismatch', [CompletionResultType]::ParameterName, 'Proceed with the rebuild even if the locally installed rustc version doesn''t match the version recorded in provenance')
+            [CompletionResult]::new('--json', '--json', [CompletionResultType]::ParameterName, 'Output results as machine-readable JSON')
+            [CompletionResult]::new('--no-cache', '--no-cache', [CompletionResultType]::ParameterName, 'Skip local response cache and always fetch fresh data')
+            [CompletionResult]::new('-v', '-v', [CompletionResultType]::ParameterName, 'Enable verbose output. Repeat to increase verbosity (-v, -vv, -vvv)')
+            [CompletionResult]::new('--verbose', '--verbose', [CompletionResultType]::ParameterName, 'Enable verbose output. Repeat to increase verbosity (-v, -vv, -vvv)')
+            [CompletionResult]::new('--check-updates', '--check-updates', [CompletionResultType]::ParameterName, 'Check for CLI updates before running the command')
+            [CompletionResult]::new('--describe', '--describe', [CompletionResultType]::ParameterName, 'Print machine-readable JSON command schema description (#1145)')
+            [CompletionResult]::new('-h', '-h', [CompletionResultType]::ParameterName, 'Print help (see more with ''--help'')')
+            [CompletionResult]::new('--help', '--help', [CompletionResultType]::ParameterName, 'Print help (see more with ''--help'')')
+            break
+        }
+        'soroban-registry;contract;compatibility' {
+            [CompletionResult]::new('--from', '--from', [CompletionResultType]::ParameterName, 'Path to the earlier/baseline compiled WASM contract')
+            [CompletionResult]::new('--to', '--to', [CompletionResultType]::ParameterName, 'Path to the newer/candidate compiled WASM contract')
+            [CompletionResult]::new('--from-network-passphrase', '--from-network-passphrase', [CompletionResultType]::ParameterName, 'Network passphrase associated with the `--from` artifact')
+            [CompletionResult]::new('--to-network-passphrase', '--to-network-passphrase', [CompletionResultType]::ParameterName, 'Network passphrase associated with the `--to` artifact')
+            [CompletionResult]::new('--fail-on', '--fail-on', [CompletionResultType]::ParameterName, 'Minimum severity that triggers a non-zero exit under --strict: breaking | potential | unknown')
+            [CompletionResult]::new('--api-url', '--api-url', [CompletionResultType]::ParameterName, 'Registry API URL')
+            [CompletionResult]::new('--network', '--network', [CompletionResultType]::ParameterName, 'Stellar network to use (mainnet | testnet | futurenet)')
+            [CompletionResult]::new('--timeout', '--timeout', [CompletionResultType]::ParameterName, 'Global timeout for network/API operations (seconds)')
+            [CompletionResult]::new('--profile', '--profile', [CompletionResultType]::ParameterName, 'Registry configuration profile to use')
+            [CompletionResult]::new('--strict', '--strict', [CompletionResultType]::ParameterName, 'Exit non-zero when changes at or above the --fail-on threshold are found (default threshold: potentially_breaking)')
+            [CompletionResult]::new('--json', '--json', [CompletionResultType]::ParameterName, 'Output results as machine-readable JSON')
+            [CompletionResult]::new('--no-cache', '--no-cache', [CompletionResultType]::ParameterName, 'Skip local response cache and always fetch fresh data')
+            [CompletionResult]::new('-v', '-v', [CompletionResultType]::ParameterName, 'Enable verbose output. Repeat to increase verbosity (-v, -vv, -vvv)')
+            [CompletionResult]::new('--verbose', '--verbose', [CompletionResultType]::ParameterName, 'Enable verbose output. Repeat to increase verbosity (-v, -vv, -vvv)')
+            [CompletionResult]::new('--check-updates', '--check-updates', [CompletionResultType]::ParameterName, 'Check for CLI updates before running the command')
+            [CompletionResult]::new('--describe', '--describe', [CompletionResultType]::ParameterName, 'Print machine-readable JSON command schema description (#1145)')
+            [CompletionResult]::new('-h', '-h', [CompletionResultType]::ParameterName, 'Print help (see more with ''--help'')')
+            [CompletionResult]::new('--help', '--help', [CompletionResultType]::ParameterName, 'Print help (see more with ''--help'')')
+            break
+        }
         'soroban-registry;contract;details' {
             [CompletionResult]::new('--network', '--network', [CompletionResultType]::ParameterName, 'Stellar network (mainnet | testnet | futurenet)')
             [CompletionResult]::new('--api-url', '--api-url', [CompletionResultType]::ParameterName, 'Registry API URL')
@@ -2589,6 +2697,123 @@ Register-ArgumentCompleter -Native -CommandName 'soroban-registry' -ScriptBlock 
             [CompletionResult]::new('--describe', '--describe', [CompletionResultType]::ParameterName, 'Print machine-readable JSON command schema description (#1145)')
             [CompletionResult]::new('-h', '-h', [CompletionResultType]::ParameterName, 'Print help (see more with ''--help'')')
             [CompletionResult]::new('--help', '--help', [CompletionResultType]::ParameterName, 'Print help (see more with ''--help'')')
+            break
+        }
+        'soroban-registry;contract;dependencies' {
+            [CompletionResult]::new('--network', '--network', [CompletionResultType]::ParameterName, 'Stellar network (mainnet | testnet | futurenet)')
+            [CompletionResult]::new('--depth', '--depth', [CompletionResultType]::ParameterName, 'Maximum traversal depth (capped server-side)')
+            [CompletionResult]::new('--api-url', '--api-url', [CompletionResultType]::ParameterName, 'Registry API URL')
+            [CompletionResult]::new('--timeout', '--timeout', [CompletionResultType]::ParameterName, 'Global timeout for network/API operations (seconds)')
+            [CompletionResult]::new('--profile', '--profile', [CompletionResultType]::ParameterName, 'Registry configuration profile to use')
+            [CompletionResult]::new('--transitive', '--transitive', [CompletionResultType]::ParameterName, 'Walk the whole dependency closure, not just direct edges')
+            [CompletionResult]::new('--include-telemetry', '--include-telemetry', [CompletionResultType]::ParameterName, 'Include on-chain call edges alongside declared ones')
+            [CompletionResult]::new('--json', '--json', [CompletionResultType]::ParameterName, 'Print the registry response as JSON')
+            [CompletionResult]::new('--no-cache', '--no-cache', [CompletionResultType]::ParameterName, 'Skip local response cache and always fetch fresh data')
+            [CompletionResult]::new('-v', '-v', [CompletionResultType]::ParameterName, 'Enable verbose output. Repeat to increase verbosity (-v, -vv, -vvv)')
+            [CompletionResult]::new('--verbose', '--verbose', [CompletionResultType]::ParameterName, 'Enable verbose output. Repeat to increase verbosity (-v, -vv, -vvv)')
+            [CompletionResult]::new('--check-updates', '--check-updates', [CompletionResultType]::ParameterName, 'Check for CLI updates before running the command')
+            [CompletionResult]::new('--describe', '--describe', [CompletionResultType]::ParameterName, 'Print machine-readable JSON command schema description (#1145)')
+            [CompletionResult]::new('-h', '-h', [CompletionResultType]::ParameterName, 'Print help (see more with ''--help'')')
+            [CompletionResult]::new('--help', '--help', [CompletionResultType]::ParameterName, 'Print help (see more with ''--help'')')
+            break
+        }
+        'soroban-registry;contract;dependents' {
+            [CompletionResult]::new('--network', '--network', [CompletionResultType]::ParameterName, 'Stellar network (mainnet | testnet | futurenet)')
+            [CompletionResult]::new('--depth', '--depth', [CompletionResultType]::ParameterName, 'Maximum traversal depth (capped server-side)')
+            [CompletionResult]::new('--api-url', '--api-url', [CompletionResultType]::ParameterName, 'Registry API URL')
+            [CompletionResult]::new('--timeout', '--timeout', [CompletionResultType]::ParameterName, 'Global timeout for network/API operations (seconds)')
+            [CompletionResult]::new('--profile', '--profile', [CompletionResultType]::ParameterName, 'Registry configuration profile to use')
+            [CompletionResult]::new('--transitive', '--transitive', [CompletionResultType]::ParameterName, 'Walk the whole dependent closure, not just direct edges')
+            [CompletionResult]::new('--include-telemetry', '--include-telemetry', [CompletionResultType]::ParameterName, 'Include on-chain call edges alongside declared ones')
+            [CompletionResult]::new('--json', '--json', [CompletionResultType]::ParameterName, 'Print the registry response as JSON')
+            [CompletionResult]::new('--no-cache', '--no-cache', [CompletionResultType]::ParameterName, 'Skip local response cache and always fetch fresh data')
+            [CompletionResult]::new('-v', '-v', [CompletionResultType]::ParameterName, 'Enable verbose output. Repeat to increase verbosity (-v, -vv, -vvv)')
+            [CompletionResult]::new('--verbose', '--verbose', [CompletionResultType]::ParameterName, 'Enable verbose output. Repeat to increase verbosity (-v, -vv, -vvv)')
+            [CompletionResult]::new('--check-updates', '--check-updates', [CompletionResultType]::ParameterName, 'Check for CLI updates before running the command')
+            [CompletionResult]::new('--describe', '--describe', [CompletionResultType]::ParameterName, 'Print machine-readable JSON command schema description (#1145)')
+            [CompletionResult]::new('-h', '-h', [CompletionResultType]::ParameterName, 'Print help (see more with ''--help'')')
+            [CompletionResult]::new('--help', '--help', [CompletionResultType]::ParameterName, 'Print help (see more with ''--help'')')
+            break
+        }
+        'soroban-registry;contract;dependency-risk' {
+            [CompletionResult]::new('--network', '--network', [CompletionResultType]::ParameterName, 'Stellar network (mainnet | testnet | futurenet)')
+            [CompletionResult]::new('--depth', '--depth', [CompletionResultType]::ParameterName, 'Maximum traversal depth (capped server-side)')
+            [CompletionResult]::new('--fail-on', '--fail-on', [CompletionResultType]::ParameterName, 'Exit 1 when overall risk meets or exceeds this level')
+            [CompletionResult]::new('--api-url', '--api-url', [CompletionResultType]::ParameterName, 'Registry API URL')
+            [CompletionResult]::new('--timeout', '--timeout', [CompletionResultType]::ParameterName, 'Global timeout for network/API operations (seconds)')
+            [CompletionResult]::new('--profile', '--profile', [CompletionResultType]::ParameterName, 'Registry configuration profile to use')
+            [CompletionResult]::new('--json', '--json', [CompletionResultType]::ParameterName, 'Print the registry response as JSON')
+            [CompletionResult]::new('--no-cache', '--no-cache', [CompletionResultType]::ParameterName, 'Skip local response cache and always fetch fresh data')
+            [CompletionResult]::new('-v', '-v', [CompletionResultType]::ParameterName, 'Enable verbose output. Repeat to increase verbosity (-v, -vv, -vvv)')
+            [CompletionResult]::new('--verbose', '--verbose', [CompletionResultType]::ParameterName, 'Enable verbose output. Repeat to increase verbosity (-v, -vv, -vvv)')
+            [CompletionResult]::new('--check-updates', '--check-updates', [CompletionResultType]::ParameterName, 'Check for CLI updates before running the command')
+            [CompletionResult]::new('--describe', '--describe', [CompletionResultType]::ParameterName, 'Print machine-readable JSON command schema description (#1145)')
+            [CompletionResult]::new('-h', '-h', [CompletionResultType]::ParameterName, 'Print help (see more with ''--help'')')
+            [CompletionResult]::new('--help', '--help', [CompletionResultType]::ParameterName, 'Print help (see more with ''--help'')')
+            break
+        }
+        'soroban-registry;contract;category' {
+            [CompletionResult]::new('--api-url', '--api-url', [CompletionResultType]::ParameterName, 'Registry API URL')
+            [CompletionResult]::new('--network', '--network', [CompletionResultType]::ParameterName, 'Stellar network to use (mainnet | testnet | futurenet)')
+            [CompletionResult]::new('--timeout', '--timeout', [CompletionResultType]::ParameterName, 'Global timeout for network/API operations (seconds)')
+            [CompletionResult]::new('--profile', '--profile', [CompletionResultType]::ParameterName, 'Registry configuration profile to use')
+            [CompletionResult]::new('--no-cache', '--no-cache', [CompletionResultType]::ParameterName, 'Skip local response cache and always fetch fresh data')
+            [CompletionResult]::new('-v', '-v', [CompletionResultType]::ParameterName, 'Enable verbose output. Repeat to increase verbosity (-v, -vv, -vvv)')
+            [CompletionResult]::new('--verbose', '--verbose', [CompletionResultType]::ParameterName, 'Enable verbose output. Repeat to increase verbosity (-v, -vv, -vvv)')
+            [CompletionResult]::new('--check-updates', '--check-updates', [CompletionResultType]::ParameterName, 'Check for CLI updates before running the command')
+            [CompletionResult]::new('--describe', '--describe', [CompletionResultType]::ParameterName, 'Print machine-readable JSON command schema description (#1145)')
+            [CompletionResult]::new('-h', '-h', [CompletionResultType]::ParameterName, 'Print help (see more with ''--help'')')
+            [CompletionResult]::new('--help', '--help', [CompletionResultType]::ParameterName, 'Print help (see more with ''--help'')')
+            [CompletionResult]::new('list', 'list', [CompletionResultType]::ParameterValue, 'List all categories with descriptions and contract counts')
+            [CompletionResult]::new('stats', 'stats', [CompletionResultType]::ParameterValue, 'Show detailed per-category statistics (counts, recent, trending)')
+            [CompletionResult]::new('help', 'help', [CompletionResultType]::ParameterValue, 'Print this message or the help of the given subcommand(s)')
+            break
+        }
+        'soroban-registry;contract;category;list' {
+            [CompletionResult]::new('--network', '--network', [CompletionResultType]::ParameterName, 'Scope contract counts to a single network (mainnet | testnet | futurenet)')
+            [CompletionResult]::new('--format', '--format', [CompletionResultType]::ParameterName, 'Output format for stdout: table, json, csv, yaml')
+            [CompletionResult]::new('--export', '--export', [CompletionResultType]::ParameterName, 'Also write the category list to a file: csv or json')
+            [CompletionResult]::new('--api-url', '--api-url', [CompletionResultType]::ParameterName, 'Registry API URL')
+            [CompletionResult]::new('--timeout', '--timeout', [CompletionResultType]::ParameterName, 'Global timeout for network/API operations (seconds)')
+            [CompletionResult]::new('--profile', '--profile', [CompletionResultType]::ParameterName, 'Registry configuration profile to use')
+            [CompletionResult]::new('--no-cache', '--no-cache', [CompletionResultType]::ParameterName, 'Skip local response cache and always fetch fresh data')
+            [CompletionResult]::new('-v', '-v', [CompletionResultType]::ParameterName, 'Enable verbose output. Repeat to increase verbosity (-v, -vv, -vvv)')
+            [CompletionResult]::new('--verbose', '--verbose', [CompletionResultType]::ParameterName, 'Enable verbose output. Repeat to increase verbosity (-v, -vv, -vvv)')
+            [CompletionResult]::new('--check-updates', '--check-updates', [CompletionResultType]::ParameterName, 'Check for CLI updates before running the command')
+            [CompletionResult]::new('--describe', '--describe', [CompletionResultType]::ParameterName, 'Print machine-readable JSON command schema description (#1145)')
+            [CompletionResult]::new('-h', '-h', [CompletionResultType]::ParameterName, 'Print help (see more with ''--help'')')
+            [CompletionResult]::new('--help', '--help', [CompletionResultType]::ParameterName, 'Print help (see more with ''--help'')')
+            break
+        }
+        'soroban-registry;contract;category;stats' {
+            [CompletionResult]::new('--network', '--network', [CompletionResultType]::ParameterName, 'Scope statistics to a single network (mainnet | testnet | futurenet)')
+            [CompletionResult]::new('--format', '--format', [CompletionResultType]::ParameterName, 'Output format for stdout: table, json, csv, yaml')
+            [CompletionResult]::new('--export', '--export', [CompletionResultType]::ParameterName, 'Also write the statistics to a file: csv or json')
+            [CompletionResult]::new('--api-url', '--api-url', [CompletionResultType]::ParameterName, 'Registry API URL')
+            [CompletionResult]::new('--timeout', '--timeout', [CompletionResultType]::ParameterName, 'Global timeout for network/API operations (seconds)')
+            [CompletionResult]::new('--profile', '--profile', [CompletionResultType]::ParameterName, 'Registry configuration profile to use')
+            [CompletionResult]::new('--no-cache', '--no-cache', [CompletionResultType]::ParameterName, 'Skip local response cache and always fetch fresh data')
+            [CompletionResult]::new('-v', '-v', [CompletionResultType]::ParameterName, 'Enable verbose output. Repeat to increase verbosity (-v, -vv, -vvv)')
+            [CompletionResult]::new('--verbose', '--verbose', [CompletionResultType]::ParameterName, 'Enable verbose output. Repeat to increase verbosity (-v, -vv, -vvv)')
+            [CompletionResult]::new('--check-updates', '--check-updates', [CompletionResultType]::ParameterName, 'Check for CLI updates before running the command')
+            [CompletionResult]::new('--describe', '--describe', [CompletionResultType]::ParameterName, 'Print machine-readable JSON command schema description (#1145)')
+            [CompletionResult]::new('-h', '-h', [CompletionResultType]::ParameterName, 'Print help (see more with ''--help'')')
+            [CompletionResult]::new('--help', '--help', [CompletionResultType]::ParameterName, 'Print help (see more with ''--help'')')
+            break
+        }
+        'soroban-registry;contract;category;help' {
+            [CompletionResult]::new('list', 'list', [CompletionResultType]::ParameterValue, 'List all categories with descriptions and contract counts')
+            [CompletionResult]::new('stats', 'stats', [CompletionResultType]::ParameterValue, 'Show detailed per-category statistics (counts, recent, trending)')
+            [CompletionResult]::new('help', 'help', [CompletionResultType]::ParameterValue, 'Print this message or the help of the given subcommand(s)')
+            break
+        }
+        'soroban-registry;contract;category;help;list' {
+            break
+        }
+        'soroban-registry;contract;category;help;stats' {
+            break
+        }
+        'soroban-registry;contract;category;help;help' {
             break
         }
         'soroban-registry;contract;update' {
@@ -2700,29 +2925,172 @@ Register-ArgumentCompleter -Native -CommandName 'soroban-registry' -ScriptBlock 
             [CompletionResult]::new('--help', '--help', [CompletionResultType]::ParameterName, 'Print help (see more with ''--help'')')
             break
         }
+        'soroban-registry;contract;notification' {
+            [CompletionResult]::new('--api-url', '--api-url', [CompletionResultType]::ParameterName, 'Registry API URL')
+            [CompletionResult]::new('--network', '--network', [CompletionResultType]::ParameterName, 'Stellar network to use (mainnet | testnet | futurenet)')
+            [CompletionResult]::new('--timeout', '--timeout', [CompletionResultType]::ParameterName, 'Global timeout for network/API operations (seconds)')
+            [CompletionResult]::new('--profile', '--profile', [CompletionResultType]::ParameterName, 'Registry configuration profile to use')
+            [CompletionResult]::new('--no-cache', '--no-cache', [CompletionResultType]::ParameterName, 'Skip local response cache and always fetch fresh data')
+            [CompletionResult]::new('-v', '-v', [CompletionResultType]::ParameterName, 'Enable verbose output. Repeat to increase verbosity (-v, -vv, -vvv)')
+            [CompletionResult]::new('--verbose', '--verbose', [CompletionResultType]::ParameterName, 'Enable verbose output. Repeat to increase verbosity (-v, -vv, -vvv)')
+            [CompletionResult]::new('--check-updates', '--check-updates', [CompletionResultType]::ParameterName, 'Check for CLI updates before running the command')
+            [CompletionResult]::new('--describe', '--describe', [CompletionResultType]::ParameterName, 'Print machine-readable JSON command schema description (#1145)')
+            [CompletionResult]::new('-h', '-h', [CompletionResultType]::ParameterName, 'Print help (see more with ''--help'')')
+            [CompletionResult]::new('--help', '--help', [CompletionResultType]::ParameterName, 'Print help (see more with ''--help'')')
+            [CompletionResult]::new('subscribe', 'subscribe', [CompletionResultType]::ParameterValue, 'Subscribe to alerts for a contract address')
+            [CompletionResult]::new('unsubscribe', 'unsubscribe', [CompletionResultType]::ParameterValue, 'Unsubscribe from alerts for a contract address')
+            [CompletionResult]::new('list', 'list', [CompletionResultType]::ParameterValue, 'List active notification rules')
+            [CompletionResult]::new('configure', 'configure', [CompletionResultType]::ParameterValue, 'Update an existing notification rule')
+            [CompletionResult]::new('test', 'test', [CompletionResultType]::ParameterValue, 'Send a test alert for a subscribed contract')
+            [CompletionResult]::new('help', 'help', [CompletionResultType]::ParameterValue, 'Print this message or the help of the given subcommand(s)')
+            break
+        }
+        'soroban-registry;contract;notification;subscribe' {
+            [CompletionResult]::new('--alerts', '--alerts', [CompletionResultType]::ParameterName, 'Alert types (comma-separated): updates, audits, security, deployments')
+            [CompletionResult]::new('--channels', '--channels', [CompletionResultType]::ParameterName, 'Notification channels (comma-separated): email, webhook, cli')
+            [CompletionResult]::new('--frequency', '--frequency', [CompletionResultType]::ParameterName, 'Notification frequency: instant, daily, weekly')
+            [CompletionResult]::new('--networks', '--networks', [CompletionResultType]::ParameterName, 'Filter by networks (comma-separated, e.g. mainnet,testnet)')
+            [CompletionResult]::new('--categories', '--categories', [CompletionResultType]::ParameterName, 'Filter by categories (comma-separated, e.g. defi,token)')
+            [CompletionResult]::new('--target', '--target', [CompletionResultType]::ParameterName, 'Email address or webhook URL for the chosen channel')
+            [CompletionResult]::new('--api-url', '--api-url', [CompletionResultType]::ParameterName, 'Registry API URL')
+            [CompletionResult]::new('--network', '--network', [CompletionResultType]::ParameterName, 'Stellar network to use (mainnet | testnet | futurenet)')
+            [CompletionResult]::new('--timeout', '--timeout', [CompletionResultType]::ParameterName, 'Global timeout for network/API operations (seconds)')
+            [CompletionResult]::new('--profile', '--profile', [CompletionResultType]::ParameterName, 'Registry configuration profile to use')
+            [CompletionResult]::new('--no-cache', '--no-cache', [CompletionResultType]::ParameterName, 'Skip local response cache and always fetch fresh data')
+            [CompletionResult]::new('-v', '-v', [CompletionResultType]::ParameterName, 'Enable verbose output. Repeat to increase verbosity (-v, -vv, -vvv)')
+            [CompletionResult]::new('--verbose', '--verbose', [CompletionResultType]::ParameterName, 'Enable verbose output. Repeat to increase verbosity (-v, -vv, -vvv)')
+            [CompletionResult]::new('--check-updates', '--check-updates', [CompletionResultType]::ParameterName, 'Check for CLI updates before running the command')
+            [CompletionResult]::new('--describe', '--describe', [CompletionResultType]::ParameterName, 'Print machine-readable JSON command schema description (#1145)')
+            [CompletionResult]::new('-h', '-h', [CompletionResultType]::ParameterName, 'Print help (see more with ''--help'')')
+            [CompletionResult]::new('--help', '--help', [CompletionResultType]::ParameterName, 'Print help (see more with ''--help'')')
+            break
+        }
+        'soroban-registry;contract;notification;unsubscribe' {
+            [CompletionResult]::new('--api-url', '--api-url', [CompletionResultType]::ParameterName, 'Registry API URL')
+            [CompletionResult]::new('--network', '--network', [CompletionResultType]::ParameterName, 'Stellar network to use (mainnet | testnet | futurenet)')
+            [CompletionResult]::new('--timeout', '--timeout', [CompletionResultType]::ParameterName, 'Global timeout for network/API operations (seconds)')
+            [CompletionResult]::new('--profile', '--profile', [CompletionResultType]::ParameterName, 'Registry configuration profile to use')
+            [CompletionResult]::new('--no-cache', '--no-cache', [CompletionResultType]::ParameterName, 'Skip local response cache and always fetch fresh data')
+            [CompletionResult]::new('-v', '-v', [CompletionResultType]::ParameterName, 'Enable verbose output. Repeat to increase verbosity (-v, -vv, -vvv)')
+            [CompletionResult]::new('--verbose', '--verbose', [CompletionResultType]::ParameterName, 'Enable verbose output. Repeat to increase verbosity (-v, -vv, -vvv)')
+            [CompletionResult]::new('--check-updates', '--check-updates', [CompletionResultType]::ParameterName, 'Check for CLI updates before running the command')
+            [CompletionResult]::new('--describe', '--describe', [CompletionResultType]::ParameterName, 'Print machine-readable JSON command schema description (#1145)')
+            [CompletionResult]::new('-h', '-h', [CompletionResultType]::ParameterName, 'Print help (see more with ''--help'')')
+            [CompletionResult]::new('--help', '--help', [CompletionResultType]::ParameterName, 'Print help (see more with ''--help'')')
+            break
+        }
+        'soroban-registry;contract;notification;list' {
+            [CompletionResult]::new('--api-url', '--api-url', [CompletionResultType]::ParameterName, 'Registry API URL')
+            [CompletionResult]::new('--network', '--network', [CompletionResultType]::ParameterName, 'Stellar network to use (mainnet | testnet | futurenet)')
+            [CompletionResult]::new('--timeout', '--timeout', [CompletionResultType]::ParameterName, 'Global timeout for network/API operations (seconds)')
+            [CompletionResult]::new('--profile', '--profile', [CompletionResultType]::ParameterName, 'Registry configuration profile to use')
+            [CompletionResult]::new('--json', '--json', [CompletionResultType]::ParameterName, 'Output as JSON')
+            [CompletionResult]::new('--no-cache', '--no-cache', [CompletionResultType]::ParameterName, 'Skip local response cache and always fetch fresh data')
+            [CompletionResult]::new('-v', '-v', [CompletionResultType]::ParameterName, 'Enable verbose output. Repeat to increase verbosity (-v, -vv, -vvv)')
+            [CompletionResult]::new('--verbose', '--verbose', [CompletionResultType]::ParameterName, 'Enable verbose output. Repeat to increase verbosity (-v, -vv, -vvv)')
+            [CompletionResult]::new('--check-updates', '--check-updates', [CompletionResultType]::ParameterName, 'Check for CLI updates before running the command')
+            [CompletionResult]::new('--describe', '--describe', [CompletionResultType]::ParameterName, 'Print machine-readable JSON command schema description (#1145)')
+            [CompletionResult]::new('-h', '-h', [CompletionResultType]::ParameterName, 'Print help (see more with ''--help'')')
+            [CompletionResult]::new('--help', '--help', [CompletionResultType]::ParameterName, 'Print help (see more with ''--help'')')
+            break
+        }
+        'soroban-registry;contract;notification;configure' {
+            [CompletionResult]::new('--alerts', '--alerts', [CompletionResultType]::ParameterName, 'New alert types (comma-separated)')
+            [CompletionResult]::new('--channels', '--channels', [CompletionResultType]::ParameterName, 'New channels (comma-separated)')
+            [CompletionResult]::new('--frequency', '--frequency', [CompletionResultType]::ParameterName, 'New frequency: instant, daily, weekly')
+            [CompletionResult]::new('--networks', '--networks', [CompletionResultType]::ParameterName, 'New network filter (comma-separated)')
+            [CompletionResult]::new('--categories', '--categories', [CompletionResultType]::ParameterName, 'New category filter (comma-separated)')
+            [CompletionResult]::new('--target', '--target', [CompletionResultType]::ParameterName, 'New email address or webhook URL')
+            [CompletionResult]::new('--api-url', '--api-url', [CompletionResultType]::ParameterName, 'Registry API URL')
+            [CompletionResult]::new('--network', '--network', [CompletionResultType]::ParameterName, 'Stellar network to use (mainnet | testnet | futurenet)')
+            [CompletionResult]::new('--timeout', '--timeout', [CompletionResultType]::ParameterName, 'Global timeout for network/API operations (seconds)')
+            [CompletionResult]::new('--profile', '--profile', [CompletionResultType]::ParameterName, 'Registry configuration profile to use')
+            [CompletionResult]::new('--no-cache', '--no-cache', [CompletionResultType]::ParameterName, 'Skip local response cache and always fetch fresh data')
+            [CompletionResult]::new('-v', '-v', [CompletionResultType]::ParameterName, 'Enable verbose output. Repeat to increase verbosity (-v, -vv, -vvv)')
+            [CompletionResult]::new('--verbose', '--verbose', [CompletionResultType]::ParameterName, 'Enable verbose output. Repeat to increase verbosity (-v, -vv, -vvv)')
+            [CompletionResult]::new('--check-updates', '--check-updates', [CompletionResultType]::ParameterName, 'Check for CLI updates before running the command')
+            [CompletionResult]::new('--describe', '--describe', [CompletionResultType]::ParameterName, 'Print machine-readable JSON command schema description (#1145)')
+            [CompletionResult]::new('-h', '-h', [CompletionResultType]::ParameterName, 'Print help (see more with ''--help'')')
+            [CompletionResult]::new('--help', '--help', [CompletionResultType]::ParameterName, 'Print help (see more with ''--help'')')
+            break
+        }
+        'soroban-registry;contract;notification;test' {
+            [CompletionResult]::new('--api-url', '--api-url', [CompletionResultType]::ParameterName, 'Registry API URL')
+            [CompletionResult]::new('--network', '--network', [CompletionResultType]::ParameterName, 'Stellar network to use (mainnet | testnet | futurenet)')
+            [CompletionResult]::new('--timeout', '--timeout', [CompletionResultType]::ParameterName, 'Global timeout for network/API operations (seconds)')
+            [CompletionResult]::new('--profile', '--profile', [CompletionResultType]::ParameterName, 'Registry configuration profile to use')
+            [CompletionResult]::new('--no-cache', '--no-cache', [CompletionResultType]::ParameterName, 'Skip local response cache and always fetch fresh data')
+            [CompletionResult]::new('-v', '-v', [CompletionResultType]::ParameterName, 'Enable verbose output. Repeat to increase verbosity (-v, -vv, -vvv)')
+            [CompletionResult]::new('--verbose', '--verbose', [CompletionResultType]::ParameterName, 'Enable verbose output. Repeat to increase verbosity (-v, -vv, -vvv)')
+            [CompletionResult]::new('--check-updates', '--check-updates', [CompletionResultType]::ParameterName, 'Check for CLI updates before running the command')
+            [CompletionResult]::new('--describe', '--describe', [CompletionResultType]::ParameterName, 'Print machine-readable JSON command schema description (#1145)')
+            [CompletionResult]::new('-h', '-h', [CompletionResultType]::ParameterName, 'Print help (see more with ''--help'')')
+            [CompletionResult]::new('--help', '--help', [CompletionResultType]::ParameterName, 'Print help (see more with ''--help'')')
+            break
+        }
+        'soroban-registry;contract;notification;help' {
+            [CompletionResult]::new('subscribe', 'subscribe', [CompletionResultType]::ParameterValue, 'Subscribe to alerts for a contract address')
+            [CompletionResult]::new('unsubscribe', 'unsubscribe', [CompletionResultType]::ParameterValue, 'Unsubscribe from alerts for a contract address')
+            [CompletionResult]::new('list', 'list', [CompletionResultType]::ParameterValue, 'List active notification rules')
+            [CompletionResult]::new('configure', 'configure', [CompletionResultType]::ParameterValue, 'Update an existing notification rule')
+            [CompletionResult]::new('test', 'test', [CompletionResultType]::ParameterValue, 'Send a test alert for a subscribed contract')
+            [CompletionResult]::new('help', 'help', [CompletionResultType]::ParameterValue, 'Print this message or the help of the given subcommand(s)')
+            break
+        }
+        'soroban-registry;contract;notification;help;subscribe' {
+            break
+        }
+        'soroban-registry;contract;notification;help;unsubscribe' {
+            break
+        }
+        'soroban-registry;contract;notification;help;list' {
+            break
+        }
+        'soroban-registry;contract;notification;help;configure' {
+            break
+        }
+        'soroban-registry;contract;notification;help;test' {
+            break
+        }
+        'soroban-registry;contract;notification;help;help' {
+            break
+        }
         'soroban-registry;contract;help' {
-            [CompletionResult]::new('publish', 'publish', [CompletionResultType]::ParameterValue, 'Publish a contract with optional policy-as-code admission evaluation (#1148)')
+            [CompletionResult]::new('list', 'list', [CompletionResultType]::ParameterValue, 'List registered contracts, a page at a time')
+            [CompletionResult]::new('search', 'search', [CompletionResultType]::ParameterValue, 'Search the registry, one page at a time or across every page')
             [CompletionResult]::new('snapshot', 'snapshot', [CompletionResultType]::ParameterValue, 'Export a signed, offline-verifiable snapshot of a contract (#1116)')
             [CompletionResult]::new('verify-snapshot', 'verify-snapshot', [CompletionResultType]::ParameterValue, 'Verify a previously exported contract snapshot (#1116)')
             [CompletionResult]::new('risk', 'risk', [CompletionResultType]::ParameterValue, 'Assess security and operational risks for a contract (#837)')
             [CompletionResult]::new('deploy', 'deploy', [CompletionResultType]::ParameterValue, 'Deploy and register a new contract in the registry')
             [CompletionResult]::new('register', 'register', [CompletionResultType]::ParameterValue, 'Register one or more contracts in the registry')
             [CompletionResult]::new('verify', 'verify', [CompletionResultType]::ParameterValue, 'Verify a contract — a local WASM artifact before publishing, or a deployed contract''s authenticity against the on-chain registry')
+            [CompletionResult]::new('interfaces', 'interfaces', [CompletionResultType]::ParameterValue, 'Derive and display a contract''s deterministic interface fingerprint (functions, types, events, errors) from a local compiled WASM artifact')
+            [CompletionResult]::new('provenance', 'provenance', [CompletionResultType]::ParameterValue, 'Display build-provenance metadata recorded for a contract, read from a local manifest file')
+            [CompletionResult]::new('verify-build', 'verify-build', [CompletionResultType]::ParameterValue, 'Attempt to independently reproduce a contract''s published WASM artifact from source, and compare its hash against the expected (registry-recorded) artifact hash')
+            [CompletionResult]::new('compatibility', 'compatibility', [CompletionResultType]::ParameterValue, 'Structurally compare two local compiled WASM artifacts and classify ABI changes as compatible, potentially breaking, breaking, or unknown')
             [CompletionResult]::new('details', 'details', [CompletionResultType]::ParameterValue, 'Display detailed information about a contract')
             [CompletionResult]::new('stats', 'stats', [CompletionResultType]::ParameterValue, 'Show contract registry statistics and analytics')
             [CompletionResult]::new('export', 'export', [CompletionResultType]::ParameterValue, 'Export contracts and related registry data for backup or migration')
             [CompletionResult]::new('highlight', 'highlight', [CompletionResultType]::ParameterValue, 'Manage featured (highlighted) contracts (#832)')
             [CompletionResult]::new('interaction', 'interaction', [CompletionResultType]::ParameterValue, 'View a contract''s interactions and call patterns (#835)')
             [CompletionResult]::new('dependency', 'dependency', [CompletionResultType]::ParameterValue, 'Analyze a contract''s dependencies and relationships (#836, #1008)')
+            [CompletionResult]::new('dependencies', 'dependencies', [CompletionResultType]::ParameterValue, 'List what a contract depends on (#1147)')
+            [CompletionResult]::new('dependents', 'dependents', [CompletionResultType]::ParameterValue, 'List what depends on a contract (#1147)')
+            [CompletionResult]::new('dependency-risk', 'dependency-risk', [CompletionResultType]::ParameterValue, 'Report direct and inherited risk across a contract''s dependencies (#1147)')
+            [CompletionResult]::new('category', 'category', [CompletionResultType]::ParameterValue, 'List and inspect contract categories')
             [CompletionResult]::new('update', 'update', [CompletionResultType]::ParameterValue, 'Update contract metadata after registration (#828)')
             [CompletionResult]::new('import', 'import', [CompletionResultType]::ParameterValue, 'Import contracts into the registry from an external file (#831)')
             [CompletionResult]::new('rollback', 'rollback', [CompletionResultType]::ParameterValue, 'Rollback a deprecated contract to active state (#1091)')
             [CompletionResult]::new('audit', 'audit', [CompletionResultType]::ParameterValue, 'Detect drift between local lockfile and registry state (#1060)')
             [CompletionResult]::new('deprecate', 'deprecate', [CompletionResultType]::ParameterValue, 'Deprecate a contract with publisher-signed authorization (#1091)')
+            [CompletionResult]::new('notification', 'notification', [CompletionResultType]::ParameterValue, 'Manage contract event notifications and alerts (#838)')
             [CompletionResult]::new('help', 'help', [CompletionResultType]::ParameterValue, 'Print this message or the help of the given subcommand(s)')
             break
         }
-        'soroban-registry;contract;help;publish' {
+        'soroban-registry;contract;help;list' {
+            break
+        }
+        'soroban-registry;contract;help;search' {
             break
         }
         'soroban-registry;contract;help;snapshot' {
@@ -2743,6 +3111,18 @@ Register-ArgumentCompleter -Native -CommandName 'soroban-registry' -ScriptBlock 
         'soroban-registry;contract;help;verify' {
             break
         }
+        'soroban-registry;contract;help;interfaces' {
+            break
+        }
+        'soroban-registry;contract;help;provenance' {
+            break
+        }
+        'soroban-registry;contract;help;verify-build' {
+            break
+        }
+        'soroban-registry;contract;help;compatibility' {
+            break
+        }
         'soroban-registry;contract;help;details' {
             break
         }
@@ -2761,6 +3141,26 @@ Register-ArgumentCompleter -Native -CommandName 'soroban-registry' -ScriptBlock 
         'soroban-registry;contract;help;dependency' {
             break
         }
+        'soroban-registry;contract;help;dependencies' {
+            break
+        }
+        'soroban-registry;contract;help;dependents' {
+            break
+        }
+        'soroban-registry;contract;help;dependency-risk' {
+            break
+        }
+        'soroban-registry;contract;help;category' {
+            [CompletionResult]::new('list', 'list', [CompletionResultType]::ParameterValue, 'List all categories with descriptions and contract counts')
+            [CompletionResult]::new('stats', 'stats', [CompletionResultType]::ParameterValue, 'Show detailed per-category statistics (counts, recent, trending)')
+            break
+        }
+        'soroban-registry;contract;help;category;list' {
+            break
+        }
+        'soroban-registry;contract;help;category;stats' {
+            break
+        }
         'soroban-registry;contract;help;update' {
             break
         }
@@ -2774,6 +3174,29 @@ Register-ArgumentCompleter -Native -CommandName 'soroban-registry' -ScriptBlock 
             break
         }
         'soroban-registry;contract;help;deprecate' {
+            break
+        }
+        'soroban-registry;contract;help;notification' {
+            [CompletionResult]::new('subscribe', 'subscribe', [CompletionResultType]::ParameterValue, 'Subscribe to alerts for a contract address')
+            [CompletionResult]::new('unsubscribe', 'unsubscribe', [CompletionResultType]::ParameterValue, 'Unsubscribe from alerts for a contract address')
+            [CompletionResult]::new('list', 'list', [CompletionResultType]::ParameterValue, 'List active notification rules')
+            [CompletionResult]::new('configure', 'configure', [CompletionResultType]::ParameterValue, 'Update an existing notification rule')
+            [CompletionResult]::new('test', 'test', [CompletionResultType]::ParameterValue, 'Send a test alert for a subscribed contract')
+            break
+        }
+        'soroban-registry;contract;help;notification;subscribe' {
+            break
+        }
+        'soroban-registry;contract;help;notification;unsubscribe' {
+            break
+        }
+        'soroban-registry;contract;help;notification;list' {
+            break
+        }
+        'soroban-registry;contract;help;notification;configure' {
+            break
+        }
+        'soroban-registry;contract;help;notification;test' {
             break
         }
         'soroban-registry;contract;help;help' {
@@ -4003,6 +4426,108 @@ Register-ArgumentCompleter -Native -CommandName 'soroban-registry' -ScriptBlock 
         'soroban-registry;env;help;help' {
             break
         }
+        'soroban-registry;snapshot' {
+            [CompletionResult]::new('--api-url', '--api-url', [CompletionResultType]::ParameterName, 'Registry API URL')
+            [CompletionResult]::new('--network', '--network', [CompletionResultType]::ParameterName, 'Stellar network to use (mainnet | testnet | futurenet)')
+            [CompletionResult]::new('--timeout', '--timeout', [CompletionResultType]::ParameterName, 'Global timeout for network/API operations (seconds)')
+            [CompletionResult]::new('--profile', '--profile', [CompletionResultType]::ParameterName, 'Registry configuration profile to use')
+            [CompletionResult]::new('--no-cache', '--no-cache', [CompletionResultType]::ParameterName, 'Skip local response cache and always fetch fresh data')
+            [CompletionResult]::new('-v', '-v', [CompletionResultType]::ParameterName, 'Enable verbose output. Repeat to increase verbosity (-v, -vv, -vvv)')
+            [CompletionResult]::new('--verbose', '--verbose', [CompletionResultType]::ParameterName, 'Enable verbose output. Repeat to increase verbosity (-v, -vv, -vvv)')
+            [CompletionResult]::new('--check-updates', '--check-updates', [CompletionResultType]::ParameterName, 'Check for CLI updates before running the command')
+            [CompletionResult]::new('--describe', '--describe', [CompletionResultType]::ParameterName, 'Print machine-readable JSON command schema description (#1145)')
+            [CompletionResult]::new('-h', '-h', [CompletionResultType]::ParameterName, 'Print help (see more with ''--help'')')
+            [CompletionResult]::new('--help', '--help', [CompletionResultType]::ParameterName, 'Print help (see more with ''--help'')')
+            [CompletionResult]::new('export', 'export', [CompletionResultType]::ParameterValue, 'Export a signed offline registry snapshot')
+            [CompletionResult]::new('sign', 'sign', [CompletionResultType]::ParameterValue, 'Sign a registry snapshot')
+            [CompletionResult]::new('verify', 'verify', [CompletionResultType]::ParameterValue, 'Verify a signed registry snapshot locally')
+            [CompletionResult]::new('inspect', 'inspect', [CompletionResultType]::ParameterValue, 'Inspect a registry snapshot metadata')
+            [CompletionResult]::new('help', 'help', [CompletionResultType]::ParameterValue, 'Print this message or the help of the given subcommand(s)')
+            break
+        }
+        'soroban-registry;snapshot;export' {
+            [CompletionResult]::new('-o', '-o', [CompletionResultType]::ParameterName, 'Output file path')
+            [CompletionResult]::new('--output', '--output', [CompletionResultType]::ParameterName, 'Output file path')
+            [CompletionResult]::new('--api-url', '--api-url', [CompletionResultType]::ParameterName, 'Registry API URL')
+            [CompletionResult]::new('--network', '--network', [CompletionResultType]::ParameterName, 'Stellar network to use (mainnet | testnet | futurenet)')
+            [CompletionResult]::new('--timeout', '--timeout', [CompletionResultType]::ParameterName, 'Global timeout for network/API operations (seconds)')
+            [CompletionResult]::new('--profile', '--profile', [CompletionResultType]::ParameterName, 'Registry configuration profile to use')
+            [CompletionResult]::new('--no-cache', '--no-cache', [CompletionResultType]::ParameterName, 'Skip local response cache and always fetch fresh data')
+            [CompletionResult]::new('-v', '-v', [CompletionResultType]::ParameterName, 'Enable verbose output. Repeat to increase verbosity (-v, -vv, -vvv)')
+            [CompletionResult]::new('--verbose', '--verbose', [CompletionResultType]::ParameterName, 'Enable verbose output. Repeat to increase verbosity (-v, -vv, -vvv)')
+            [CompletionResult]::new('--check-updates', '--check-updates', [CompletionResultType]::ParameterName, 'Check for CLI updates before running the command')
+            [CompletionResult]::new('--describe', '--describe', [CompletionResultType]::ParameterName, 'Print machine-readable JSON command schema description (#1145)')
+            [CompletionResult]::new('-h', '-h', [CompletionResultType]::ParameterName, 'Print help (see more with ''--help'')')
+            [CompletionResult]::new('--help', '--help', [CompletionResultType]::ParameterName, 'Print help (see more with ''--help'')')
+            break
+        }
+        'soroban-registry;snapshot;sign' {
+            [CompletionResult]::new('--key', '--key', [CompletionResultType]::ParameterName, 'Path to the signing key (Ed25519 PEM or base64)')
+            [CompletionResult]::new('--api-url', '--api-url', [CompletionResultType]::ParameterName, 'Registry API URL')
+            [CompletionResult]::new('--network', '--network', [CompletionResultType]::ParameterName, 'Stellar network to use (mainnet | testnet | futurenet)')
+            [CompletionResult]::new('--timeout', '--timeout', [CompletionResultType]::ParameterName, 'Global timeout for network/API operations (seconds)')
+            [CompletionResult]::new('--profile', '--profile', [CompletionResultType]::ParameterName, 'Registry configuration profile to use')
+            [CompletionResult]::new('--no-cache', '--no-cache', [CompletionResultType]::ParameterName, 'Skip local response cache and always fetch fresh data')
+            [CompletionResult]::new('-v', '-v', [CompletionResultType]::ParameterName, 'Enable verbose output. Repeat to increase verbosity (-v, -vv, -vvv)')
+            [CompletionResult]::new('--verbose', '--verbose', [CompletionResultType]::ParameterName, 'Enable verbose output. Repeat to increase verbosity (-v, -vv, -vvv)')
+            [CompletionResult]::new('--check-updates', '--check-updates', [CompletionResultType]::ParameterName, 'Check for CLI updates before running the command')
+            [CompletionResult]::new('--describe', '--describe', [CompletionResultType]::ParameterName, 'Print machine-readable JSON command schema description (#1145)')
+            [CompletionResult]::new('-h', '-h', [CompletionResultType]::ParameterName, 'Print help (see more with ''--help'')')
+            [CompletionResult]::new('--help', '--help', [CompletionResultType]::ParameterName, 'Print help (see more with ''--help'')')
+            break
+        }
+        'soroban-registry;snapshot;verify' {
+            [CompletionResult]::new('--trust-key', '--trust-key', [CompletionResultType]::ParameterName, 'Path to the trusted public key')
+            [CompletionResult]::new('--api-url', '--api-url', [CompletionResultType]::ParameterName, 'Registry API URL')
+            [CompletionResult]::new('--network', '--network', [CompletionResultType]::ParameterName, 'Stellar network to use (mainnet | testnet | futurenet)')
+            [CompletionResult]::new('--timeout', '--timeout', [CompletionResultType]::ParameterName, 'Global timeout for network/API operations (seconds)')
+            [CompletionResult]::new('--profile', '--profile', [CompletionResultType]::ParameterName, 'Registry configuration profile to use')
+            [CompletionResult]::new('--no-cache', '--no-cache', [CompletionResultType]::ParameterName, 'Skip local response cache and always fetch fresh data')
+            [CompletionResult]::new('-v', '-v', [CompletionResultType]::ParameterName, 'Enable verbose output. Repeat to increase verbosity (-v, -vv, -vvv)')
+            [CompletionResult]::new('--verbose', '--verbose', [CompletionResultType]::ParameterName, 'Enable verbose output. Repeat to increase verbosity (-v, -vv, -vvv)')
+            [CompletionResult]::new('--check-updates', '--check-updates', [CompletionResultType]::ParameterName, 'Check for CLI updates before running the command')
+            [CompletionResult]::new('--describe', '--describe', [CompletionResultType]::ParameterName, 'Print machine-readable JSON command schema description (#1145)')
+            [CompletionResult]::new('-h', '-h', [CompletionResultType]::ParameterName, 'Print help (see more with ''--help'')')
+            [CompletionResult]::new('--help', '--help', [CompletionResultType]::ParameterName, 'Print help (see more with ''--help'')')
+            break
+        }
+        'soroban-registry;snapshot;inspect' {
+            [CompletionResult]::new('--api-url', '--api-url', [CompletionResultType]::ParameterName, 'Registry API URL')
+            [CompletionResult]::new('--network', '--network', [CompletionResultType]::ParameterName, 'Stellar network to use (mainnet | testnet | futurenet)')
+            [CompletionResult]::new('--timeout', '--timeout', [CompletionResultType]::ParameterName, 'Global timeout for network/API operations (seconds)')
+            [CompletionResult]::new('--profile', '--profile', [CompletionResultType]::ParameterName, 'Registry configuration profile to use')
+            [CompletionResult]::new('--no-cache', '--no-cache', [CompletionResultType]::ParameterName, 'Skip local response cache and always fetch fresh data')
+            [CompletionResult]::new('-v', '-v', [CompletionResultType]::ParameterName, 'Enable verbose output. Repeat to increase verbosity (-v, -vv, -vvv)')
+            [CompletionResult]::new('--verbose', '--verbose', [CompletionResultType]::ParameterName, 'Enable verbose output. Repeat to increase verbosity (-v, -vv, -vvv)')
+            [CompletionResult]::new('--check-updates', '--check-updates', [CompletionResultType]::ParameterName, 'Check for CLI updates before running the command')
+            [CompletionResult]::new('--describe', '--describe', [CompletionResultType]::ParameterName, 'Print machine-readable JSON command schema description (#1145)')
+            [CompletionResult]::new('-h', '-h', [CompletionResultType]::ParameterName, 'Print help (see more with ''--help'')')
+            [CompletionResult]::new('--help', '--help', [CompletionResultType]::ParameterName, 'Print help (see more with ''--help'')')
+            break
+        }
+        'soroban-registry;snapshot;help' {
+            [CompletionResult]::new('export', 'export', [CompletionResultType]::ParameterValue, 'Export a signed offline registry snapshot')
+            [CompletionResult]::new('sign', 'sign', [CompletionResultType]::ParameterValue, 'Sign a registry snapshot')
+            [CompletionResult]::new('verify', 'verify', [CompletionResultType]::ParameterValue, 'Verify a signed registry snapshot locally')
+            [CompletionResult]::new('inspect', 'inspect', [CompletionResultType]::ParameterValue, 'Inspect a registry snapshot metadata')
+            [CompletionResult]::new('help', 'help', [CompletionResultType]::ParameterValue, 'Print this message or the help of the given subcommand(s)')
+            break
+        }
+        'soroban-registry;snapshot;help;export' {
+            break
+        }
+        'soroban-registry;snapshot;help;sign' {
+            break
+        }
+        'soroban-registry;snapshot;help;verify' {
+            break
+        }
+        'soroban-registry;snapshot;help;inspect' {
+            break
+        }
+        'soroban-registry;snapshot;help;help' {
+            break
+        }
         'soroban-registry;help' {
             [CompletionResult]::new('analytics', 'analytics', [CompletionResultType]::ParameterValue, 'Query contract analytics and statistics')
             [CompletionResult]::new('stats', 'stats', [CompletionResultType]::ParameterValue, 'Get comprehensive registry statistics')
@@ -4038,12 +4563,12 @@ Register-ArgumentCompleter -Native -CommandName 'soroban-registry' -ScriptBlock 
             [CompletionResult]::new('test', 'test', [CompletionResultType]::ParameterValue, 'Run integration tests')
             [CompletionResult]::new('audit', 'audit', [CompletionResultType]::ParameterValue, 'Run a local contract security audit')
             [CompletionResult]::new('sla', 'sla', [CompletionResultType]::ParameterValue, 'SLA compliance monitoring')
-            [CompletionResult]::new('config', 'config', [CompletionResultType]::ParameterValue, 'config')
+            [CompletionResult]::new('config', 'config', [CompletionResultType]::ParameterValue, 'Read and edit persisted user configuration values')
             [CompletionResult]::new('auth', 'auth', [CompletionResultType]::ParameterValue, 'Manage authentication sessions and API tokens')
             [CompletionResult]::new('backup', 'backup', [CompletionResultType]::ParameterValue, 'Manage contract backups and disaster recovery')
             [CompletionResult]::new('state', 'state', [CompletionResultType]::ParameterValue, 'Inspect and modify contract state (dev/test mutation only)')
             [CompletionResult]::new('verify-formal', 'verify-formal', [CompletionResultType]::ParameterValue, 'Run formal verification analysis against a deployed or local contract')
-            [CompletionResult]::new('scan-deps', 'scan-deps', [CompletionResultType]::ParameterValue, 'scan-deps')
+            [CompletionResult]::new('scan-deps', 'scan-deps', [CompletionResultType]::ParameterValue, 'Scan a contract''s dependencies for known vulnerabilities')
             [CompletionResult]::new('coverage', 'coverage', [CompletionResultType]::ParameterValue, 'Measure and report code coverage for contract tests')
             [CompletionResult]::new('sign', 'sign', [CompletionResultType]::ParameterValue, 'Sign a contract package with your private key')
             [CompletionResult]::new('verify-package', 'verify-package', [CompletionResultType]::ParameterValue, 'Verify a signed contract package')
@@ -4070,6 +4595,7 @@ Register-ArgumentCompleter -Native -CommandName 'soroban-registry' -ScriptBlock 
             [CompletionResult]::new('plugins', 'plugins', [CompletionResultType]::ParameterValue, 'Plugin management (install, configure, run)')
             [CompletionResult]::new('cache', 'cache', [CompletionResultType]::ParameterValue, 'Manage local cache of registry API responses (#845)')
             [CompletionResult]::new('env', 'env', [CompletionResultType]::ParameterValue, 'Manage environment variable sets for different deployments (#843)')
+            [CompletionResult]::new('snapshot', 'snapshot', [CompletionResultType]::ParameterValue, 'Manage signed offline registry snapshots (#1146)')
             [CompletionResult]::new('help', 'help', [CompletionResultType]::ParameterValue, 'Print this message or the help of the given subcommand(s)')
             break
         }
@@ -4452,41 +4978,54 @@ Register-ArgumentCompleter -Native -CommandName 'soroban-registry' -ScriptBlock 
             break
         }
         'soroban-registry;help;policy' {
-            [CompletionResult]::new('check', 'check', [CompletionResultType]::ParameterValue, 'Evaluate a policy-as-code file against a contract artifact or context')
+            [CompletionResult]::new('check', 'check', [CompletionResultType]::ParameterValue, 'Evaluate a policy-as-code definition against a contract artifact')
             break
         }
         'soroban-registry;help;policy;check' {
             break
         }
         'soroban-registry;help;publisher' {
-            [CompletionResult]::new('doctor', 'doctor', [CompletionResultType]::ParameterValue, 'Run publisher environment diagnostics')
+            [CompletionResult]::new('doctor', 'doctor', [CompletionResultType]::ParameterValue, 'Diagnose the local publishing environment (config, session, signing key, connectivity)')
             break
         }
         'soroban-registry;help;publisher;doctor' {
             break
         }
         'soroban-registry;help;contract' {
-            [CompletionResult]::new('publish', 'publish', [CompletionResultType]::ParameterValue, 'Publish a contract with optional policy-as-code admission evaluation (#1148)')
+            [CompletionResult]::new('list', 'list', [CompletionResultType]::ParameterValue, 'List registered contracts, a page at a time')
+            [CompletionResult]::new('search', 'search', [CompletionResultType]::ParameterValue, 'Search the registry, one page at a time or across every page')
             [CompletionResult]::new('snapshot', 'snapshot', [CompletionResultType]::ParameterValue, 'Export a signed, offline-verifiable snapshot of a contract (#1116)')
             [CompletionResult]::new('verify-snapshot', 'verify-snapshot', [CompletionResultType]::ParameterValue, 'Verify a previously exported contract snapshot (#1116)')
             [CompletionResult]::new('risk', 'risk', [CompletionResultType]::ParameterValue, 'Assess security and operational risks for a contract (#837)')
             [CompletionResult]::new('deploy', 'deploy', [CompletionResultType]::ParameterValue, 'Deploy and register a new contract in the registry')
             [CompletionResult]::new('register', 'register', [CompletionResultType]::ParameterValue, 'Register one or more contracts in the registry')
             [CompletionResult]::new('verify', 'verify', [CompletionResultType]::ParameterValue, 'Verify a contract — a local WASM artifact before publishing, or a deployed contract''s authenticity against the on-chain registry')
+            [CompletionResult]::new('interfaces', 'interfaces', [CompletionResultType]::ParameterValue, 'Derive and display a contract''s deterministic interface fingerprint (functions, types, events, errors) from a local compiled WASM artifact')
+            [CompletionResult]::new('provenance', 'provenance', [CompletionResultType]::ParameterValue, 'Display build-provenance metadata recorded for a contract, read from a local manifest file')
+            [CompletionResult]::new('verify-build', 'verify-build', [CompletionResultType]::ParameterValue, 'Attempt to independently reproduce a contract''s published WASM artifact from source, and compare its hash against the expected (registry-recorded) artifact hash')
+            [CompletionResult]::new('compatibility', 'compatibility', [CompletionResultType]::ParameterValue, 'Structurally compare two local compiled WASM artifacts and classify ABI changes as compatible, potentially breaking, breaking, or unknown')
             [CompletionResult]::new('details', 'details', [CompletionResultType]::ParameterValue, 'Display detailed information about a contract')
             [CompletionResult]::new('stats', 'stats', [CompletionResultType]::ParameterValue, 'Show contract registry statistics and analytics')
             [CompletionResult]::new('export', 'export', [CompletionResultType]::ParameterValue, 'Export contracts and related registry data for backup or migration')
             [CompletionResult]::new('highlight', 'highlight', [CompletionResultType]::ParameterValue, 'Manage featured (highlighted) contracts (#832)')
             [CompletionResult]::new('interaction', 'interaction', [CompletionResultType]::ParameterValue, 'View a contract''s interactions and call patterns (#835)')
             [CompletionResult]::new('dependency', 'dependency', [CompletionResultType]::ParameterValue, 'Analyze a contract''s dependencies and relationships (#836, #1008)')
+            [CompletionResult]::new('dependencies', 'dependencies', [CompletionResultType]::ParameterValue, 'List what a contract depends on (#1147)')
+            [CompletionResult]::new('dependents', 'dependents', [CompletionResultType]::ParameterValue, 'List what depends on a contract (#1147)')
+            [CompletionResult]::new('dependency-risk', 'dependency-risk', [CompletionResultType]::ParameterValue, 'Report direct and inherited risk across a contract''s dependencies (#1147)')
+            [CompletionResult]::new('category', 'category', [CompletionResultType]::ParameterValue, 'List and inspect contract categories')
             [CompletionResult]::new('update', 'update', [CompletionResultType]::ParameterValue, 'Update contract metadata after registration (#828)')
             [CompletionResult]::new('import', 'import', [CompletionResultType]::ParameterValue, 'Import contracts into the registry from an external file (#831)')
             [CompletionResult]::new('rollback', 'rollback', [CompletionResultType]::ParameterValue, 'Rollback a deprecated contract to active state (#1091)')
             [CompletionResult]::new('audit', 'audit', [CompletionResultType]::ParameterValue, 'Detect drift between local lockfile and registry state (#1060)')
             [CompletionResult]::new('deprecate', 'deprecate', [CompletionResultType]::ParameterValue, 'Deprecate a contract with publisher-signed authorization (#1091)')
+            [CompletionResult]::new('notification', 'notification', [CompletionResultType]::ParameterValue, 'Manage contract event notifications and alerts (#838)')
             break
         }
-        'soroban-registry;help;contract;publish' {
+        'soroban-registry;help;contract;list' {
+            break
+        }
+        'soroban-registry;help;contract;search' {
             break
         }
         'soroban-registry;help;contract;snapshot' {
@@ -4507,6 +5046,18 @@ Register-ArgumentCompleter -Native -CommandName 'soroban-registry' -ScriptBlock 
         'soroban-registry;help;contract;verify' {
             break
         }
+        'soroban-registry;help;contract;interfaces' {
+            break
+        }
+        'soroban-registry;help;contract;provenance' {
+            break
+        }
+        'soroban-registry;help;contract;verify-build' {
+            break
+        }
+        'soroban-registry;help;contract;compatibility' {
+            break
+        }
         'soroban-registry;help;contract;details' {
             break
         }
@@ -4525,6 +5076,26 @@ Register-ArgumentCompleter -Native -CommandName 'soroban-registry' -ScriptBlock 
         'soroban-registry;help;contract;dependency' {
             break
         }
+        'soroban-registry;help;contract;dependencies' {
+            break
+        }
+        'soroban-registry;help;contract;dependents' {
+            break
+        }
+        'soroban-registry;help;contract;dependency-risk' {
+            break
+        }
+        'soroban-registry;help;contract;category' {
+            [CompletionResult]::new('list', 'list', [CompletionResultType]::ParameterValue, 'List all categories with descriptions and contract counts')
+            [CompletionResult]::new('stats', 'stats', [CompletionResultType]::ParameterValue, 'Show detailed per-category statistics (counts, recent, trending)')
+            break
+        }
+        'soroban-registry;help;contract;category;list' {
+            break
+        }
+        'soroban-registry;help;contract;category;stats' {
+            break
+        }
         'soroban-registry;help;contract;update' {
             break
         }
@@ -4538,6 +5109,29 @@ Register-ArgumentCompleter -Native -CommandName 'soroban-registry' -ScriptBlock 
             break
         }
         'soroban-registry;help;contract;deprecate' {
+            break
+        }
+        'soroban-registry;help;contract;notification' {
+            [CompletionResult]::new('subscribe', 'subscribe', [CompletionResultType]::ParameterValue, 'Subscribe to alerts for a contract address')
+            [CompletionResult]::new('unsubscribe', 'unsubscribe', [CompletionResultType]::ParameterValue, 'Unsubscribe from alerts for a contract address')
+            [CompletionResult]::new('list', 'list', [CompletionResultType]::ParameterValue, 'List active notification rules')
+            [CompletionResult]::new('configure', 'configure', [CompletionResultType]::ParameterValue, 'Update an existing notification rule')
+            [CompletionResult]::new('test', 'test', [CompletionResultType]::ParameterValue, 'Send a test alert for a subscribed contract')
+            break
+        }
+        'soroban-registry;help;contract;notification;subscribe' {
+            break
+        }
+        'soroban-registry;help;contract;notification;unsubscribe' {
+            break
+        }
+        'soroban-registry;help;contract;notification;list' {
+            break
+        }
+        'soroban-registry;help;contract;notification;configure' {
+            break
+        }
+        'soroban-registry;help;contract;notification;test' {
             break
         }
         'soroban-registry;help;api-key' {
@@ -4753,6 +5347,25 @@ Register-ArgumentCompleter -Native -CommandName 'soroban-registry' -ScriptBlock 
             break
         }
         'soroban-registry;help;env;switch' {
+            break
+        }
+        'soroban-registry;help;snapshot' {
+            [CompletionResult]::new('export', 'export', [CompletionResultType]::ParameterValue, 'Export a signed offline registry snapshot')
+            [CompletionResult]::new('sign', 'sign', [CompletionResultType]::ParameterValue, 'Sign a registry snapshot')
+            [CompletionResult]::new('verify', 'verify', [CompletionResultType]::ParameterValue, 'Verify a signed registry snapshot locally')
+            [CompletionResult]::new('inspect', 'inspect', [CompletionResultType]::ParameterValue, 'Inspect a registry snapshot metadata')
+            break
+        }
+        'soroban-registry;help;snapshot;export' {
+            break
+        }
+        'soroban-registry;help;snapshot;sign' {
+            break
+        }
+        'soroban-registry;help;snapshot;verify' {
+            break
+        }
+        'soroban-registry;help;snapshot;inspect' {
             break
         }
         'soroban-registry;help;help' {

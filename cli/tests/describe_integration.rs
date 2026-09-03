@@ -28,8 +28,14 @@ fn describe_root_command() {
 
     assert_eq!(json["version"], "1.0");
     assert_eq!(json["command"], "soroban-registry");
-    assert!(json["subcommands"].as_array().unwrap().contains(&serde_json::json!("contract")));
-    assert!(json["subcommands"].as_array().unwrap().contains(&serde_json::json!("completion")));
+    assert!(json["subcommands"]
+        .as_array()
+        .unwrap()
+        .contains(&serde_json::json!("contract")));
+    assert!(json["subcommands"]
+        .as_array()
+        .unwrap()
+        .contains(&serde_json::json!("completion")));
 }
 
 #[test]
@@ -45,11 +51,20 @@ fn describe_root_boolean_args_not_enum() {
 
     // Boolean flags should be typed as "boolean", not "enum" with ["true","false"]
     let check_updates = &json["arguments"]["check-updates"];
-    assert_eq!(check_updates["type"], "boolean", "--check-updates should be boolean");
-    assert!(check_updates["enum_values"].is_null(), "boolean args must not have enum_values");
+    assert_eq!(
+        check_updates["type"], "boolean",
+        "--check-updates should be boolean"
+    );
+    assert!(
+        check_updates["enum_values"].is_null(),
+        "boolean args must not have enum_values"
+    );
 
     let describe_arg = &json["arguments"]["describe"];
-    assert_eq!(describe_arg["type"], "boolean", "--describe should be boolean");
+    assert_eq!(
+        describe_arg["type"], "boolean",
+        "--describe should be boolean"
+    );
 }
 
 #[test]
@@ -72,7 +87,10 @@ fn describe_contract_verify_snapshot_nested_command() {
     assert_eq!(json["arguments"]["expect-key"]["type"], "string");
     assert_eq!(json["arguments"]["expect-key"]["required"], false);
     assert_eq!(json["arguments"]["expect-key"]["secret"], false);
-    assert!(json["output"]["formats"].as_array().unwrap().contains(&serde_json::json!("json")));
+    assert!(json["output"]["formats"]
+        .as_array()
+        .unwrap()
+        .contains(&serde_json::json!("json")));
 }
 
 #[test]
@@ -89,7 +107,10 @@ fn describe_secret_argument_protection() {
     let json: serde_json::Value = serde_json::from_str(&stdout).expect("valid JSON");
 
     assert_eq!(json["arguments"]["private-key"]["secret"], true);
-    assert_eq!(json["arguments"]["private-key"]["default_value"], serde_json::Value::Null);
+    assert_eq!(
+        json["arguments"]["private-key"]["default_value"],
+        serde_json::Value::Null
+    );
 }
 
 #[test]
@@ -106,7 +127,10 @@ fn describe_repeatable_flag_marked() {
     // --verbose is a Count action, so it should be repeatable
     let verbose = &json["arguments"]["verbose"];
     assert_eq!(verbose["type"], "number", "--verbose should be number type");
-    assert_eq!(verbose["repeatable"], true, "--verbose should be repeatable");
+    assert_eq!(
+        verbose["repeatable"], true,
+        "--verbose should be repeatable"
+    );
 }
 
 #[test]
@@ -137,12 +161,28 @@ fn generate_artifacts_creates_and_verifies_files() {
         .output()
         .expect("run generate-artifacts");
 
-    assert!(gen_output.status.success(), "generate-artifacts stderr: {}", String::from_utf8_lossy(&gen_output.stderr));
+    assert!(
+        gen_output.status.success(),
+        "generate-artifacts stderr: {}",
+        String::from_utf8_lossy(&gen_output.stderr)
+    );
     assert!(temp_dir.path().join("schema.json").exists());
-    assert!(temp_dir.path().join("completions/soroban-registry.bash").exists());
-    assert!(temp_dir.path().join("completions/_soroban-registry").exists());
-    assert!(temp_dir.path().join("completions/soroban-registry.fish").exists());
-    assert!(temp_dir.path().join("completions/soroban-registry.ps1").exists());
+    assert!(temp_dir
+        .path()
+        .join("completions/soroban-registry.bash")
+        .exists());
+    assert!(temp_dir
+        .path()
+        .join("completions/_soroban-registry")
+        .exists());
+    assert!(temp_dir
+        .path()
+        .join("completions/soroban-registry.fish")
+        .exists());
+    assert!(temp_dir
+        .path()
+        .join("completions/soroban-registry.ps1")
+        .exists());
 
     // Check artifacts (--check mode should pass)
     let check_output = Command::new(get_binary_path())
@@ -153,5 +193,9 @@ fn generate_artifacts_creates_and_verifies_files() {
         .output()
         .expect("run generate-artifacts --check");
 
-    assert!(check_output.status.success(), "generate-artifacts --check stderr: {}", String::from_utf8_lossy(&check_output.stderr));
+    assert!(
+        check_output.status.success(),
+        "generate-artifacts --check stderr: {}",
+        String::from_utf8_lossy(&check_output.stderr)
+    );
 }

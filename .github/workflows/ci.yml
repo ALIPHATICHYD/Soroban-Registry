@@ -82,7 +82,7 @@ jobs:
             fi
             prev="$base"
           done
-          echo "✓ All $(ls database/migrations/*.sql | wc -l) migrations in order"
+          echo "[OK] All $(ls database/migrations/*.sql | wc -l) migrations in order"
 
   # ── CLI Artifacts Validation ───────────────────────────────────────────
   check-cli-artifacts:
